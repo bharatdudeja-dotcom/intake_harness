@@ -8,6 +8,8 @@
 
 export const AGENT_NAMES = ["intake", "review", "audience_creation"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
+/** A task_id in the `tasks` table is just an AgentName — same vocabulary, DB column name. */
+export type TaskId = AgentName;
 
 /**
  * "completed"    — normal success, output feeds the next agent.
@@ -20,7 +22,7 @@ export type AgentName = (typeof AGENT_NAMES)[number];
 export type AgentStatus = "completed" | "needs_input" | "failed";
 
 export interface AgentRequest<TInput = unknown> {
-  /** The pipeline_runs.id this call belongs to. */
+  /** The runs.run_id this call belongs to. */
   runId: string;
   /** Output of the previous agent (or the original submission for the first agent). */
   input: TInput;
@@ -35,16 +37,17 @@ export interface AgentResponse<TOutput = unknown> {
   /** Present when status is "failed" or "needs_input". */
   message?: string;
   /**
-   * Free-form health/observability data, persisted alongside the step but
-   * NOT passed to the next agent. Use this for the metrics the requirements
-   * doc calls out explicitly, e.g. { loopCount } for B1, { predictedCount,
-   * identityGap } for B3/B6, { requestAgeSeconds } for B7.
+   * Free-form health/observability data, persisted alongside the task run
+   * but NOT passed to the next agent. Use this for the metrics the
+   * requirements doc calls out explicitly, e.g. { loopCount } for B1,
+   * { predictedCount, identityGap } for B3/B6, { requestAgeSeconds } for B7.
    */
   metadata?: Record<string, unknown>;
 }
 
-export interface PipelineRunRow {
-  id: string;
+/** One row in `runs` — a single pipeline invocation. */
+export interface RunRow {
+  run_id: string;
   status: "running" | "completed" | "failed" | "needs_input";
   current_step: number;
   input: unknown;
@@ -52,16 +55,27 @@ export interface PipelineRunRow {
   updated_at: string;
 }
 
-export interface PipelineStepRow {
-  id: number;
+/** One row in `tasks` — the static catalog of task/agent types (seeded from registry.ts). */
+export interface TaskRow {
+  task_id: TaskId;
+  label: string;
+  owner: string | null;
+  created_at: string;
+}
+
+/** One row in `task_runs` — a single execution of a task inside a run. The traceability record: what ran, in which run, at what step, and when. */
+export interface TaskRunRow {
+  task_run_id: number;
   run_id: string;
+  task_id: TaskId;
   step_index: number;
-  agent_name: AgentName;
   status: AgentStatus;
   input: unknown;
   output: unknown;
   message: string | null;
   metadata: Record<string, unknown>;
+  started_at: string;
+  finished_at: string;
   duration_ms: number;
   created_at: string;
 }

@@ -22,9 +22,9 @@ endpoint in turn and persists a row to Postgres after every step. That
 gives:
 
 - A visible, queryable status for any in-flight run (`GET
-  /api/pipeline/run/[runId]`) instead of a black box — directly answering
-  B3/B4/B7's complaint that the marketer only finds out something is wrong
-  when it's already expensive.
+  /api/runs/[runId]`) instead of a black box — directly answering B3/B4/B7's
+  complaint that the marketer only finds out something is wrong when it's
+  already expensive.
 - A pause state (`needs_input`) distinct from failure, for the doc's
   human-in-the-loop points (B1's marketer round-trip, B3's validation step)
   — the pipeline stops cleanly rather than erroring out.
@@ -36,13 +36,13 @@ gives:
 ## Architecture
 
 ```
-POST /api/pipeline/run  { input }
+POST /api/runs  { input }
         │
         ▼
   src/lib/pipeline/orchestrator.ts
         │  for each agent in src/lib/pipeline/registry.ts:
         │    POST <agent.path>  { runId, input, priorOutputs }
-        │    persist a pipeline_steps row
+        │    persist a task_runs row (run_id, task_id, step_index, started_at, finished_at)
         ▼
   /api/agents/intake            (Dev 1)
   /api/agents/review            (Dev 2)
@@ -55,8 +55,37 @@ POST /api/pipeline/run  { input }
   chaunceyplum/mcp Lambda: 238 tools, Adobe IMS auth, pgvector RAG, Postgres
 ```
 
-`GET /api/pipeline/run/[runId]` returns the run plus every step recorded so
+`GET /api/runs/[runId]` returns the run plus every task run recorded so
 far — poll this for status instead of guessing whether a run is still going.
+
+## Observability: runs, tasks, task runs
+
+Three tables (`db/schema.sql`), matching how the pipeline actually executes:
+
+| Table | Row = | Primary key | What it's for |
+|---|---|---|---|
+| `runs` | one pipeline invocation | `run_id` | "Did this marketer's request finish? What's its current status?" |
+| `tasks` | one task/agent *type* (intake, review, audience_creation) | `task_id` | A static catalog — human label + owner per agent, kept in sync with `src/lib/pipeline/registry.ts`. |
+| `task_runs` | one actual execution of a task, inside one run | `task_run_id` | The traceability record: which task, in which run, at which step, with what input/output, and exactly when it started and finished. |
+
+`task_runs` is the audit trail the requirements doc keeps asking for — B1's
+loop count, B7's request age, B9's failure classification, all read off
+this one table, filterable by `run_id` (everything that happened in one
+run) or `task_id` (every time one agent has ever run, across all runs).
+
+API surface:
+
+- `POST /api/runs` — start a new run.
+- `GET /api/runs` — list recent runs.
+- `GET /api/runs/[runId]` — one run plus its task_runs, in step order.
+- `GET /api/tasks` — the task catalog.
+- `GET /api/tasks/[taskId]/runs` — every execution of one task, across all
+  runs, most recent first — useful for "how has Audience Creation been
+  doing lately" independent of any single run_id.
+
+The homepage (`src/app/run-dashboard.tsx`) is a thin client over this same
+API: a list of recent runs on the left, and the selected run's task_runs
+(with `task_run_id`, status, timing, input/output) on the right.
 
 ## The agent contract (`src/lib/pipeline/types.ts`)
 
@@ -93,8 +122,20 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000` — it has a form that POSTs to
-`/api/pipeline/run` and renders each step's status live.
+Open `http://localhost:3000` — it has a form that POSTs to `/api/runs`, a
+list of recent runs, and a detail view of the selected run's task_runs.
+
+### Migrating from the pre-observability schema
+
+If you already applied an earlier copy of `db/schema.sql` (tables named
+`pipeline_runs` / `pipeline_steps`), those are superseded by `runs` /
+`tasks` / `task_runs` above and are safe to drop — nothing in this repo
+reads them anymore:
+
+```sql
+DROP TABLE IF EXISTS pipeline_steps;
+DROP TABLE IF EXISTS pipeline_runs;
+```
 
 ## What's a stub right now
 
@@ -117,8 +158,8 @@ Open `http://localhost:3000` — it has a form that POSTs to
 state in one request/response cycle. That's fine while every agent is a
 fast stub. Once Audience Creation is doing real work — especially the
 GTO/FAC sub-workflow in B4/B5, which the doc says can run for a quarter —
-this needs to become fire-and-poll: `POST /api/pipeline/run` returns
-`{ runId }` immediately, and the agent whose work is long-running updates
-its own step out-of-band (e.g. a webhook callback into a
-`PATCH /api/pipeline/run/[runId]/steps/[stepIndex]` route) while the
-marketer-facing UI keeps polling `GET /api/pipeline/run/[runId]`.
+this needs to become fire-and-poll: `POST /api/runs` returns `{ run_id }`
+immediately, and the agent whose work is long-running updates its own
+task_runs row out-of-band (e.g. a webhook callback into a
+`PATCH /api/runs/[runId]/task-runs/[taskRunId]` route) while the
+marketer-facing UI keeps polling `GET /api/runs/[runId]`.

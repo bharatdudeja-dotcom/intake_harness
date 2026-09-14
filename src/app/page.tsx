@@ -1,5 +1,5 @@
 import { PIPELINE } from "@/lib/pipeline/registry";
-import { PipelineForm } from "./pipeline-form";
+import { RunDashboard } from "./run-dashboard";
 
 export default function Home() {
   return (
@@ -31,7 +31,7 @@ export default function Home() {
           ))}
         </ol>
 
-        <PipelineForm />
+        <RunDashboard />
       </main>
     </div>
   );

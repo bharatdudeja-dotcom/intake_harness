@@ -1,12 +1,12 @@
 import { Pool, type QueryResultRow } from "pg";
 
 /**
- * Shared Postgres pool for this harness's own pipeline-state tables
- * (see db/schema.sql). This is the SAME RDS instance the Python MCP server
- * (chaunceyplum/mcp) uses for pgvector, but a DIFFERENT set of tables:
- * `pipeline_runs` and `pipeline_steps`, kept distinct from that repo's
- * Python orchestrator tables (`executions` / `execution_resources`) so the
- * two orchestration layers never collide.
+ * Shared Postgres pool for this harness's own observability tables
+ * (see db/schema.sql: `runs`, `tasks`, `task_runs`). This is the SAME RDS
+ * instance the Python MCP server (chaunceyplum/mcp) uses for pgvector, but
+ * a DIFFERENT set of tables, kept distinct from that repo's Python
+ * orchestrator tables (`executions` / `execution_resources`) so the two
+ * orchestration layers never collide.
  */
 
 let pool: Pool | undefined;
