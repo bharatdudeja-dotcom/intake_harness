@@ -13,7 +13,17 @@
  * All tool arguments are sent as JSON-serializable values; the Lambda side
  * auto-parses JSON-encoded strings back into dict/list for legacy MCP
  * clients, but plain objects/arrays work directly.
+ *
+ * Least privilege: callMcpTool requires the caller's taskId and checks it
+ * against that task's `allowedTools` in src/lib/pipeline/registry.ts before
+ * the request ever leaves this process. The MCP Lambda itself has no
+ * concept of "which agent is calling" — this is the only enforcement point,
+ * so every agent route MUST call through here rather than hitting
+ * MCP_ENDPOINT_URL directly.
  */
+
+import { PIPELINE } from "./pipeline/registry";
+import type { TaskId } from "./pipeline/types";
 
 export class McpError extends Error {
   constructor(
@@ -52,17 +62,35 @@ function getEndpoint(): string {
 
 let requestCounter = 0;
 
+function assertToolAllowed(taskId: TaskId, name: string): void {
+  const agent = PIPELINE.find((a) => a.name === taskId);
+  if (!agent) {
+    throw new McpError(`callMcpTool: unknown taskId "${taskId}" — not in the pipeline registry.`);
+  }
+  if (!agent.allowedTools.includes(name)) {
+    throw new McpError(
+      `Task "${taskId}" is not allowed to call MCP tool "${name}". ` +
+        `If this is intentional, add "${name}" to allowedTools for "${taskId}" ` +
+        `in src/lib/pipeline/registry.ts.`,
+    );
+  }
+}
+
 /**
- * Call a single MCP tool by name and return its parsed result.
+ * Call a single MCP tool by name and return its parsed result, scoped to
+ * the calling task's allowlist (see assertToolAllowed above).
  *
- * Throws McpError on transport failure, JSON-RPC error, or a tool-level
- * error (isError: true in the MCP content envelope).
+ * Throws McpError on a scoping violation, transport failure, JSON-RPC
+ * error, or a tool-level error (isError: true in the MCP content envelope).
  */
 export async function callMcpTool<T = unknown>(
+  taskId: TaskId,
   name: string,
   args: Record<string, unknown> = {},
   { timeoutMs = 30_000 }: { timeoutMs?: number } = {},
 ): Promise<T> {
+  assertToolAllowed(taskId, name);
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

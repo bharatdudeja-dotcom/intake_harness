@@ -14,6 +14,12 @@ import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRo
  * when. Stops at the first "needs_input" or "failed" step, matching the
  * doc's finding that most of the process is fine and the real problem is
  * silent waiting — a paused run is visible in `runs`, not a black box.
+ *
+ * Each agent also only ever receives the slice of `priorOutputs` its
+ * registry entry declares via `contextAccess` — this function filters the
+ * full accumulated history down to that allowlist before every HTTP call,
+ * so an agent never receives a prior agent's output it isn't scoped to see
+ * (paired with the tool allowlist enforced in lib/mcp-client.ts).
  */
 export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
   const [run] = await query<RunRow>(
@@ -28,12 +34,19 @@ export async function runPipeline(initialInput: unknown, baseUrl: string): Promi
     const agent = PIPELINE[stepIndex];
     const startedAt = new Date();
 
+    const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
+    for (const visibleAgent of agent.contextAccess) {
+      if (visibleAgent in priorOutputs) {
+        scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
+      }
+    }
+
     let response: AgentResponse;
     try {
       response = await callAgent(baseUrl, agent.path, {
         runId: run.run_id,
         input: currentInput,
-        priorOutputs,
+        priorOutputs: scopedPriorOutputs,
       });
     } catch (err) {
       response = { status: "failed", message: (err as Error).message };

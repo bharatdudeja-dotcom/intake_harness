@@ -113,6 +113,51 @@ To add a 4th agent: add one entry to `src/lib/pipeline/registry.ts` and
 create its route under `src/app/api/agents/<name>/route.ts`. Nothing else
 changes.
 
+## Least privilege: scoping tools and context per agent
+
+Three developers, three routes, one shared MCP endpoint with 238+ tools —
+without scoping, any agent could call any tool or read any other agent's
+raw output. `src/lib/pipeline/registry.ts` is where each agent's
+permissions are declared, and both are enforced, not just documented:
+
+- **`allowedTools`** — the MCP tool names a task may call.
+  `src/lib/mcp-client.ts`'s `callMcpTool(taskId, name, args)` checks the
+  caller's `taskId` against this list before the request ever leaves the
+  process; a call to a tool outside it throws immediately. Since agent
+  routes don't hold `MCP_ENDPOINT_URL` credentials of their own — they only
+  reach the MCP Lambda through this one function — there's no way around
+  the check short of editing the registry. A denied call bubbles up as a
+  normal agent failure, so it lands in `task_runs.status = 'failed'`
+  automatically (see Observability above) rather than failing silently.
+- **`contextAccess`** — which prior agents' outputs a task may see via
+  `priorOutputs`, beyond its own immediate `input` (always just the
+  previous agent's output). `src/lib/pipeline/orchestrator.ts` filters the
+  full accumulated `priorOutputs` down to exactly this list before every
+  HTTP call — an agent's request body never contains a key it isn't scoped
+  to see.
+
+Current allowlists (Intake and Review are placeholders pending real logic;
+tighten or widen as each agent's actual needs become concrete):
+
+| Task | `allowedTools` | `contextAccess` |
+|---|---|---|
+| `intake` | `search_knowledge_base` | *(none)* |
+| `review` | `search_knowledge_base` | *(none)* |
+| `audience_creation` | `search_knowledge_base`, segment estimate/CRUD, schema read | *(none)* |
+
+`contextAccess` is empty for all three today because none of the current
+stubs read `priorOutputs` at all — each agent's `input` already carries
+everything the previous agent produced. Widen a task's `contextAccess`
+only when its real implementation needs to look back further than its
+immediate `input` (e.g. Audience Creation wanting Intake's original,
+untransformed grounding rather than whatever Review passed along).
+
+**Open item — Workfront:** the chaunceyplum/mcp tool registry doesn't have
+a Workfront module yet (today's tools are Adobe AEP/Reactor/CJA, AWS,
+Databricks, Snowflake, GitHub). If Intake and/or Review need Workfront
+access, that module needs to be added server-side first — the `allowedTools`
+entries above have a `TODO(Workfront)` marker for exactly this.
+
 ## Setup
 
 ```bash
