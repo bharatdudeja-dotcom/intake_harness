@@ -14,7 +14,7 @@
  * route stays a thin wrapper.
  */
 
-import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "./fields";
+import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
 
 export type Fault = {
   field: FieldSpec;

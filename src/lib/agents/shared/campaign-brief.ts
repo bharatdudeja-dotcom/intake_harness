@@ -6,9 +6,10 @@
  * field is missing, wrong, or sourced from the wrong place, and B2 is the job
  * of turning that sentence back into the field.
  *
- * Kept as data rather than code so a form change is an edit here, and so the
- * same catalogue can be shared with Agent Manager's validator without either
- * side owning the other.
+ * Kept as data rather than code so a form change is an edit here. SHARED by
+ * Agent 1 (which fills these fields from a brief) and Agent 2 (which works out
+ * which one a rejection is about), so the two can never drift apart on what
+ * the form actually is.
  *
  * `aliases` are how a human might refer to the field in a rejection comment.
  * They are matched case-insensitively against the rejection text.
@@ -24,6 +25,12 @@ export type FieldSpec = {
   ambiguous?: string[];
   /** How a reviewer might name this field in prose. */
   aliases: string[];
+  /**
+   * The values the form actually offers. Agent 1 matches these against the
+   * brief to fill a field from the marketer's own words; Agent 2 uses them to
+   * tell a wrong value from a missing one.
+   */
+  options?: string[];
   /** What to ask the marketer when this is the field at fault. */
   ask: string;
 };
@@ -43,6 +50,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Request type",
     required: true,
     aliases: ["request type", "type of request"],
+    options: ["Audience Build-Only", "Campaign + Audience", "Creative Only"],
     ask: "Is this Audience Build-Only, Campaign + Audience, or Creative Only?",
   },
   {
@@ -51,6 +59,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Request type",
     required: true,
     aliases: ["audience support", "type of audience support"],
+    options: ["Audience Build (New)", "Audience Update", "Audience Clone"],
     ask: "Is this a new audience build, an update, or a clone?",
   },
   {
@@ -59,6 +68,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Overview",
     required: true,
     aliases: ["por", "approved por", "plan of record"],
+    options: ["Yes", "No"],
     ask: "Is this tied to an approved POR?",
   },
   {
@@ -67,6 +77,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Overview",
     required: true,
     aliases: ["business objective", "objective", "goal"],
+    options: ["Growth/Upsell", "Retention", "Acquisition", "Engagement"],
     ask: "What is the primary business objective — Growth/Upsell, Retention, Acquisition or Engagement?",
   },
   {
@@ -75,6 +86,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Overview",
     required: true,
     aliases: ["lifecycle", "journey", "customer lifecycle"],
+    options: ["Upgrade", "Onboard", "Renew", "Winback"],
     ask: "Which lifecycle journey — Upgrade, Onboard, Renew or Winback?",
   },
   {
@@ -91,6 +103,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Overview",
     required: true,
     aliases: ["line of business", "lob", "residential", "business unit"],
+    options: ["Residential (RES)", "Business (SMB)"],
     ask: "Residential (RES) or Business (SMB)?",
   },
   {
@@ -107,6 +120,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Timeline",
     required: true,
     aliases: ["priority", "urgency"],
+    options: ["Standard Priority", "High Priority", "Critical"],
     ask: "Standard, High or Critical priority?",
   },
   {
@@ -115,6 +129,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Audience",
     required: true,
     aliases: ["build method", "how should the audience be built", "rule builder", "fac", "workflow audience"],
+    options: ["1) Simple Workflow Audience", "2) AEP Rule Builder", "3) FAC"],
     ask: "Simple Workflow Audience, AEP Rule Builder, or FAC?",
   },
   {
@@ -123,6 +138,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Audience",
     required: true,
     aliases: ["audience size", "expected size", "size", "count", "volume", "how many"],
+    options: ["Small (<100k)", "Medium (100k-1M)", "Very Large (1M+)"],
     ask: "Roughly how large is the audience — under 100k, 100k to 1M, or over 1M?",
   },
   {
@@ -130,6 +146,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     label: "Audience refresh cadence",
     section: "Audience",
     aliases: ["refresh", "cadence", "how often should the audience refresh"],
+    options: ["One-time snapshot", "Dynamic Audience Updates"],
     ask: "One-time snapshot, or dynamic updates?",
   },
   {
@@ -145,6 +162,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Audience",
     required: true,
     aliases: ["data available", "targeting data", "attributes available", "attribute availability"],
+    options: ["Yes", "No"],
     ask: "Is all the required targeting data available today?",
   },
   {
@@ -162,6 +180,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     label: "Predictive model required",
     section: "Audience",
     aliases: ["predictive model", "model not live", "propensity"],
+    options: ["Yes", "No"],
     ask: "Does this need a predictive model that is not live yet?",
   },
   {
@@ -169,6 +188,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     label: "Activation pattern",
     section: "Audience",
     aliases: ["activation pattern", "trigger", "near real time", "batch"],
+    options: ["Batch", "Near-real time trigger", "Scheduled"],
     ask: "Batch, scheduled, or a near-real-time trigger?",
   },
   {
@@ -177,6 +197,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     section: "Channels",
     required: true,
     aliases: ["channel", "channels", "email", "sms", "direct mail", "streaming"],
+    options: ["Email", "SMS", "Digital/Display", "Direct Mail", "TV", "Streaming", "Xfinity App"],
     ask: "Which channels — Email, SMS, Digital/Display, Direct Mail, TV, Streaming, Xfinity App?",
   },
   {
@@ -184,6 +205,7 @@ export const CAMPAIGN_BRIEF_FIELDS: FieldSpec[] = [
     label: "Cross-channel attribution",
     section: "Channels",
     aliases: ["attribution", "how should performance be measured"],
+    options: ["First-Touch Attribution", "Last-Touch", "Multi-Touch"],
     ask: "First-touch, last-touch or multi-touch attribution?",
   },
 ];
