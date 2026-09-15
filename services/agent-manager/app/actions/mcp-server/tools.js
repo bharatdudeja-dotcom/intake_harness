@@ -1214,7 +1214,16 @@ function registerTools (server, context = {}) {
                         upstream_task_run_id: st.upstream_task_run_id,
                         duration_ms: st.duration_ms,
                         started_at: st.started_at,
-                        finished_at: st.finished_at
+                        finished_at: st.finished_at,
+                        // Exactly what the upstream sent and received, verbatim.
+                        // The narration is a reading of this; this is the evidence.
+                        upstream_payload: {
+                            agent: st.agent_id,
+                            upstream_status: st.upstream_status,
+                            input: st.input,
+                            output: st.output,
+                            metadata: st.metadata
+                        }
                     }
                 })
             }

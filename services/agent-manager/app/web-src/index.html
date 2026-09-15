@@ -365,6 +365,64 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
 #role-chip{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 #role-chip .chip-role{color:var(--muted);font-weight:400;font-size:11px}
 #role-chip.head-chef .chip-role{color:var(--baked)}
+
+.json-panel{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--surface-2);overflow:hidden}
+.json-panel .json-head{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)}
+.json-panel pre.raw{margin:0;max-height:420px;overflow:auto;padding:12px;
+  background:transparent;font-size:12px;line-height:1.5}
+
+/* Agent faces. Awake ones drift, blink and pulse; dormant ones sit still. */
+.agent-face{flex:0 0 auto;display:block}
+.agent-face.is-awake{filter:drop-shadow(0 2px 4px rgba(31,30,28,.12))}
+.agent-face .am-pupils{animation:am-look var(--drift,4s) ease-in-out infinite;transform-origin:center}
+.agent-face .am-lids{animation:am-blink var(--blink,6s) infinite;transform-origin:center;transform:translateY(-13px)}
+.agent-face .am-blip{animation:am-pulse 2.6s ease-in-out infinite}
+@keyframes am-look{
+  0%,14%{transform:translate(0,0)}
+  22%,38%{transform:translate(1.7px,-.7px)}
+  46%,62%{transform:translate(-1.7px,.5px)}
+  70%,86%{transform:translate(.6px,1.1px)}
+  100%{transform:translate(0,0)}
+}
+@keyframes am-blink{
+  0%,92%,100%{transform:translateY(-13px)}
+  95%,97%{transform:translateY(0)}
+}
+@keyframes am-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .agent-face .am-pupils,.agent-face .am-lids,.agent-face .am-blip{animation:none}
+  .agent-face .am-lids{transform:translateY(-13px)}
+}
+
+/* Run ledger. Drawn to elapsed clock, so waiting dominates it the way it
+   dominates reality - which is the point the step list can never make. */
+.ledger{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  padding:16px 18px;margin:14px 0 6px;box-shadow:var(--shadow)}
+.ledger-head{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:12px}
+.ledger-head h3{margin:0;font-size:14px}
+.lbar{display:flex;height:40px;border-radius:6px;overflow:hidden;border:1px solid var(--border-strong);
+  background:var(--surface-2)}
+.lseg{min-width:3px;position:relative}
+.lseg + .lseg{border-left:1px solid var(--surface)}
+.lseg.work{background:var(--house)}
+.lseg.wait{background:var(--exp)}
+.lseg.fault{background:repeating-linear-gradient(-45deg,var(--reject) 0 8px,
+  color-mix(in srgb,var(--reject) 75%,#000) 8px 16px)}
+.lkey{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:12px;font-size:12.5px;color:var(--muted)}
+.lkey b{color:var(--text);font-weight:600}
+.lsw{width:11px;height:11px;border-radius:2px;display:inline-block;margin-right:7px;vertical-align:-1px}
+.lsw.work{background:var(--house)}
+.lsw.wait{background:var(--exp)}
+.lsw.fault{background:var(--reject)}
+.lstats{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+  gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
+.lstat{background:var(--surface);padding:11px 13px}
+.lstat .k{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.lstat .v{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.lstat .v small{font-size:.65em;font-weight:500;color:var(--muted)}
+.lstat.hot .v{color:var(--reject)}
 </style>
 </head>
 <body>
@@ -576,68 +634,84 @@ const AGENT_MARK = {
 /* ---------------------------------------------------------------------------
  * Agent faces.
  *
- * Each agent gets its own face, and the face WAKES UP once that agent has
- * produced something: dormant is muted with closed eyes, active is coloured
- * with its eyes open. So the Agents page reads at a glance as a cast that
- * arrives over time, rather than a list that is mostly empty.
+ * Each agent gets a face, and it WAKES UP once that agent has produced
+ * something: dormant is dimmed with its eyes shut, awake is coloured with
+ * pupils that drift and blink. So the Agents page reads as a cast that arrives
+ * over time rather than a list that is mostly empty.
  *
- * The face is derived from the agent id, not looked up in a table. A fifth
- * agent appearing in the registry gets a distinct, stable face with nobody
- * drawing one - the same rule that keeps agent names out of this file.
+ * The face is DERIVED FROM THE AGENT ID, not looked up in a table. That is the
+ * same rule as the names themselves: if the upstream renames or adds an agent,
+ * the new one gets its own stable face and the label follows, with nothing
+ * changed here.
  * ------------------------------------------------------------------------- */
 function agentHash (id) {
-  let h = 0
+  let h = 2166136261
   const str = String(id || '')
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
   return h
 }
 
-/* Drawn from the palette already on :root, so faces inherit both themes. */
+/* Hues from the palette already on :root, so faces inherit both themes. */
 const FACE_HUES = ['--ready', '--house', '--exp', '--ingredient', '--accent', '--baked']
 
-/* Eye shapes. Index chosen by hash, so it is stable per agent and varied across them. */
-const EYES = [
-  (c) => `<circle cx="15" cy="21" r="3.2" fill="${c}"/><circle cx="29" cy="21" r="3.2" fill="${c}"/>`,
-  (c) => `<rect x="12" y="18.5" width="7" height="5" rx="2.5" fill="${c}"/><rect x="25" y="18.5" width="7" height="5" rx="2.5" fill="${c}"/>`,
-  (c) => `<path d="M12 21.5q3-4 6 0" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M26 21.5q3-4 6 0" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
-  (c) => `<path d="M12.5 18l5 5M17.5 18l-5 5" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/><path d="M26.5 18l5 5M31.5 18l-5 5" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`,
-  (c) => `<circle cx="15" cy="21" r="4" fill="none" stroke="${c}" stroke-width="2.2"/><circle cx="29" cy="21" r="4" fill="none" stroke="${c}" stroke-width="2.2"/>`,
-  (c) => `<path d="M15 16.5l1.6 3.4 3.4 1.6-3.4 1.6L15 26.5l-1.6-3.4L10 21.5l3.4-1.6z" fill="${c}"/><circle cx="29" cy="21" r="3.2" fill="${c}"/>`
+/* Head silhouettes. Varied enough that two agents never read as the same character. */
+const HEADS = [
+  'M8 14a14 14 0 0 1 28 0v12a14 14 0 0 1-28 0z',           // tall capsule
+  'M6 16a16 12 0 0 1 32 0v10a16 14 0 0 1-32 0z',            // wide visor
+  'M22 5 38 15v14L22 39 6 29V15z',                          // hex
+  'M10 12h24a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6V18a6 6 0 0 1 6-6z' // slab
 ]
 
-/* Mouths, same idea. Keeps two agents with similar eyes still distinguishable. */
+/* Mouths. Small, and enough to change the character. */
 const MOUTHS = [
-  (c) => `<path d="M15 30q7 5 14 0" stroke="${c}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`,
-  (c) => `<rect x="15" y="29" width="14" height="3.4" rx="1.7" fill="${c}"/>`,
-  (c) => `<path d="M16 31h12" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`,
-  (c) => `<path d="M15 32q7-5 14 0" stroke="${c}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`
+  (c) => `<path d="M16 30q6 5 12 0" stroke="${c}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`,
+  (c) => `<rect x="16" y="29.5" width="12" height="3" rx="1.5" fill="${c}" opacity=".85"/>`,
+  (c) => `<path d="M17 31h10" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/>`,
+  (c) => `<path d="M16 29q6 6 12 0" stroke="${c}" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M19 33h6" stroke="${c}" stroke-width="1.6" stroke-linecap="round" opacity=".5"/>`
 ]
 
 /**
  * @param {string} id agent id from the registry
- * @param {boolean} active has this agent produced anything yet
+ * @param {boolean} awake has this agent produced anything yet
  * @param {number} size px
- * @returns {string} inline SVG
  */
-function agentFace (id, active = false, size = 46) {
+function agentFace (id, awake = false, size = 52) {
   const h = agentHash(id)
   const hue = `var(${FACE_HUES[h % FACE_HUES.length]})`
-  const eyes = EYES[(h >> 3) % EYES.length]
-  const mouth = MOUTHS[(h >> 7) % MOUTHS.length]
-  const antenna = (h >> 11) % 2 === 0
+  const head = HEADS[(h >> 4) % HEADS.length]
+  const mouth = MOUTHS[(h >> 9) % MOUTHS.length]
+  const antenna = (h >> 13) % 3 !== 0
+  // Each agent drifts and blinks on its own clock, so a row of them never
+  // pulses in unison like a loading spinner.
+  const drift = 3.2 + ((h >> 17) % 26) / 10
+  const blink = 5 + ((h >> 21) % 40) / 10
+  const uid = `f${(h % 100000).toString(36)}`
 
-  // Dormant: muted, eyes shut. Nothing has happened, and the face says so.
-  const ink = active ? hue : 'var(--muted)'
-  const shell = active ? hue : 'var(--border-strong)'
-  const fill = active ? 'var(--surface)' : 'var(--surface-2)'
-  const closed = `<path d="M12 21.5h6M26 21.5h6" stroke="var(--muted)" stroke-width="2.4" stroke-linecap="round"/>`
+  const ink = awake ? hue : 'var(--muted)'
+  const shell = awake ? hue : 'var(--border-strong)'
+  const fill = awake ? 'var(--surface)' : 'var(--surface-2)'
 
-  return `<svg class="agent-face${active ? ' is-active' : ''}" width="${size}" height="${size}"
+  const eyes = awake
+    ? `<g class="am-eyes" style="--drift:${drift}s;--blink:${blink}s">
+         <ellipse cx="16.5" cy="21" rx="4.6" ry="5" fill="var(--surface)" stroke="${hue}" stroke-width="1.6"/>
+         <ellipse cx="27.5" cy="21" rx="4.6" ry="5" fill="var(--surface)" stroke="${hue}" stroke-width="1.6"/>
+         <g class="am-pupils">
+           <circle cx="16.5" cy="21" r="2.1" fill="${hue}"/>
+           <circle cx="27.5" cy="21" r="2.1" fill="${hue}"/>
+         </g>
+         <g class="am-lids">
+           <rect x="11.5" y="15" width="10" height="12" fill="${fill}"/>
+           <rect x="22.5" y="15" width="10" height="12" fill="${fill}"/>
+         </g>
+       </g>`
+    : `<path d="M12.5 21.5h8M23.5 21.5h8" stroke="var(--muted)" stroke-width="2.2" stroke-linecap="round"/>`
+
+  return `<svg class="agent-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
       viewBox="0 0 44 44" role="img" aria-label="${esc(id)}">
-    ${antenna ? `<path d="M22 4v4" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
-      <circle cx="22" cy="3" r="2.2" fill="${active ? hue : 'var(--border-strong)'}"/>` : ''}
-    <rect x="4" y="8" width="36" height="32" rx="11" fill="${fill}" stroke="${shell}" stroke-width="2"/>
-    ${active ? eyes(ink) : closed}
+    ${antenna ? `<path d="M22 3v5" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
+      <circle class="${awake ? 'am-blip' : ''}" cx="22" cy="2.5" r="2.3" fill="${awake ? hue : 'var(--border-strong)'}"/>` : ''}
+    <path d="${head}" fill="${fill}" stroke="${shell}" stroke-width="2" stroke-linejoin="round"/>
+    ${eyes}
     ${mouth(ink)}
   </svg>`
 }
@@ -1536,14 +1610,91 @@ async function openWorklog (id) {
         <button class="btn" id="attach-diagram" data-id="${esc(r.id)}"><i data-lucide="paperclip"></i> Attach diagram/image</button>
         <button class="btn" id="pdf-recipe"><i data-lucide="file-down"></i> PDF</button>
       </div>
-      ${['draft', 'ready'].includes(recipeStage(meta)) ? '<p class="help">Approve the artifacts worth keeping, then bake it to submit it for review.</p>' : ''}
+      ${['draft', 'ready'].includes(recipeStage(meta)) ? '<p class="help">Approve the run to hand it to the Hero Agent. It proposes; a named person decides.</p>' : ''}
     </div>
+    ${runLedger(ingredients)}
     ${legend}
     <div class="steps" id="steps-wrap">${(r.steps || []).length ? '' : '<p class="empty"><i data-lucide="inbox"></i><br>This recipe has no artifacts yet.</p>'}</div>`
   const wrap = $('#steps-wrap')
   for (const s of (r.steps || [])) wrap.appendChild(renderStepCard(s))
   refreshIcons()
   hydrateRenderables(wrap)
+}
+
+/* ---------------------------------------------------------------------------
+ * The run ledger: where the time actually went.
+ *
+ * Taken from the review prototype, because it answers the question the client
+ * keeps asking - why does one intake take two days and another two weeks - and
+ * a list of steps never answers it. The bar is drawn to ELAPSED clock, not to
+ * step count, so waiting dominates it visually exactly as it dominates reality.
+ *
+ * Three kinds of time:
+ *   work    an agent was doing something (its reported duration)
+ *   wait    the gap between one stage finishing and the next starting
+ *   fault   a stage that reported success while its tool call failed
+ * ------------------------------------------------------------------------- */
+function runLedger (steps) {
+  const timed = steps
+    .map(s => ({
+      ms: Number((s.provenance && s.provenance.duration_ms) || 0),
+      started: (s.provenance && s.provenance.started_at) || null,
+      finished: (s.provenance && s.provenance.finished_at) || null,
+      faulted: Array.isArray(s.tags) && s.tags.includes('silent-failure'),
+      label: (s.content || '').split('\n')[0].replace(/^#+\s*/, '').slice(0, 40)
+    }))
+    .filter(s => s.ms > 0 || s.started)
+  if (!timed.length) return ''
+
+  const segs = []
+  let work = 0; let wait = 0; let faulted = 0
+  for (let i = 0; i < timed.length; i++) {
+    const s = timed[i]
+    if (s.ms > 0) {
+      segs.push({ kind: s.faulted ? 'fault' : 'work', ms: s.ms, label: s.label })
+      work += s.ms
+      if (s.faulted) faulted++
+    }
+    const next = timed[i + 1]
+    if (s.finished && next && next.started) {
+      const gap = new Date(next.started) - new Date(s.finished)
+      // Only gaps worth a person's attention. Below a second is scheduling noise.
+      if (gap > 1000) { segs.push({ kind: 'wait', ms: gap, label: 'waiting' }); wait += gap }
+    }
+  }
+  const total = work + wait
+  if (!total) return ''
+
+  const fmt = (ms) => ms >= 86400000 ? `${(ms / 86400000).toFixed(1)}d`
+    : ms >= 3600000 ? `${(ms / 3600000).toFixed(1)}h`
+    : ms >= 60000 ? `${Math.round(ms / 60000)}m`
+    : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+  const waitShare = total ? Math.round((wait / total) * 1000) / 10 : 0
+
+  const bar = segs.map(sg =>
+    `<div class="lseg ${sg.kind}" style="flex:${Math.max(sg.ms, 1)} 0 auto"
+      title="${esc(sg.label)} — ${fmt(sg.ms)}"></div>`).join('')
+
+  return `
+  <section class="ledger">
+    <div class="ledger-head">
+      <h3>Where the time went</h3>
+      <span class="mono sub">${fmt(total)} elapsed</span>
+    </div>
+    <div class="lbar">${bar}</div>
+    <div class="lkey">
+      <span><span class="lsw work"></span>Agents working <b>${fmt(work)}</b></span>
+      ${wait ? `<span><span class="lsw wait"></span>Waiting <b>${fmt(wait)}</b> (${waitShare}%)</span>` : ''}
+      ${faulted ? `<span><span class="lsw fault"></span><b>${faulted}</b> stage${faulted === 1 ? '' : 's'} reported success while failing</span>` : ''}
+    </div>
+    <div class="lstats">
+      <div class="lstat"><div class="k">Elapsed</div><div class="v">${fmt(total)}</div></div>
+      <div class="lstat"><div class="k">Agents working</div><div class="v">${fmt(work)}</div></div>
+      <div class="lstat${waitShare > 50 ? ' hot' : ''}"><div class="k">Clock spent waiting</div><div class="v">${waitShare}<small>%</small></div></div>
+      <div class="lstat${faulted ? ' hot' : ''}"><div class="k">Silent failures</div><div class="v">${faulted}</div></div>
+      <div class="lstat"><div class="k">Artifacts</div><div class="v">${steps.length}</div></div>
+    </div>
+  </section>`
 }
 
 function renderStepCard (s) {
@@ -1562,6 +1713,7 @@ function renderStepCard (s) {
     <div class="step-foot">
       <button class="btn tiny" data-copy-step="${esc(s.id)}"><i data-lucide="copy"></i> Copy</button>
       <button class="btn tiny" data-download-step="${esc(s.id)}"><i data-lucide="download"></i> Download</button>
+      ${s.provenance && s.provenance.upstream_payload ? `<button class="btn tiny" data-view-json="${esc(s.id)}"><i data-lucide="braces"></i> View JSON</button>` : ''}
       <button class="btn tiny" data-assign-step="${esc(s.id)}" title="Hand this to a colleague. Assigning is what makes an unfinished recipe visible to them."><i data-lucide="user-plus"></i> Assign</button>
       ${s.approved_by ? `<span class="sub" style="margin-left:auto"><i data-lucide="badge-check"></i> approved by ${esc(displayName(s.approved_by))} · ${relTime(s.approved_at)}</span>` : ''}
     </div>
@@ -2459,13 +2611,13 @@ async function buildGraph () {
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
   for (const r of rows) stageCounts[recipeStage(r)]++
   sub.innerHTML = `<b>Your</b> work in ${where}, at every stage, private drafts included. ` +
-    `${stageCounts.draft} experimental · ${stageCounts.ready} ready to bake · ${stageCounts.awaiting} awaiting Hero Agent · ${stageCounts.incx} in the CX graph. ` +
+    `${stageCounts.draft} in progress · ${stageCounts.ready} ready to approve · ${stageCounts.awaiting} with the Hero Agent · ${stageCounts.incx} in the Shared Knowledge Graph. ` +
     `${capped ? `Showing the ${CAP} most recent of ${total}.` : ''}`
   // Legend mirrors the four stages exactly, so the colour tells you where the work stands.
-  legend.innerHTML = `<span><span class="swatch" style="background:var(--exp)"></span>experimental (private draft)</span>` +
-    `<span><span class="swatch" style="background:var(--ready)"></span>ready to bake</span>` +
-    `<span><span class="swatch" style="background:var(--baked)"></span>awaiting Hero Agent</span>` +
-    `<span><span class="swatch" style="background:var(--house)"></span>in the Company CX Graph</span>` +
+  legend.innerHTML = `<span><span class="swatch" style="background:var(--exp)"></span>in progress (private)</span>` +
+    `<span><span class="swatch" style="background:var(--ready)"></span>ready to approve</span>` +
+    `<span><span class="swatch" style="background:var(--baked)"></span>with the Hero Agent</span>` +
+    `<span><span class="swatch" style="background:var(--house)"></span>in the Shared Knowledge Graph</span>` +
     `<span><span class="swatch" style="background:var(--ingredient)"></span>artifact</span>` +
     `<span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
   container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="loader"></i><br>Loading artifacts &amp; lineage…</div>'; refreshIcons()
@@ -2477,6 +2629,16 @@ async function buildGraph () {
       callTool('list_resources', { project: state.project, type: 'handoff-prompt' }).catch(() => [])
     ])
   } catch (e) { container.innerHTML = `<div class="empty">Failed to load: ${esc(e.message)}</div>`; return }
+
+  // vis-network is a CDN script. When it does not arrive, every later line
+  // throws and the spinner sits there for ever, which reads as a hang rather
+  // than a failure. Say what actually happened.
+  if (typeof vis === 'undefined' || !vis.Network) {
+    container.innerHTML = '<div class="empty" style="padding-top:100px"><i data-lucide="wifi-off"></i><br>' +
+      'The graph library did not load.<br><span class="sub">vis-network is fetched from a CDN. ' +
+      'Check the network tab, or a blocked script.</span></div>'
+    refreshIcons(); return
+  }
 
   const stepsByRecipe = {}
   rows.forEach((r, i) => { stepsByRecipe[r.id] = stepLists[i] || [] })
@@ -2696,7 +2858,7 @@ async function exportPdf (node, title) {
    Actions (event delegation)
    ===================================================================== */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-open-recipe],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-recipe],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-assign-step],[data-unassign-step]')
+  const t = e.target.closest('[data-open-recipe],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-view-json],[data-copy-json],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-recipe],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-assign-step],[data-unassign-step]')
   if (!t) return
   try {
     if (t.dataset.openRecipe) { openDetail(t.dataset.openRecipe) }
@@ -2709,6 +2871,11 @@ document.addEventListener('click', async (e) => {
     else if (t.dataset.discardStep) { await callTool('discard_step', { step_id: t.dataset.discardStep }); toast('Step discarded'); await refreshCurrent() }
     else if (t.dataset.copyStep) { copyStepFrom(t.dataset.copyStep) }
     else if (t.dataset.downloadStep) { downloadStepFrom(t.dataset.downloadStep) }
+    else if (t.dataset.viewJson) { toggleJson(t) }
+    else if (t.dataset.copyJson) {
+      const pre = document.getElementById(`json-${t.dataset.copyJson}`)
+      if (pre) { navigator.clipboard.writeText(pre.textContent); toast('JSON copied') }
+    }
     else if (t.dataset.copyTask) { copyTask(t.dataset.copyTask) }
     else if (t.dataset.doneTask) { await callTool('set_task_status', { id: t.dataset.doneTask, status: 'done' }); toast('Task marked done'); await reloadLight() }
     else if (t.dataset.viewToggle) { openDetail(t.dataset.viewToggle, t.dataset.view) }
@@ -2735,6 +2902,37 @@ function copyStepFrom (stepId) {
   const text = s.content || (s.asset ? `[${s.asset.mime_type} asset ${s.asset.path}]` : '')
   navigator.clipboard.writeText(text).then(() => toast('Step copied'))
 }
+/* The exact upstream response, in place. The narration above says what a stage
+   did; this says precisely what it sent and received. Both matter - a reader
+   who only has prose cannot check it, and a reader who only has JSON will not
+   read it. */
+function toggleJson (btn) {
+  const stepId = btn.dataset.viewJson
+  const card = [...document.querySelectorAll('.step')].find(c => c._step && c._step.id === stepId)
+  const s = card ? card._step : null
+  if (!s || !s.provenance || !s.provenance.upstream_payload) return
+
+  const existing = card.querySelector('.json-panel')
+  if (existing) {
+    existing.remove()
+    btn.innerHTML = '<i data-lucide="braces"></i> View JSON'
+    refreshIcons(); return
+  }
+
+  const safeId = stepId.replace(/[^a-zA-Z0-9_-]/g, '_')
+  const panel = document.createElement('div')
+  panel.className = 'json-panel'
+  panel.innerHTML = `
+    <div class="json-head">
+      <span class="sub"><i data-lucide="braces"></i> Exactly what the upstream sent and received</span>
+      <button class="btn tiny" data-copy-json="${esc(safeId)}"><i data-lucide="copy"></i> Copy</button>
+    </div>
+    <pre class="raw" id="json-${esc(safeId)}">${esc(JSON.stringify(s.provenance.upstream_payload, null, 2))}</pre>`
+  btn.closest('.rowbtns').after(panel)
+  btn.innerHTML = '<i data-lucide="chevron-up"></i> Hide JSON'
+  refreshIcons()
+}
+
 function downloadStepFrom (stepId) {
   const card = [...document.querySelectorAll('.step')].find(c => c._step && c._step.id === stepId)
   const s = card ? card._step : null

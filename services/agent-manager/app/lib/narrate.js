@@ -126,15 +126,9 @@ function narrateStep (step, label) {
         }
     }
 
-    lines.push(
-        '<details><summary>Raw upstream payload</summary>',
-        '',
-        '```json',
-        JSON.stringify({ input: step.input, output: step.output, metadata: step.metadata }, null, 2),
-        '```',
-        '',
-        '</details>'
-    )
+    // The raw payload is NOT inlined. It is attached to the step's provenance,
+    // and the dashboard shows it behind a View JSON toggle - so the narrative
+    // reads as narrative, and the exact response stays one click away.
 
     return lines.join('\n')
 }
