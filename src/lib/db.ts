@@ -15,6 +15,8 @@ function getPool(): Pool {
   if (!pool) {
     let raw = process.env.DATABASE_URL;
     if (!raw) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
       throw new Error(
         "DATABASE_URL is not set. Copy .env.local.example to .env.local.",
       );
@@ -53,6 +55,14 @@ function getPool(): Pool {
     url.searchParams.delete("sslmode");
     url.searchParams.delete("ssl");
 
+    pool = new Pool({
+      connectionString: url.toString(),
+      // RDS's cert chain isn't in Node's default trust store, so this
+      // encrypts the connection without verifying the certificate/hostname
+      // (matches sslmode=require's actual guarantee, not verify-full's).
+      // For real hostname+CA verification, pass `ca: fs.readFileSync(...)`
+      // here with the RDS combined CA bundle instead of rejectUnauthorized.
+      ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
     pool = new Pool({
       connectionString: url.toString(),
       // RDS's cert chain isn't in Node's default trust store, so this
