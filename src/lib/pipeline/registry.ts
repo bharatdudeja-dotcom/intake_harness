@@ -74,7 +74,10 @@ export const PIPELINE: AgentDefinition[] = [
     // rejection (B2), and read/post comments — that's where a rejection
     // reason and the redraft explanation most likely live.
     allowedTools: [
-      "search_knowledge_base",
+      // The knowledge tool that EXISTS on the Adobe MCP server.
+      // "search_knowledge_base" does not, which is why every grounding
+      // call has failed while the step still reported completed.
+      "search_adobe_knowledge",
       "wf_core_project_get",
       "wf_core_project_update",
       "wf_core_issue_get",
