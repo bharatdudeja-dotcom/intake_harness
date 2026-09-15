@@ -19,8 +19,15 @@ deliberately so the system stays honest. See `docs/STORY.md`.
 
 ## Where it lives
 
-`github.com/chaunceyplum/intake_harness`, at
-`src/app/api/agents/review/route.ts`. TypeScript, a Next.js route handler.
+Same repo you are already in: `src/app/api/agents/review/route.ts`. TypeScript,
+a Next.js route handler. Agent Manager sits alongside at
+`services/agent-manager/` — a separate service, no imports either way.
+
+```bash
+git clone https://github.com/chaunceyplum/intake_harness.git
+cd intake_harness
+git checkout agent-manager      # until PR #8 merges
+```
 **Do not change the contract** in `src/lib/pipeline/types.ts` — the orchestrator
 and Agent 3 depend on it:
 
@@ -111,7 +118,7 @@ Agree the split between the three of you; the pieces are independent.
 
 ## Check the work in Agent Manager
 
-Run the dashboard, ingest, and the run view shows Agent 2's step under **Road of
+Run the dashboard from `services/agent-manager`, ingest, and the run view shows Agent 2's step under **Road of
 Trials** in Act 2. If the badge says `faulted` while the harness says
 `completed`, the payload carries an error — that is the dashboard doing its job,
 not a bug.
