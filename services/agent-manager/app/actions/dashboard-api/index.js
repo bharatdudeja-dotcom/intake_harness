@@ -325,12 +325,15 @@ function buildInfo (params) {
                 swappable: 'Config-only swap: set AUTH_PROVIDER (adobe-ims | microsoft-entra) + its client id - D21/D66/D73'
             },
             storage: {
-                adapter: '@adobe/aio-lib-files (App Builder blob storage)',
-                swapPoint: 'lib/store.js - SharePoint/Graph or S3 swap planned (Increment 4, D27)'
+                // Report what is ACTUALLY running, not what this was written on.
+                // A Connections page that describes a host we left is worse than
+                // no Connections page.
+                adapter: `${params.STORAGE_DRIVER || process.env.STORAGE_DRIVER || 'fs'} driver (lib/storage)`,
+                swapPoint: 'lib/storage - fs | s3 | gcs | aio, chosen at runtime by STORAGE_DRIVER'
             },
             host: {
-                adapter: 'Adobe I/O Runtime (App Builder web actions)',
-                swapPoint: 'actions/* transport shims - any HTTP host works (D21)'
+                adapter: 'Container (server.js) - Cloud Run, ECS, a VM or a laptop',
+                swapPoint: 'server.js maps HTTP to the action contract; no host SDK in lib/**'
             }
         },
         downstream: [

@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "The agent-system registry. One entry per upstream system that actually executes agents.",
+    "",
+    "This is a REGISTRY, NOT AN ENUM. A system named in source outside its own adapter is a",
+    "mistake - the same rule that applies to agent names. Adding an agentic AEM or an agentic",
+    "Campaign later is a new entry here, not a schema change.",
+    "",
+    "Shape:  practice (domain) -> agent_system (upstream) -> agents (discovered at runtime)",
+    "",
+    "Agent names, labels and owners are NEVER written here. They come from the upstream's own",
+    "catalog via agents_path, so Chauncey stays the single source of truth for what his agents",
+    "are called. Add a fifth agent there and it appears here with no change on our side.",
+    "",
+    "Editable from Settings and from Claude (set_agent_system), so this file is a seed, not a",
+    "hardcoded list."
+  ],
+
+  "systems": [
+    {
+      "id": "agentic-harness",
+      "label": "Xfinity Creative Intake",
+      "practice": "workfront",
+      "adapter": "agentic-harness",
+      "active": true,
+      "base_url": "http://34.203.238.63:3000",
+      "auth": null,
+
+      "agents_path": "/api/tasks",
+      "agents_key": "tasks",
+      "agent_id_key": "task_id",
+      "agent_label_key": "label",
+      "agent_owner_key": "owner",
+
+      "start_path": "/api/runs",
+      "run_path": "/api/runs/{run_id}",
+      "run_id_key": "run_id",
+      "input_key": "brief",
+
+      "notes": [
+        "Chauncey Plummer's harness (chaunceyplum/intake_harness).",
+        "Four agents: intake, review, audience_creation, escalation. Escalation is invoked only",
+        "when a run fails, not as step 4 of the pipeline.",
+        "Capture is POLLED, not intercepted: the orchestrator calls its agents server-side, so we",
+        "read the run back afterwards. Said plainly rather than claiming an interception we do",
+        "not have.",
+        "This host currently has no authentication on any route.",
+        "Known upstream defect: a failing tool call is written into the payload and the step still",
+        "reports completed, so `failed` never fires and Agent 4 is never invoked. Agent Manager",
+        "derives stage state from evidence rather than trusting the status field."
+      ]
+    },
+
+    {
+      "id": "aep-agents",
+      "label": "AEP / Real-Time CDP agents",
+      "practice": "aep",
+      "adapter": null,
+      "active": false,
+      "notes": ["Declared so the domain has a home. No executing system yet."]
+    },
+
+    {
+      "id": "aem-agents",
+      "label": "AEM agents",
+      "practice": "aem",
+      "adapter": null,
+      "active": false,
+      "notes": ["Declared so the domain has a home. No executing system yet."]
+    }
+  ]
+}

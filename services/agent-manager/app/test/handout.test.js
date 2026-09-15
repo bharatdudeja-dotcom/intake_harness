@@ -65,7 +65,7 @@ describe('the new-user onboarding kit (D83)', () => {
         const match = kit.match(/\{\s*\n\s*"mcpServers"[\s\S]*?\n\}/)
         expect(match).not.toBeNull()
         const parsed = JSON.parse(match[0])
-        const server = parsed.mcpServers['company-cookbook']
+        const server = parsed.mcpServers['agent-manager']
         expect(server.command).toBe('npx')
         expect(server.args).toContain(MCP_URL)
         expect(server.args).toContain('x-cookbook-login:saul.goodman:test-pw-hotel-0008')
@@ -82,14 +82,14 @@ describe('the new-user onboarding kit (D83)', () => {
     })
 
     test('includes the one-line command to connect an IDE, with the credential in it', () => {
-        expect(kit).toMatch(/claude mcp add company-cookbook --transport http/)
+        expect(kit).toMatch(/claude mcp add agent-manager --transport http/)
         expect(kit).toContain(`--header "x-cookbook-login: ${USER.id}:${USER.password}"`)
         // and the machine-wide variant, since most people want it in every project
         expect(kit).toMatch(/--scope user/)
     })
 
     test('includes the standing capture instruction AND where to configure it', () => {
-        expect(kit).toMatch(/search the cookbook/i)
+        expect(kit).toMatch(/search for prior runs/i)
         expect(kit).toMatch(/append_step/)
         expect(kit).toMatch(/save_resource with its existing id/i)
         // Where it goes is the half people get wrong.
@@ -99,7 +99,7 @@ describe('the new-user onboarding kit (D83)', () => {
         expect(kit).toMatch(/copy from here/)
         // The rule that stops one task becoming several recipes must survive any rewrite.
         // Whitespace-tolerant: the copy is hard-wrapped, so the phrase can straddle a line break.
-        expect(kit).toMatch(/One\s+recipe per task/i)
+        expect(kit).toMatch(/One\s+run per intake/i)
     })
 
     test('names the person\'s practice, so they know their work is filed automatically', () => {
@@ -114,7 +114,7 @@ describe('the new-user onboarding kit (D83)', () => {
     test('explains the privacy model, which is the whole product promise', () => {
         expect(kit).toMatch(/PRIVATE to you/i)
         expect(kit).toMatch(/Hero Agent/i)
-        expect(kit).toMatch(/CX Graph/)
+        expect(kit).toMatch(/Shared Knowledge Graph/)
     })
 
     test('carries troubleshooting for the failures people actually hit', () => {

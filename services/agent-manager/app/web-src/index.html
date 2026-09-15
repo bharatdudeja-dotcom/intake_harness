@@ -362,12 +362,12 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
     <button data-panel="home" aria-current="true"><i data-lucide="layout-dashboard"></i> Home / My Work <span class="key">1</span></button>
     <button data-panel="projects"><i data-lucide="folder-kanban"></i> Programmes <span class="key">2</span></button>
     <button data-panel="worklog"><i data-lucide="list-ordered"></i> Event Log <span class="key">3</span></button>
-    <button data-panel="tasks"><i data-lucide="list-checks"></i> Live Queue <span id="tasks-badge"></span></button>
+    <button data-panel="tasks"><i data-lucide="list-checks"></i> Live Queue <span id="tasks-badge" class="key">4</span></button>
     <div class="group">Knowledge</div>
     <button data-panel="cookbook"><i data-lucide="book-marked"></i> Playbooks <span class="key">5</span></button>
-    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span id="headchef-badge"></span></button>
-    <button data-panel="graph"><i data-lucide="git-fork"></i> My Knowledge Graph <span class="key">6</span></button>
-    <button data-panel="cx"><i data-lucide="network"></i> Shared Knowledge Graph <span class="key">7</span></button>
+    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span><span id="headchef-badge"></span></button>
+    <button data-panel="graph"><i data-lucide="git-fork"></i> My Graph <span class="key">7</span></button>
+    <button data-panel="cx"><i data-lucide="network"></i> Shared Graph <span class="key">8</span></button>
     <div class="group">Admin</div>
     <button data-panel="settings"><i data-lucide="sliders-horizontal"></i> Settings <span class="key">9</span></button>
     <button data-panel="connections"><i data-lucide="plug"></i> Connections <span class="key">0</span></button>
@@ -416,7 +416,7 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
         
         <div class="recipe-list" id="worklog-list"></div>
       </div>
-      <div id="worklog-detail"><div class="empty"><i data-lucide="list-ordered"></i><p>Select a recipe to open its Work Log.</p></div></div>
+      <div id="worklog-detail"><div class="empty"><i data-lucide="list-ordered"></i><p>Select a run to open its Work Log.</p></div></div>
     </div>
   </section>
   <section class="panel" id="panel-tasks"></section>
@@ -502,14 +502,14 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userkey-title" style="max-width:420px">
     <div class="mark" style="margin:0 auto 12px"><i data-lucide="user-round"></i></div>
     <h3 id="userkey-title" style="text-align:center">Sign in to Agent Manager</h3>
-    <p class="sub" style="margin:8px 0 18px; text-align:center">Your own drafts stay private to you. Approved recipes and the Company CX Graph are shared with everyone.</p>
+    <p class="sub" style="margin:8px 0 18px; text-align:center">Your own runs stay private to you. Approved runs and the Shared Knowledge Graph are visible to everyone.</p>
     <label class="sub" for="login-id" style="display:block; margin-bottom:6px">Login id</label>
     <input class="field" type="text" id="login-id" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="e.g. jesse.pinkman" style="margin-bottom:12px">
     <label class="sub" for="userkey-input" style="display:block; margin-bottom:6px">Password</label>
     <input class="field" type="password" id="userkey-input" autocomplete="current-password" spellcheck="false" placeholder="Your password">
     <p class="sub" id="userkey-error" style="color:var(--reject); display:none; margin:10px 0 0"></p>
     <button class="btn primary" id="userkey-btn" style="width:100%; justify-content:center; margin-top:14px"><i data-lucide="log-in"></i> Sign in</button>
-    <p class="sub" style="margin:14px 0 0; text-align:center; font-size:12px">Signing in identifies you, so the Cookbook shows <em>your</em> work. No login yet? Ask an admin to create one.</p>
+    <p class="sub" style="margin:14px 0 0; text-align:center; font-size:12px">Signing in identifies you, so Agent Manager shows <em>your</em> work. No login yet? Ask an admin to create one.</p>
   </div>
 </div>
 
@@ -589,7 +589,7 @@ async function rpc (method, params = {}) {
   const res = await fetch(API_BASE, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }) })
   if (res.status === 401) {
     if (auth.loginEnabled) { handleAuthExpired(); throw new Error('Your session expired. Sign in again.') }
-    if (auth.passcodeRequired) { handlePasscodeRejected(); throw new Error('This cookbook is locked. Enter the access code.') }
+    if (auth.passcodeRequired) { handlePasscodeRejected(); throw new Error('Agent Manager is locked. Enter the access code.') }
   }
   const body = await res.json()
   if (body.error) throw new Error(`${method}: ${body.error.message}`)
@@ -1025,7 +1025,7 @@ async function loadAll (silent) {
 
   if (fails.length) banner(`Some data failed to load: ${fails.join(', ')}. The proxy or upstream may be unavailable.`); else banner('')
   const approved = state.recipes.filter(inCookbook).length
-  $('#conn-sub').innerHTML = `Your view · ${state.recipes.length} recipe(s) visible · ${approved} in the cookbook`
+  $('#conn-sub').innerHTML = `Your view · ${state.recipes.length} run(s) visible · ${approved} in Playbooks`
   renderProjectSwitcher()
   updateRoleUI()
   state.graphBuilt = false
@@ -1230,7 +1230,7 @@ function renderCookOff () {
           <span class="lb-crystal" title="${r.purityKnown ? r.purity + '% pure: ' + esc(r.grade.note) : esc(r.grade.note)}">${crystalSvg(i === 0 ? 30 : 22, r.grade.key)}</span>
           <span class="lb-who">
             <b>${esc(r.name)}</b>${r.owner === state.owner ? ' <span class="sub">you</span>' : ''}
-            <span class="lb-meta">${r.admitted} in the cookbook${r.purityKnown ? ` &middot; ${r.submitted} submitted &middot; <span class="lb-purity x-${r.grade.key}">${r.purity}% ${esc(r.grade.label)}</span>` : ''}</span>
+            <span class="lb-meta">${r.admitted} in Playbooks${r.purityKnown ? ` &middot; ${r.submitted} submitted &middot; <span class="lb-purity x-${r.grade.key}">${r.purity}% ${esc(r.grade.label)}</span>` : ''}</span>
           </span>
           <span class="lb-score">
             <b>${r.crystals}</b>
@@ -1268,15 +1268,15 @@ function renderHome () {
 
   $('#panel-home').innerHTML = `
     <div class="statgrid">
-      <div class="card stat" data-symbol="Rc"><span class="n">${mine.length}</span><span class="l">my recipes</span></div>
+      <div class="card stat" data-symbol="Rc"><span class="n">${mine.length}</span><span class="l">my runs</span></div>
       <div class="card stat" data-symbol="Dr"><span class="n">${experimental.length}</span><span class="l">drafts</span></div>
-      <div class="card stat" data-symbol="Cb"><span class="n">${cookbook.length}</span><span class="l">in the cookbook</span></div>
+      <div class="card stat" data-symbol="Cb"><span class="n">${cookbook.length}</span><span class="l">in Playbooks</span></div>
       <div class="card stat" data-symbol="Tk" title="${noTokenData ? noTokenData + ' of your recipes report no token usage, so they are not counted.' : 'Every one of your recipes reports token usage.'}">
         <span class="n">${fmtTokens(tokens)}</span>
         <span class="l">my tokens${noTokenData ? ` · <span style="color:var(--exp)">${noTokenData} not reported</span>` : ''}</span>
       </div>
     </div>
-    <p class="help">Yours only. The team has ${rows.length} recipe(s) visible here, ${fmtTokens(teamTokens)} tokens.</p>
+    <p class="help">Yours only. The team has ${rows.length} run(s) visible here, ${fmtTokens(teamTokens)} tokens.</p>
 
 
     ${readyToBake.length ? `<div class="card section-gap" style="border-left:3px solid var(--ready)">
@@ -1308,7 +1308,7 @@ function renderHome () {
         <p class="sub">Across steps in ${esc(scopeLabel)}.</p>
         <div class="rowbtns">${models.length ? models.map(m => modelChip(m)).join('') : '<span class="sub">No model recorded yet.</span>'}</div>
         <h3 class="head section-gap"><i data-lucide="folder-kanban"></i> Active projects</h3>
-        <div class="rowbtns">${activeProjects.length ? activeProjects.map(p => `<span class="chip"><i data-lucide="folder"></i>${esc(p.name)}</span>`).join('') : '<span class="sub">Projects are created from your AI client (start_project).</span>'}</div>
+        <div class="rowbtns">${activeProjects.length ? activeProjects.map(p => `<span class="chip"><i data-lucide="folder"></i>${esc(p.name)}</span>`).join('') : '<span class="sub">Programmes are created from Claude (start_project).</span>'}</div>
       </div>
     </div>
 
@@ -1346,7 +1346,7 @@ function renderProjects () {
             ${st !== 'archived' ? `<button class="btn tiny" data-archive-project="${esc(p.name)}"><i data-lucide="archive"></i> Archive</button>` : ''}
           </span>
         </div>
-        <div class="meta"><span>${rs.length} recipe(s)</span><span>${cook} in cookbook</span></div>
+        <div class="meta"><span>${rs.length} recipe(s)</span><span>${cook} in Playbooks</span></div>
         <div class="stack section-gap">
           ${rs.length ? rs.map(r => `<button class="recipe-item" data-open-worklog="${esc(r.id)}" style="flex-direction:row; align-items:center; gap:8px;">
             <i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b style="flex:1 1 10ch; min-width:0">${esc(r.title)}</b>${statusBadge(r)}<span class="sub" style="flex:0 0 auto">${r.step_count || 1} ingr.</span></button>`).join('') : '<span class="sub">No recipes yet. Start one from your assistant.</span>'}
@@ -1385,14 +1385,14 @@ function renderWorklogList () {
     const hidden = all.length - rows.length
     count.innerHTML = q
       ? `${rows.length} matching <b>${esc(state.worklogQuery)}</b> <button class="btn tiny" id="worklog-clear-q" style="margin-left:6px"><i data-lucide="x"></i> show all ${all.length}</button>`
-      : `${rows.length} of ${all.length} recipe(s) on your bench${hidden ? ` · ${hidden} filtered out` : ''}`
+      : `${rows.length} of ${all.length} run(s) on your bench${hidden ? ` · ${hidden} filtered out` : ''}`
     const clear = $('#worklog-clear-q')
     if (clear) clear.addEventListener('click', () => { state.worklogQuery = ''; renderWorklogList() })
     refreshIcons()
   }
   const list = $('#worklog-list')
   if (!rows.length) {
-    list.innerHTML = `<p class="empty"><i data-lucide="inbox"></i><br>${all.length ? `No recipes match this stage. You have ${all.length} on your bench.` : 'Nothing on your bench yet. Work captured from an AI client lands here, along with anything a colleague assigns you.'}</p>`
+    list.innerHTML = `<p class="empty"><i data-lucide="inbox"></i><br>${all.length ? `No recipes match this stage. You have ${all.length} on your bench.` : 'Nothing on your bench yet. Runs captured from Claude land here, along with anything a colleague assigns you.'}</p>`
     refreshIcons(); return
   }
   list.innerHTML = rows.map(r => `
@@ -1771,7 +1771,7 @@ function renderCookbook () {
     <input class="field" id="cookbook-search" placeholder="Search recipes…" value="${esc(q)}" style="max-width:240px" oninput="cookbookSearch(this.value)"></div>`
   if (!rows.length) {
     const exp = scoped(state.recipes).filter(r => !inCookbook(r)).length
-    html += `<p class="empty"><i data-lucide="chef-hat"></i><br>${q ? 'No matching recipes.' : (exp ? `Nothing certified yet. ${exp} experimental recipe(s) are in the Work Log.` : 'No recipes captured yet.')}</p>`
+    html += `<p class="empty"><i data-lucide="chef-hat"></i><br>${q ? 'No matching recipes.' : (exp ? `Nothing certified yet. ${exp} experimental run(s) are in the Work Log.` : 'No recipes captured yet.')}</p>`
   } else {
     for (const [project, plist] of [...byProject.entries()].sort()) {
       const byKind = new Map()
@@ -1972,34 +1972,50 @@ function buildHandout (user) {
   const header = `${user.id}:${user.password}`
   const claudeConfig = JSON.stringify({
     mcpServers: {
-      'company-cookbook': {
+      'agent-manager': {
         command: 'npx',
         args: ['-y', 'mcp-remote', mcpUrl, '--header', `x-cookbook-login:${header}`]
       }
     }
   }, null, 2)
-  const standingInstruction = `Use the company-cookbook MCP server for this work.
+  const standingInstruction = `Use the agent-manager MCP server for this work.
 
-Before starting, search the cookbook for prior work on this topic and tell me what you
-find. Reuse before rebuilding.
+I am a marketer. When I ask you to create a campaign brief or an audience request:
 
-While working: start_project if this is new work, then start_recipe for the task. Append
-every substantive artifact with append_step, including the model and tokens used. One
-recipe per task: a diagram, a doc and some code from the same task are three artifacts
-of one recipe, not three recipes. Capture what I reject too, with kind "steering".
+1. Call start_intake with my brief in plain English. That hands it to the agent
+   pipeline, which builds the structured intake, triages it and decides the audience
+   build route. Tell me the run id it gives back.
+2. Show me what came back at each stage in plain language - what each agent did, and
+   anything it could not answer. If an agent asks for a missing field, ask me only for
+   that field. Do not re-ask me the whole brief.
+3. If a stage reports success but its output carries an error, say so. A step that
+   claims completed while its tool failed is not a success, and I would rather hear it
+   from you than find it later.
+4. When the run is finished and I am happy, approve it. That hands it to the Hero
+   Agent, which reads it against every earlier run and proposes what should be learned.
+   The Hero Agent only proposes - a named person still decides what is promoted.
 
-When refining something that exists, call save_resource with its existing id.
+Before starting, search for prior runs on this topic and tell me what you find. Reuse
+before rebuilding.
 
-My practice is ${user.practice || 'not set, so ask an admin'}. New recipes inherit it.`
+Capture as we go: append_step for every substantive artifact, with the model and tokens
+used. One run per intake - the brief, the triage and the audience definition are three
+artifacts of one run, not three runs. Capture what I reject too, with kind "steering":
+a correction is the most useful thing you can record.
 
-  return `TAP COOKBOOK
+When refining something that exists, call save_resource with its existing id rather
+than creating a near-duplicate.
+
+My domain is ${user.practice || 'not set, so ask an admin'}. New runs inherit it.`
+
+  return `AGENT MANAGER
 Setup for ${user.display_name || user.id}
 
 Login id     ${user.id}
 Password     ${user.password}
 Email        ${user.email || 'not set'}
 Roles        ${(user.roles || ['marketer']).join(', ')}
-Practice     ${user.practice || 'not set'}
+Domain       ${user.practice || 'not set'}
 Issued       ${new Date().toISOString().slice(0, 10)}
 
 Dashboard    ${dashUrl}
@@ -2016,8 +2032,8 @@ Your work stays private to you while it is rough. You choose when to share it.
 
 Open ${dashUrl} and enter the login id and password above.
 
-You will see your own work, every recipe the company has approved, and the shared
-Company CX Graph. You will not see anyone else's drafts.
+You will see your own runs, everything the company has promoted, and the Shared
+Knowledge Graph. You will not see anyone else's drafts.
 
 
 2. CONNECT CLAUDE DESKTOP
@@ -2028,7 +2044,7 @@ Open the config file. The reliable route is Settings, Developer, Edit Config. Ot
   macOS     ~/Library/Application Support/Claude/claude_desktop_config.json
 
 Paste this. If the file already has an "mcpServers" section, add only the
-"company-cookbook" block inside it rather than creating a second one.
+"agent-manager" block inside it rather than creating a second one.
 
 ${claudeConfig}
 
@@ -2043,7 +2059,7 @@ To confirm, ask it to call get_my_roles. It should answer ${user.email || user.i
 
 From your project folder:
 
-  claude mcp add company-cookbook --transport http ${mcpUrl} --header "x-cookbook-login: ${header}"
+  claude mcp add agent-manager --transport http ${mcpUrl} --header "x-cookbook-login: ${header}"
 
 Add --scope user to make it available in every project on this machine.
 
@@ -2081,15 +2097,18 @@ clients will stop connecting.
 
 6. HOW WORK BECOMES SHARED
 
-  capture     private to you. Leave it messy.
-  approve     keep the artifacts worth keeping, discard the dead ends.
-  bake        submits the recipe. Colleagues can now see it.
-  admit       a Hero Agent decides what enters the Company CX Graph.
+  capture     every step of a run is logged as it happens. Private to you.
+  approve     one button, or just tell Claude to approve. Hands the run to the
+              Hero Agent.
+  propose     the Hero Agent reads the run against every earlier run and proposes
+              what should be learned. It only ever proposes.
+  promote     a named person decides what enters the Shared Knowledge Graph.
 
-A recipe with no approved artifacts cannot be baked.
+That last line is the point. Ask "who decided this was true" and the answer is always
+a person, by name, with the evidence they decided on.
 
-Bake when the recipe would help a different person, on a different client, next quarter.
-Private drafts cost nothing, so there is no reason to bake exploration.
+Approve when the run would help a different marketer, on a different campaign, next
+quarter. Private runs cost nothing, so there is no reason to approve exploration.
 
 
 TROUBLESHOOTING
@@ -2691,7 +2710,7 @@ $('#consent-confirm').addEventListener('click', async () => {
     // D64: bake uses the artifacts already approved (no approve_all auto-approve). The server
     // rejects a bake with zero approved artifacts; surface that clearly if it happens.
     if (consentCtx.mode === 'bake') await callTool('bake_recipe', note ? { id: consentCtx.id, note } : { id: consentCtx.id })
-    const id = consentCtx.id; closeConsent(); toast('Recipe baked into the cookbook'); await reloadLight()
+    const id = consentCtx.id; closeConsent(); toast('Run approved and sent to the Hero Agent'); await reloadLight()
     if (state.currentRecipe && state.currentRecipe.id === id) await openWorklog(id)
   } catch (e) { banner(e.message); closeConsent() }
 })
@@ -2857,7 +2876,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeDrawer(); closeConsent() }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return
   // Digits follow the sidebar top to bottom, so the printed hint and the key always agree.
-  const map = { 1: 'home', 2: 'projects', 3: 'worklog', 4: 'tasks', 5: 'cookbook', 6: 'graph', 7: 'cx', 8: 'cookoff', 9: 'settings', 0: 'connections' }
+  const map = { 1: 'home', 2: 'projects', 3: 'worklog', 4: 'tasks', 5: 'playbooks', 6: 'agents', 7: 'graph', 8: 'cx', 9: 'settings', 0: 'connections' }
+  map[5] = 'cookbook' // panel id is still the cookbook's; the label is Playbooks
   if (map[e.key]) go(map[e.key])
 })
 function syncPaletteSel () { document.querySelectorAll('.palette-item').forEach((el, i) => el.classList.toggle('sel', i === paletteSel)) }

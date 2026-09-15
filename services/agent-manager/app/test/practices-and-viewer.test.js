@@ -118,7 +118,7 @@ describe('viewer is read-only at a single choke point (D79)', () => {
 describe('practices: config, per-user assignment, inheritance, filtering (D79)', () => {
     test('list_practices exposes the configured groups and the caller\'s own', async () => {
         const out = okJson(await asKey(K.alice, 'list_practices'))
-        expect(out.practices.map(p => p.id)).toEqual(expect.arrayContaining(['aem', 'aep', 'braze', 'campaign']))
+        expect(out.practices.map(p => p.id)).toEqual(expect.arrayContaining(['workfront', 'aep', 'aem']))
         expect(out.my_practices).toEqual([]) // none assigned yet
     })
 
@@ -145,8 +145,8 @@ describe('practices: config, per-user assignment, inheritance, filtering (D79)',
 
     test('an explicit practice overrides the inherited one; an unknown one errors', async () => {
         await asKey(K.bharat, 'set_user_practices', { owner: 'alice@a.example', practices: ['aem'] })
-        const rec = okJson(await asKey(K.alice, 'start_recipe', { project: 'P', title: 'Braze work', practice: 'braze' }))
-        expect(rec.practice).toBe('braze')
+        const rec = okJson(await asKey(K.alice, 'start_recipe', { project: 'P', title: 'Braze work', practice: 'workfront' }))
+        expect(rec.practice).toBe('workfront')
 
         const bad = await asKey(K.alice, 'start_recipe', { project: 'P', title: 'Bogus', practice: 'not-a-practice' })
         expect(bad.isError).toBe(true)
@@ -156,10 +156,10 @@ describe('practices: config, per-user assignment, inheritance, filtering (D79)',
     test('list_recipes filters by practice, so one discipline sees just its own knowledge', async () => {
         await asKey(K.bharat, 'set_user_practices', { owner: 'alice@a.example', practices: ['aem'] })
         await asKey(K.alice, 'start_recipe', { project: 'P', title: 'AEM one' })
-        await asKey(K.alice, 'start_recipe', { project: 'P', title: 'Braze one', practice: 'braze' })
+        await asKey(K.alice, 'start_recipe', { project: 'P', title: 'Braze one', practice: 'workfront' })
 
         const aem = okJson(await asKey(K.alice, 'list_recipes', { practice: 'aem' }))
-        const braze = okJson(await asKey(K.alice, 'list_recipes', { practice: 'braze' }))
+        const braze = okJson(await asKey(K.alice, 'list_recipes', { practice: 'workfront' }))
         expect(aem.map(r => r.title)).toEqual(['AEM one'])
         expect(braze.map(r => r.title)).toEqual(['Braze one'])
     })
@@ -223,9 +223,9 @@ describe('update-in-place must not silently drop fields (D79 bugfixes)', () => {
     })
 
     test('a recipe created via save_resource inherits the practice too', async () => {
-        await asKey(K.bharat, 'set_user_practices', { owner: 'bob@b.example', practices: ['braze'] })
+        await asKey(K.bharat, 'set_user_practices', { owner: 'bob@b.example', practices: ['workfront'] })
         const saved = okJson(await asKey(K.bob, 'save_resource', { type: 'decision', title: 'Braze decision', content: 'c', project: 'BP' }))
-        const listed = okJson(await asKey(K.bob, 'list_recipes', { practice: 'braze' }))
+        const listed = okJson(await asKey(K.bob, 'list_recipes', { practice: 'workfront' }))
         expect(listed.map(r => r.id)).toContain(saved.id)
     })
 })
