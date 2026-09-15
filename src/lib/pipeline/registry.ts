@@ -54,18 +54,13 @@ export const PIPELINE: AgentDefinition[] = [
     // for an existing duplicate before creating one. No update/delete —
     // intake shouldn't be able to modify or remove existing records.
     allowedTools: [
-      // The knowledge tool that EXISTS on the Adobe MCP server. Asking for
-      // "search_knowledge_base" is why grounding failed on every run.
-      "search_adobe_knowledge",
+      "search_knowledge_base",
       "wf_core_project_list",
       "wf_core_project_get",
       "wf_core_project_create",
       "wf_core_issue_list",
       "wf_core_issue_get",
       "wf_core_issue_create",
-      // The DE: custom-form values, which can only be set after the record
-      // exists and carries its categoryID.
-      "wf_core_issue_set_custom_fields",
     ],
     contextAccess: [], // first in the pipeline — nothing prior to see
   },

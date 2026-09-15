@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Agent 1 is Uday's. Ours is local-only, for testing the 1-2-3 flow.
+src/lib/agents/intake/
+local/
