@@ -5,8 +5,8 @@ import type { AgentName } from "./types";
  * This is the ONE place that decides which agent runs next, which MCP
  * tools it may call, and which prior agents' outputs it may see —
  * individual agent routes never call each other directly, and never get to
- * decide their own permissions. To add a 4th agent, add a row here;
- * nothing else in lib/pipeline changes.
+ * decide their own permissions. To add a 5th sequential agent, add a row to
+ * PIPELINE; nothing else in lib/pipeline changes.
  */
 export interface AgentDefinition {
   name: AgentName;
@@ -114,3 +114,33 @@ export const PIPELINE: AgentDefinition[] = [
     contextAccess: [],
   },
 ];
+
+/**
+ * Agent 4 — Escalation. NOT part of PIPELINE: it isn't step 4 of the happy
+ * path, it's the handler for when the happy path doesn't happen.
+ *
+ * From the requirements doc (B9 / step 4.6): "Full escalation. The process
+ * terminates without an audience, and nothing is captured... Log the
+ * failure and classify it. This is the input to the crawl, walk, run loop
+ * in section 10 — without it, the same class of failure recurs
+ * indefinitely and the agents never improve."
+ *
+ * The orchestrator (runPipeline in orchestrator.ts) calls this agent
+ * exactly when a run's status becomes "failed" — never on "needs_input",
+ * which is an expected, resumable pause (B1's marketer round-trip, B3's
+ * validation step), not a terminated-without-an-audience escalation. It
+ * needs visibility into every prior agent's output to classify what
+ * actually went wrong, which is why contextAccess is broad here — this is
+ * the one agent where that's the job, not a scoping gap.
+ */
+export const ESCALATION: AgentDefinition = {
+  name: "escalation",
+  path: "/api/agents/escalation",
+  label: "Agent 4 — Escalation",
+  owner: "Unassigned",
+  allowedTools: ["search_knowledge_base"], // TODO: look up prior similar failures once a real classification store exists
+  contextAccess: ["intake", "review", "audience_creation"],
+};
+
+/** Every task, sequential pipeline + escalation — used to seed db/schema.sql's `tasks` catalog and for tool-allowlist lookups in lib/mcp-client.ts. */
+export const ALL_TASKS: AgentDefinition[] = [...PIPELINE, ESCALATION];

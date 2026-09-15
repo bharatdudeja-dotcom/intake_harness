@@ -1,12 +1,14 @@
 /**
- * The contract every agent endpoint implements. Each of the three agents
- * (Intake, Review/Triage, Audience Creation) is a standalone Next.js route
- * handler — this is the ONLY shape the orchestrator, and every other agent,
+ * The contract every agent endpoint implements. Each agent — the three in
+ * the sequential pipeline (Intake, Review/Triage, Audience Creation) plus
+ * Escalation, invoked out-of-band when a run fails (see
+ * src/lib/pipeline/orchestrator.ts) — is a standalone Next.js route
+ * handler. This is the ONLY shape the orchestrator, and every other agent,
  * needs to agree on. An agent can be rewritten entirely internally as long
  * as it keeps this request/response shape.
  */
 
-export const AGENT_NAMES = ["intake", "review", "audience_creation"] as const;
+export const AGENT_NAMES = ["intake", "review", "audience_creation", "escalation"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 /** A task_id in the `tasks` table is just an AgentName — same vocabulary, DB column name. */
 export type TaskId = AgentName;

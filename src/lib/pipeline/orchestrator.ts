@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { PIPELINE } from "./registry";
+import { ESCALATION, PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
 /**
@@ -20,6 +20,11 @@ import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRo
  * full accumulated history down to that allowlist before every HTTP call,
  * so an agent never receives a prior agent's output it isn't scoped to see
  * (paired with the tool allowlist enforced in lib/mcp-client.ts).
+ *
+ * A "failed" step additionally triggers Agent 4 — Escalation (B9 in the
+ * requirements doc: "the process terminates without an audience, and
+ * nothing is captured"). "needs_input" does NOT trigger it — that's an
+ * expected, resumable pause, not a terminated run.
  */
 export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
   const [run] = await query<RunRow>(
@@ -76,6 +81,15 @@ export async function runPipeline(initialInput: unknown, baseUrl: string): Promi
     );
 
     if (response.status !== "completed") {
+      if (response.status === "failed") {
+        await runEscalation(run.run_id, baseUrl, {
+          failedTask: agent.name,
+          failedStepIndex: stepIndex,
+          message: response.message ?? null,
+          input: currentInput,
+        }, priorOutputs, stepIndex + 1);
+      }
+
       const [updated] = await query<RunRow>(
         `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
          WHERE run_id = $1 RETURNING *`,
@@ -94,6 +108,60 @@ export async function runPipeline(initialInput: unknown, baseUrl: string): Promi
     [run.run_id, PIPELINE.length],
   );
   return completed;
+}
+
+/**
+ * Best-effort call to the Escalation agent when a run fails. Never throws:
+ * a broken escalation path must not mask the original failure, but it IS
+ * still recorded as its own task_run — even escalation failing is
+ * something B9 says must be captured, not silently dropped.
+ */
+async function runEscalation(
+  runId: string,
+  baseUrl: string,
+  failure: { failedTask: AgentName; failedStepIndex: number; message: string | null; input: unknown },
+  priorOutputs: Partial<Record<AgentName, unknown>>,
+  stepIndex: number,
+): Promise<void> {
+  const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
+  for (const visibleAgent of ESCALATION.contextAccess) {
+    if (visibleAgent in priorOutputs) {
+      scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
+    }
+  }
+
+  const startedAt = new Date();
+  let response: AgentResponse;
+  try {
+    response = await callAgent(baseUrl, ESCALATION.path, {
+      runId,
+      input: failure,
+      priorOutputs: scopedPriorOutputs,
+    });
+  } catch (err) {
+    response = { status: "failed", message: (err as Error).message };
+  }
+  const finishedAt = new Date();
+
+  await query<TaskRunRow>(
+    `INSERT INTO task_runs
+       (run_id, task_id, step_index, status, input, output, message, metadata,
+        started_at, finished_at, duration_ms)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+    [
+      runId,
+      ESCALATION.name,
+      stepIndex,
+      response.status,
+      JSON.stringify(failure),
+      JSON.stringify(response.output ?? null),
+      response.message ?? null,
+      JSON.stringify(response.metadata ?? {}),
+      startedAt.toISOString(),
+      finishedAt.toISOString(),
+      finishedAt.getTime() - startedAt.getTime(),
+    ],
+  );
 }
 
 async function callAgent(baseUrl: string, path: string, body: AgentRequest): Promise<AgentResponse> {

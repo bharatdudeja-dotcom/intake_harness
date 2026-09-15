@@ -56,7 +56,7 @@
  * route directly.
  */
 
-import { PIPELINE } from "./pipeline/registry";
+import { ALL_TASKS } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
 
 const MCP_SERVER_ROUTES: Array<{ prefix: string; path: string }> = [
@@ -129,7 +129,7 @@ function getEndpointForTool(toolName: string): string {
 let requestCounter = 0;
 
 function assertToolAllowed(taskId: TaskId, name: string): void {
-  const agent = PIPELINE.find((a) => a.name === taskId);
+  const agent = ALL_TASKS.find((a) => a.name === taskId);
   if (!agent) {
     throw new McpError(`callMcpTool: unknown taskId "${taskId}" — not in the pipeline registry.`);
   }
