@@ -16,6 +16,10 @@ export function RunDashboard() {
 
   const refreshRuns = useCallback(async () => {
     const res = await fetch("/api/runs");
+    if (!res.ok) {
+      setError(`Failed to load runs (HTTP ${res.status}). Is DATABASE_URL set in .env.local?`);
+      return;
+    }
     const data = await res.json();
     setRuns(data.runs ?? []);
   }, []);
@@ -23,6 +27,10 @@ export function RunDashboard() {
   const loadDetail = useCallback(async (runId: string) => {
     setSelectedRunId(runId);
     const res = await fetch(`/api/runs/${runId}`);
+    if (!res.ok) {
+      setError(`Failed to load run ${runId} (HTTP ${res.status}).`);
+      return;
+    }
     setDetail(await res.json());
   }, []);
 
@@ -32,9 +40,18 @@ export function RunDashboard() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/runs")
-      .then((res) => res.json())
-      .then((data) => {
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!cancelled) {
+            setError(`Failed to load runs (HTTP ${res.status}). Is DATABASE_URL set in .env.local?`);
+          }
+          return;
+        }
+        const data = await res.json();
         if (!cancelled) setRuns(data.runs ?? []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
       });
     return () => {
       cancelled = true;
