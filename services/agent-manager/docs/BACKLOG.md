@@ -130,19 +130,28 @@ fires Agent 4 has never once been invoked.
 **Fix is one string in Chauncey's repo**, plus the allowlist entry in
 `src/lib/pipeline/registry.ts`. Worth raising today — it is the cheapest win on the board.
 
-### No Workfront tools are deployed
+### The Workfront routes 404 at this gateway
 
-`/mcp/workfront/core`, `/comments`, `/search` and `/metadata` all return **zero tools**,
-and no `wf_*` name appears among the 238.
+`/mcp/workfront/core`, `/comments`, `/search` and `/metadata` all return **HTTP 404
+"Not Found"** — not an empty tool list. (My first pass reported "zero tools"; that was my
+parser defaulting on a non-JSON-RPC body. The routes are simply absent.)
 
-So `wf_core_project_*`, `wf_core_issue_*` and `wf_comments_*` — the allowlists for Agents 1
-and 2 — reference tools that are not deployed at this endpoint. **This blocks our Agent 2
-from posting a redraft via `wf_comments_create`**, which is most of B2.
+`template.yaml` in `chaunceyplum/mcp` **declares all eight Workfront routes**, so the code
+is there and the deployed stack is behind it — or the Workfront Lambdas sit behind a
+different API Gateway.
 
-The code for them exists in `chaunceyplum/mcp` (ten Workfront Lambdas). Either they are
-not deployed to this API Gateway, or they are behind a different one. **Ask Chauncey
-which.** Until then Agent 2 can parse a rejection and decide `needs_input`, but it cannot
-write back to Workfront.
+**But Workfront writes demonstrably work.** Uday's agent created a real issue: *Q4 Xfinity
+Upsell - Email Campaign Brief*, reference **4201**, in project *UKS Agent Test - Marketing
+Intake*, entered by "udays agent" on 14 Sep.
+
+So there is a working write path that is **not in either of Chauncey's repos** — neither
+`intake_harness` (branches: main, nextjs-scaffold, agent-scoping, fix-api-error-handling,
+fix-quoted-database-url, agent-manager) nor `mcp` (main only) contains it.
+
+**Ask Uday directly:** where does the code that created issue 4201 live, and what does it
+call — the deployed `wf_*` Lambdas behind another URL, the Workfront REST API directly, or
+Fusion? That answer decides how our Agent 2 posts its redraft, and it is the last unknown
+in the end-to-end path.
 
 ### Agent 3 is genuinely ready
 

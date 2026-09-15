@@ -393,7 +393,7 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
     <div style="margin-top:6px">No-secret proxy · key stays server-side</div>
   </div>
   <div class="whoami">
-    <span id="role-chip" class="chip" title="Everyone is a marketer. The Hero Agent proposes what should be learned; a named human always decides. An admin manages roles and settings."><i data-lucide="user"></i> <b>Not signed in</b></span>
+    <span id="role-chip" class="chip" title="Everyone is a Marketer. The Hero Agent proposes what should be learned; a named human always decides. An Admin manages roles and settings."><i data-lucide="user"></i> <b>Not signed in</b></span>
     <button class="btn" id="signout-btn" style="display:none" title="Sign out so someone else can sign in"><i data-lucide="log-out"></i> <span id="signout-label">Sign out</span></button>
   </div>
 </aside>
@@ -520,7 +520,7 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
     <h3 id="userkey-title" style="text-align:center">Sign in to Agent Manager</h3>
     <p class="sub" style="margin:8px 0 18px; text-align:center">Your own runs stay private to you. Approved runs and the Shared Knowledge Graph are visible to everyone.</p>
     <label class="sub" for="login-id" style="display:block; margin-bottom:6px">Login id</label>
-    <input class="field" type="text" id="login-id" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="e.g. jesse.pinkman" style="margin-bottom:12px">
+    <input class="field" type="text" id="login-id" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="e.g. your.name" style="margin-bottom:12px">
     <label class="sub" for="userkey-input" style="display:block; margin-bottom:6px">Password</label>
     <input class="field" type="password" id="userkey-input" autocomplete="current-password" spellcheck="false" placeholder="Your password">
     <p class="sub" id="userkey-error" style="color:var(--reject); display:none; margin:10px 0 0"></p>
@@ -945,7 +945,7 @@ const state = {
   worklogQuery: '',
   currentRecipe: null, graphBuilt: false, cxGraph: null, cookoff: [],
   // D64: marketer roles + Hero Agent CX-graph gate
-  role: 'marketer', roles: ['marketer'], userRoles: {}, headChefs: [], cxPending: [], drawerRecipeId: null
+  role: 'chef', roles: ['chef'], userRoles: {}, headChefs: [], cxPending: [], drawerRecipeId: null
 }
 
 /* ---------- helpers ---------- */
@@ -1097,7 +1097,7 @@ async function loadAll (silent) {
   if (tasks.status === 'fulfilled') state.tasks = tasks.value || []
   if (seg.status === 'fulfilled') state.segLevels = seg.value.levels || state.segLevels
   if (settings.status === 'fulfilled') state.settings = settings.value
-  if (role.status === 'fulfilled') { state.role = role.value.role || 'marketer'; state.roles = role.value.roles || [state.role]; state.headChefs = role.value.head_chefs || []; state.owner = role.value.owner }
+  if (role.status === 'fulfilled') { state.role = role.value.role || 'chef'; state.roles = role.value.roles || [state.role]; state.headChefs = role.value.head_chefs || []; state.owner = role.value.owner }
   if (pending.status === 'fulfilled') state.cxPending = pending.value || []
   if (cxg.status === 'fulfilled') state.cxGraph = cxg.value || null
   // owner -> the name their admin gave them, so nothing has to guess a name from an email (D96).
@@ -1125,9 +1125,8 @@ function updateRoleUI () {
   chip.classList.toggle('head-chef', isHead)
   // Who you are comes first. The role is how you are allowed to act, which is a
   // detail next to your name - and "head-chef" was never a thing here anyway.
-  const ROLE_LABEL = { 'head-chef': 'Hero Agent approver', admin: 'Admin', chef: 'Marketer', viewer: 'Read-only' }
   const who = auth.owner ? displayName(auth.owner) : 'Not signed in'
-  const roleText = ROLE_LABEL[state.role] || state.role
+  const roleText = roleLabel(state.role)
   chip.innerHTML = `<i data-lucide="${isHead ? 'sparkles' : 'user'}"></i> <b>${esc(who)}</b><span class="chip-role">${esc(roleText)}</span>`
   // D65: when signed in per-user, show who + a sign-out control.
   const signout = $('#signout-btn')
@@ -2005,9 +2004,9 @@ function renderSettings () {
         <label class="flabel" for="nu-name">Full name</label>
         <input class="field" id="nu-name" placeholder="Jesse Pinkman" style="max-width:320px">
         <label class="flabel" for="nu-id">Login id</label>
-        <input class="field" id="nu-id" placeholder="jesse.pinkman" autocapitalize="none" spellcheck="false" style="max-width:320px">
+        <input class="field" id="nu-id" placeholder="your.name" autocapitalize="none" spellcheck="false" style="max-width:320px">
         <label class="flabel" for="nu-email">Work email</label>
-        <input class="field" id="nu-email" type="email" placeholder="jesse.pinkman@tapcxm.com" autocapitalize="none" spellcheck="false" style="max-width:320px">
+        <input class="field" id="nu-email" type="email" placeholder="your.name@tapcxm.com" autocapitalize="none" spellcheck="false" style="max-width:320px">
         <label class="flabel" for="nu-pass">Password</label>
         <input class="field" id="nu-pass" placeholder="at least 8 characters" style="max-width:320px">
         <label class="flabel" for="nu-practice">Agent</label>
@@ -2018,7 +2017,7 @@ function renderSettings () {
       </div>
       <div class="rowbtns">
         <span class="sub" style="align-self:center">Roles:</span>
-        ${ASSIGNABLE_ROLES.map(r => `<label class="chip" style="cursor:pointer"><input type="checkbox" class="nu-role" value="${esc(r)}" ${r === 'marketer' ? 'checked' : ''} style="margin-right:6px">${esc(r)}</label>`).join('')}
+        ${ASSIGNABLE_ROLES.map(r => `<label class="chip" style="cursor:pointer"><input type="checkbox" class="nu-role" value="${esc(r)}" ${r === 'chef' ? 'checked' : ''} style="margin-right:6px">${esc(roleLabel(r))}</label>`).join('')}
       </div>
       <div class="rowbtns">
         <button class="btn" id="nu-gen"><i data-lucide="dice-5"></i> Suggest password</button>
@@ -2028,7 +2027,7 @@ function renderSettings () {
     </div>
     <div class="card section-gap" id="team-roles-card">
       <h3 class="head"><i data-lucide="users"></i> Team / Roles (admin)</h3>
-      <p class="help">Everyone is a <b>marketer</b>. A <b>head-chef</b> admits recipes into the Company CX Graph. An <b>admin</b> manages roles and settings.</p>
+      <p class="help">Everyone is a <b>Marketer</b>. A <b>Hero Agent approver</b> decides what the Hero Agent proposes is promoted into the Shared Knowledge Graph. An <b>Admin</b> manages roles and settings.</p>
       <div id="team-roles-body"><span class="sub">Loading…</span></div>
       <div class="rowbtns">
         <input class="field" id="team-add-owner" placeholder="user identity (email / username)" style="max-width:320px">
@@ -2044,7 +2043,11 @@ function renderSettings () {
 
 /* Team/Roles admin panel (D66). Lists known users with multi-select role chips; admin-only
    (the tools themselves also enforce admin server-side). */
-const ASSIGNABLE_ROLES = ['marketer', 'head-chef', 'admin']
+/* Role VALUES, matching the server's enum. Never display these raw - see ROLE_LABEL.
+   'chef' is the stored value; 'Marketer' is what a person reads. */
+const ASSIGNABLE_ROLES = ['chef', 'head-chef', 'admin']
+const ROLE_LABEL = { chef: 'Marketer', 'head-chef': 'Hero Agent approver', admin: 'Admin', viewer: 'Read-only' }
+const roleLabel = (r) => ROLE_LABEL[r] || r
 
 /* =====================================================================
    New-login handout (D81). The password is hashed server-side and never comes back, so this
@@ -2110,7 +2113,7 @@ Setup for ${user.display_name || user.id}
 Login id     ${user.id}
 Password     ${user.password}
 Email        ${user.email || 'not set'}
-Roles        ${(user.roles || ['marketer']).join(', ')}
+Roles        ${(user.roles || ['chef']).map(r => ({ chef: 'Marketer', 'head-chef': 'Hero Agent approver', admin: 'Admin', viewer: 'Read-only' })[r] || r).join(', ')}
 Domain       ${user.practice || 'not set'}
 Issued       ${new Date().toISOString().slice(0, 10)}
 
@@ -2320,18 +2323,18 @@ async function loadTeamRoles () {
   const owners = [...new Set([...Object.keys(state.userRoles), ...(data.head_chefs || []), ...(data.bootstrap_admins || []), state.owner].filter(Boolean))].sort()
   if (!owners.length) { body.innerHTML = '<span class="sub">No users yet.</span>'; refreshIcons(); return }
   body.innerHTML = owners.map(o => {
-    const roles = state.userRoles[o] || (o === 'service-account' || (data.bootstrap_admins || []).includes(o) ? ['marketer', 'head-chef', 'admin'] : (data.head_chefs || []).includes(o) ? ['marketer', 'head-chef'] : ['marketer'])
+    const roles = state.userRoles[o] || (o === 'service-account' || (data.bootstrap_admins || []).includes(o) ? ['chef', 'head-chef', 'admin'] : (data.head_chefs || []).includes(o) ? ['chef', 'head-chef'] : ['chef'])
     return `<div class="kv" data-owner-row="${esc(o)}" style="align-items:center; gap:10px">
       <span class="v" style="flex:1; font-weight:600">${esc(o)}${o === state.owner ? ' <span class="sub">(you)</span>' : ''}</span>
-      <span style="display:flex; gap:6px; flex-wrap:wrap">${ASSIGNABLE_ROLES.map(r => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-role-cb="${esc(o)}" value="${r}" ${roles.includes(r) ? 'checked' : ''} ${r === 'marketer' ? 'disabled' : ''}> ${r}</label>`).join('')}</span>
+      <span style="display:flex; gap:6px; flex-wrap:wrap">${ASSIGNABLE_ROLES.map(r => `<label class="chip" style="cursor:pointer"><input type="checkbox" data-role-cb="${esc(o)}" value="${r}" ${roles.includes(r) ? 'checked' : ''} ${r === 'chef' ? 'disabled' : ''}> ${esc(roleLabel(r))}</label>`).join('')}</span>
       <button class="btn tiny" data-save-roles="${esc(o)}"><i data-lucide="save"></i> Save</button>
     </div>`
   }).join('')
   refreshIcons()
 }
 async function saveUserRoles (owner) {
-  const roles = [...document.querySelectorAll(`[data-role-cb="${CSS.escape(owner)}"]`)].filter(c => c.checked || c.value === 'marketer').map(c => c.value)
-  try { await callTool('set_user_roles', { owner, roles: [...new Set(['marketer', ...roles])] }); toast(`Roles saved for ${owner}`); await loadTeamRoles() } catch (e) { banner(`Save failed: ${e.message}`) }
+  const roles = [...document.querySelectorAll(`[data-role-cb="${CSS.escape(owner)}"]`)].filter(c => c.checked || c.value === 'chef').map(c => c.value)
+  try { await callTool('set_user_roles', { owner, roles: [...new Set(['chef', ...roles])] }); toast(`Roles saved for ${owner}`); await loadTeamRoles() } catch (e) { banner(`Save failed: ${e.message}`) }
 }
 async function saveSettings () {
   const retention_days = Number($('#set-retention').value)
@@ -2986,7 +2989,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('#team-add-btn')) {
     const inp = $('#team-add-owner'); const owner = (inp.value || '').trim()
     if (!owner) { banner('Enter a user identity to add'); return }
-    callTool('set_user_roles', { owner, roles: ['marketer'] }).then(() => { inp.value = ''; toast(`Added ${owner}`); loadTeamRoles() }).catch(err => banner(err.message))
+    callTool('set_user_roles', { owner, roles: ['chef'] }).then(() => { inp.value = ''; toast(`Added ${owner}`); loadTeamRoles() }).catch(err => banner(err.message))
     return
   }
   // Create-login card (D81)

@@ -43,9 +43,10 @@
         "    That single wrong name is why every intake step fails while still reporting completed.",
         "  * Agent 3's AEP tools are all present: adobe_create_segment_estimate, adobe_get_segment_estimate,",
         "    adobe_list_schemas, adobe_get_schema, adobe_list_segments.",
-        "  * NO Workfront tools are deployed. /mcp/workfront/* return zero tools, and no wf_* name appears",
-        "    among the 238. Agent 1 and Agent 2's Workfront allowlists therefore reference tools that do",
-        "    not exist yet, which blocks Agent 2 posting a redraft via wf_comments_create."
+        "  * The Workfront routes are NOT deployed at this gateway: /mcp/workfront/core, /comments,",
+        "    /search and /metadata all return HTTP 404 'Not Found'. template.yaml in chaunceyplum/mcp",
+        "    declares all eight of them, so the deployed stack is behind the repo, or they live behind",
+        "    a different API. Nothing can call wf_* here until that is resolved."
       ],
       "mcp_endpoint": "https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp",
       "mcp_verified": "2026-09-16"
