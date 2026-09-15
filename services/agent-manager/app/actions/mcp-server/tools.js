@@ -67,6 +67,7 @@ const usersLib = require('../../lib/auth/users')
 const cxGraph = require('../../lib/cx-graph')
 const agentSystems = require('../../lib/agent-systems')
 const narrate = require('../../lib/narrate')
+const mcpServers = require('../../lib/mcp-servers')
 const approvalConfig = require('../../config/approval.json')
 
 const TASK_STATUSES = ['open', 'in_progress', 'done']
@@ -213,7 +214,9 @@ const WRITE_TOOLS = new Set([
     'rebuild_cx_graph', 'purge_expired', 'admin_reset_data',
     'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_recipe', 'assign_step', 'unassign_step', 'set_user_display_name',
     // Starts a run upstream AND writes the captured run here.
-    'start_intake'
+    'start_intake',
+    // Changes which MCP servers agents can reach.
+    'set_mcp_server'
 ])
 
 /** Guides any connected AI on reuse-first + capture behavior (MCP `initialize` instructions). */
@@ -1286,6 +1289,86 @@ function registerTools (server, context = {}) {
                     ms: st.duration_ms
                 }))
             })
+        }
+    )
+
+    /* -----------------------------------------------------------------
+       MCP servers. Adobe ships one per product - Workfront, AEM, AEP -
+       and more will arrive. Each is a registry entry with an endpoint,
+       editable here and in Settings, never a branch in code.
+       ----------------------------------------------------------------- */
+
+    server.tool(
+        'list_mcp_servers',
+        'List the MCP servers Agent Manager can reach - Workfront, AEM, AEP and any other. Shows each one\'s endpoint, domain, whether it is active and whether its credential is configured. Never returns the credential itself.',
+        {},
+        async () => {
+            const overrides = settings.mcpServers()
+            const servers = mcpServers.listSafe(overrides)
+            return jsonResult(servers.map(s => ({
+                ...s,
+                ready: mcpServers.readiness(mcpServers.get(s.id, overrides)).ready,
+                blocked_because: mcpServers.readiness(mcpServers.get(s.id, overrides)).reason
+            })))
+        }
+    )
+
+    server.tool(
+        'set_mcp_server',
+        'ADMIN: add or update an MCP server. Use this to point Agent Manager at a new Adobe MCP - Workfront, AEM, AEP - without a deploy. Only the fields you pass are changed. Put real tokens in the environment and reference them as ${ENV_VAR} rather than pasting them here.',
+        {
+            id: z.string().min(1).describe('Stable key, e.g. workfront-adobe'),
+            label: z.string().optional().describe('What people see'),
+            practice: z.string().optional().describe('Domain it belongs to: workfront | aep | aem'),
+            endpoint: z.string().optional().describe('Base URL of the MCP server'),
+            auth: z.string().optional().describe('Authorization header value, or ${ENV_VAR} to read it from the environment. Blank when the server owns auth.'),
+            instance: z.string().optional().describe('Tenant, where the server needs one (Workfront)'),
+            active: z.boolean().optional().describe('Off leaves it registered but unused')
+        },
+        async (args) => {
+            if (!callerHasRole(context, 'admin')) {
+                return errorResult('Only an admin may change MCP servers.')
+            }
+            const overrides = settings.mcpServers()
+            const existing = overrides.find(s => s.id === args.id) || { id: args.id }
+            const merged = { ...existing }
+            for (const [k, v] of Object.entries(args)) if (v !== undefined) merged[k] = v
+
+            const next = overrides.filter(s => s.id !== args.id).concat([merged])
+            const current = await store.getSettingsOverride()
+            const stored = await store.saveSettingsOverride({ ...current, mcp_servers: next })
+            settings._setCache(stored)
+
+            const resolved = mcpServers.get(args.id, next)
+            const state = mcpServers.readiness(resolved)
+            return jsonResult({
+                saved: mcpServers.listSafe(next).find(s => s.id === args.id),
+                ready: state.ready,
+                blocked_because: state.reason
+            })
+        }
+    )
+
+    server.tool(
+        'check_mcp_server',
+        'Ask an MCP server what tools it exposes. Use it to verify a server actually answers before pointing an agent at it, and to find the real name of a tool rather than guessing one.',
+        {
+            id: z.string().min(1).describe('The server id, from list_mcp_servers'),
+            contains: z.string().optional().describe('Only return tool names containing this string')
+        },
+        async ({ id, contains }) => {
+            const overrides = settings.mcpServers()
+            const srv = mcpServers.get(id, overrides)
+            if (!srv) return errorResult(`No MCP server registered with id '${id}'`)
+            try {
+                const tools = await mcpServers.listTools(srv)
+                const names = tools.map(t => t.name).filter(n => !contains || n.includes(contains))
+                return jsonResult({ id, endpoint: srv.endpoint, tool_count: tools.length, tools: names.slice(0, 200) })
+            } catch (e) {
+                // Reported as a failure, not as an empty list. An unreachable
+                // server and a server with no tools are different problems.
+                return errorResult(`${id} did not answer: ${e.message}`)
+            }
         }
     )
 

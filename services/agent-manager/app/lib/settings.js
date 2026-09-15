@@ -192,6 +192,17 @@ function practices () {
         .filter(Boolean)
 }
 
+/**
+ * MCP server overrides (Workfront, AEM, AEP, ...). Settings wins over the
+ * seeded config, by id, so an admin can point at a new Adobe MCP without a
+ * deploy. Returns [] when nothing has been overridden.
+ * @returns {object[]}
+ */
+function mcpServers () {
+    const override = cache && cache.mcp_servers
+    return Array.isArray(override) ? override : []
+}
+
 /** @returns {string[]} the valid practice ids */
 function practiceIds () {
     return practices().map(p => p.id)
@@ -264,6 +275,7 @@ module.exports = {
     rolesFor,
     practices,
     practiceIds,
+    mcpServers,
     userPracticesMap,
     practicesForOwner,
     defaultPracticeFor,

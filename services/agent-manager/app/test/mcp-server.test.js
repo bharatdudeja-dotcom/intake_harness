@@ -287,7 +287,10 @@ describe('MCP Server - Company Connector', () => {
             expect(toolNames).toContain('list_system_agents')
             expect(toolNames).toContain('start_intake')
             expect(toolNames).toContain('get_intake')
-            expect(toolNames).toHaveLength(64)
+            expect(toolNames).toContain('list_mcp_servers')
+            expect(toolNames).toContain('set_mcp_server')
+            expect(toolNames).toContain('check_mcp_server')
+            expect(toolNames).toHaveLength(67)
         })
 
     })
