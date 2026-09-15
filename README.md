@@ -115,19 +115,24 @@ changes.
 
 ## Least privilege: scoping tools and context per agent
 
-Three developers, three routes, one shared MCP endpoint with 238+ tools —
-without scoping, any agent could call any tool or read any other agent's
-raw output. `src/lib/pipeline/registry.ts` is where each agent's
-permissions are declared, and both are enforced, not just documented:
+Three developers, three routes, and — as of chaunceyplum/mcp#34 — **15
+separate MCP Lambdas** (the original 238-tool AEC server plus 9 Workfront
+and 5 Fusion servers, see the route table atop `src/lib/mcp-client.ts`).
+Without scoping, any agent could call any tool on any of those 15 servers,
+or read any other agent's raw output. `src/lib/pipeline/registry.ts` is
+where each agent's permissions are declared, and both are enforced, not
+just documented:
 
-- **`allowedTools`** — the MCP tool names a task may call.
-  `src/lib/mcp-client.ts`'s `callMcpTool(taskId, name, args)` checks the
-  caller's `taskId` against this list before the request ever leaves the
-  process; a call to a tool outside it throws immediately. Since agent
-  routes don't hold `MCP_ENDPOINT_URL` credentials of their own — they only
-  reach the MCP Lambda through this one function — there's no way around
-  the check short of editing the registry. A denied call bubbles up as a
-  normal agent failure, so it lands in `task_runs.status = 'failed'`
+- **`allowedTools`** — the MCP tool names a task may call, regardless of
+  which of the 15 servers actually serves them. `src/lib/mcp-client.ts`'s
+  `callMcpTool(taskId, name, args)` checks the caller's `taskId` against
+  this list, then resolves the correct server from the tool name's prefix
+  (`wf_core_*` → workfront-core, `fusion_scenario_*` → fusion-scenarios,
+  etc.) — the request never leaves this process if the tool isn't allowed.
+  Since agent routes don't hold Lambda credentials of their own — they only
+  reach any of these servers through this one function — there's no way
+  around the check short of editing the registry. A denied call bubbles up
+  as a normal agent failure, so it lands in `task_runs.status = 'failed'`
   automatically (see Observability above) rather than failing silently.
 - **`contextAccess`** — which prior agents' outputs a task may see via
   `priorOutputs`, beyond its own immediate `input` (always just the
@@ -136,14 +141,24 @@ permissions are declared, and both are enforced, not just documented:
   HTTP call — an agent's request body never contains a key it isn't scoped
   to see.
 
-Current allowlists (Intake and Review are placeholders pending real logic;
-tighten or widen as each agent's actual needs become concrete):
+Current allowlists — **Intake and Review's Workfront tools are a first
+draft**, not a confirmed final scope. They're a least-privilege guess at
+what B1/B2 in the requirements doc need (create/read the work request;
+read/update + comment during triage), picked from the real tool names in
+`mcp_server/workfront/servers/core/tools/core.py` and
+`.../comments/tools/comments.py`. Confirm the actual Workfront object model
+this team uses before treating these as final:
 
 | Task | `allowedTools` | `contextAccess` |
 |---|---|---|
-| `intake` | `search_knowledge_base` | *(none)* |
-| `review` | `search_knowledge_base` | *(none)* |
+| `intake` | `search_knowledge_base`; `wf_core_project_{list,get,create}`; `wf_core_issue_{list,get,create}` | *(none)* |
+| `review` | `search_knowledge_base`; `wf_core_project_{get,update}`; `wf_core_issue_{get,update}`; `wf_comments_{list,create}` | *(none)* |
 | `audience_creation` | `search_knowledge_base`, segment estimate/CRUD, schema read | *(none)* |
+
+Note what's deliberately absent: no `_delete` tool anywhere, no Fusion
+tools for either Workfront-scoped agent (Fusion is workflow automation, not
+work-item data), and no `wf_users_*`/`wf_planning_*`/etc. — add them only
+when a real implementation needs that specific server.
 
 `contextAccess` is empty for all three today because none of the current
 stubs read `priorOutputs` at all — each agent's `input` already carries
@@ -151,12 +166,6 @@ everything the previous agent produced. Widen a task's `contextAccess`
 only when its real implementation needs to look back further than its
 immediate `input` (e.g. Audience Creation wanting Intake's original,
 untransformed grounding rather than whatever Review passed along).
-
-**Open item — Workfront:** the chaunceyplum/mcp tool registry doesn't have
-a Workfront module yet (today's tools are Adobe AEP/Reactor/CJA, AWS,
-Databricks, Snowflake, GitHub). If Intake and/or Review need Workfront
-access, that module needs to be added server-side first — the `allowedTools`
-entries above have a `TODO(Workfront)` marker for exactly this.
 
 ## Setup
 

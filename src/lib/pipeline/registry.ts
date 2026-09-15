@@ -23,11 +23,14 @@ export interface AgentDefinition {
    * that way), so a scoping violation is visible in observability, not a
    * silent hole.
    *
-   * TODO(Workfront): Workfront tools aren't in the chaunceyplum/mcp tool
-   * registry yet — today's tools are Adobe AEP/Reactor/CJA, AWS,
-   * Databricks, Snowflake, and GitHub (see mcp_server/lambda_handler.py in
-   * that repo). Add a Workfront tool module there first, then replace
-   * these placeholders with the real tool names.
+   * Workfront/Fusion tools now exist in chaunceyplum/mcp (14 servers under
+   * mcp_server/workfront/servers/, each its own Lambda route — see the
+   * route table atop src/lib/mcp-client.ts). The lists below are a DRAFT
+   * first pass, not a confirmed final scope: they're least-privilege
+   * guesses at what Intake/Review need for B1/B2 in the requirements doc
+   * (create/read the work request; read/update it during triage), not a
+   * sign-off on the real Workfront object model this team uses. Confirm
+   * and adjust before treating these as final.
    */
   allowedTools: string[];
   /**
@@ -46,9 +49,19 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/intake",
     label: "Agent 1 — Intake",
     owner: "Dev 1",
-    // TODO(Workfront): swap in the real Workfront intake-queue tool names
-    // once that module exists server-side.
-    allowedTools: ["search_knowledge_base"],
+    // Workfront only (workfront-core), per the stated split: create the
+    // work request from the marketer's brief (B1), and list/get to check
+    // for an existing duplicate before creating one. No update/delete —
+    // intake shouldn't be able to modify or remove existing records.
+    allowedTools: [
+      "search_knowledge_base",
+      "wf_core_project_list",
+      "wf_core_project_get",
+      "wf_core_project_create",
+      "wf_core_issue_list",
+      "wf_core_issue_get",
+      "wf_core_issue_create",
+    ],
     contextAccess: [], // first in the pipeline — nothing prior to see
   },
   {
@@ -56,10 +69,19 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/review",
     label: "Agent 2 — Review / Triage",
     owner: "Dev 2",
-    // TODO(Workfront): review-queue rejections (B2 in the requirements doc)
-    // likely live in Workfront — add its tool names here once available,
-    // alongside whatever AEP validation tools this agent ends up needing.
-    allowedTools: ["search_knowledge_base"],
+    // Workfront (workfront-core + workfront-comments) plus other stuff, per
+    // the stated split: read/update the work request while triaging a
+    // rejection (B2), and read/post comments — that's where a rejection
+    // reason and the redraft explanation most likely live.
+    allowedTools: [
+      "search_knowledge_base",
+      "wf_core_project_get",
+      "wf_core_project_update",
+      "wf_core_issue_get",
+      "wf_core_issue_update",
+      "wf_comments_list",
+      "wf_comments_create",
+    ],
     // Empty today: this stub doesn't read priorOutputs at all, and its
     // `input` already IS intake's output. Widen this only when a real
     // implementation needs to look back further than its immediate input.

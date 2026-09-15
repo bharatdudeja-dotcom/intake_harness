@@ -1,12 +1,46 @@
 /**
- * Thin JSON-RPC 2.0 client for the deployed AEC MCP Lambda that lives in the
- * chaunceyplum/mcp repo (see mcp_server/lambda_handler.py there). Every agent
- * route here should go through this instead of talking to Postgres, Adobe,
- * Databricks, or Snowflake directly — that Lambda already owns auth (Adobe
- * IMS, SSM-resolved credentials) and the RAG/pgvector layer.
+ * Thin JSON-RPC 2.0 client for the MCP Lambdas deployed from chaunceyplum/mcp.
+ * Every agent route here should go through this instead of talking to
+ * Postgres, Adobe, Workfront, Databricks, or Snowflake directly — those
+ * Lambdas already own auth (Adobe IMS, Workfront IMS, SSM-resolved
+ * credentials) and the RAG/pgvector layer.
  *
- * Endpoint contract:
- *   POST {MCP_ENDPOINT_URL}   body: { jsonrpc: "2.0", method, params, id }
+ * That repo is actually MULTIPLE Lambdas behind one API Gateway
+ * (template.yaml — they all share one implicit HttpApi, just different
+ * routes):
+ *   /mcp                       — the original AEC server: 238 Adobe/AWS/
+ *                                 Databricks/Snowflake/GitHub tools, no
+ *                                 shared name prefix.
+ *   /mcp/workfront/core        — wf_core_*        (portfolios, programs,
+ *                                 templates, projects, tasks, issues)
+ *   /mcp/workfront/users       — wf_users_*        (companies, roles, users,
+ *                                 teams, resource pools, allocations)
+ *   /mcp/workfront/documents   — wf_docs_*         (folders, documents,
+ *                                 versions, approvals, webhooks)
+ *   /mcp/workfront/time-approval — wf_time_*       (approval paths,
+ *                                 timesheets, hour entries, approvals)
+ *   /mcp/workfront/metadata    — wf_metadata_*     (custom fields/forms)
+ *   /mcp/workfront/search      — wf_search_*       (object/generic search,
+ *                                 named queries, saved reports)
+ *   /mcp/workfront/comments    — wf_comments_*     (comments, replies,
+ *                                 reactions)
+ *   /mcp/workfront/planning    — wf_planning_*     (Planning workspaces,
+ *                                 record types, fields, views, records)
+ *   /mcp/workfront/misc        — wf_misc_*         (notes, messages, report
+ *                                 defs, calendars, prefs, config, journal)
+ *   /mcp/fusion/org            — fusion_org_*      (organizations, teams,
+ *                                 Fusion users)
+ *   /mcp/fusion/connections    — fusion_conn_*     (app connections)
+ *   /mcp/fusion/hooks          — fusion_hook_*     (webhooks/triggers)
+ *   /mcp/fusion/scenarios      — fusion_scenario_* (scenario CRUD/execute)
+ *   /mcp/fusion/executions     — fusion_exec_*     (execution history/logs)
+ *
+ * resolveMcpPath() below picks the right route from the tool name's prefix,
+ * so callers just pass a tool name — they never need to know or care which
+ * of the 15 Lambdas actually serves it.
+ *
+ * Endpoint contract (same for all 15):
+ *   POST {route}   body: { jsonrpc: "2.0", method, params, id }
  *   methods: "initialize" | "tools/list" | "tools/call"
  *   tools/call params: { name: <tool name>, arguments: <object> }
  *
@@ -16,14 +50,36 @@
  *
  * Least privilege: callMcpTool requires the caller's taskId and checks it
  * against that task's `allowedTools` in src/lib/pipeline/registry.ts before
- * the request ever leaves this process. The MCP Lambda itself has no
+ * the request ever leaves this process. None of these Lambdas has any
  * concept of "which agent is calling" — this is the only enforcement point,
- * so every agent route MUST call through here rather than hitting
- * MCP_ENDPOINT_URL directly.
+ * so every agent route MUST call through here rather than hitting an MCP
+ * route directly.
  */
 
 import { PIPELINE } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
+
+const MCP_SERVER_ROUTES: Array<{ prefix: string; path: string }> = [
+  { prefix: "wf_core_", path: "/mcp/workfront/core" },
+  { prefix: "wf_users_", path: "/mcp/workfront/users" },
+  { prefix: "wf_docs_", path: "/mcp/workfront/documents" },
+  { prefix: "wf_time_", path: "/mcp/workfront/time-approval" },
+  { prefix: "wf_metadata_", path: "/mcp/workfront/metadata" },
+  { prefix: "wf_search_", path: "/mcp/workfront/search" },
+  { prefix: "wf_comments_", path: "/mcp/workfront/comments" },
+  { prefix: "wf_planning_", path: "/mcp/workfront/planning" },
+  { prefix: "wf_misc_", path: "/mcp/workfront/misc" },
+  { prefix: "fusion_org_", path: "/mcp/fusion/org" },
+  { prefix: "fusion_conn_", path: "/mcp/fusion/connections" },
+  { prefix: "fusion_hook_", path: "/mcp/fusion/hooks" },
+  { prefix: "fusion_scenario_", path: "/mcp/fusion/scenarios" },
+  { prefix: "fusion_exec_", path: "/mcp/fusion/executions" },
+];
+
+/** Everything without a wf_ or fusion_ prefix is one of the original 238 AEC tools. */
+function resolveMcpPath(toolName: string): string {
+  return MCP_SERVER_ROUTES.find((r) => toolName.startsWith(r.prefix))?.path ?? "/mcp";
+}
 
 export class McpError extends Error {
   constructor(
@@ -49,7 +105,13 @@ interface ToolCallResult {
   [key: string]: unknown;
 }
 
-function getEndpoint(): string {
+/**
+ * All 15 Lambdas share one API Gateway (template.yaml's implicit
+ * ServerlessHttpApi), so the base domain is derived from MCP_ENDPOINT_URL
+ * (the original .../mcp AEC endpoint) by stripping its trailing /mcp —
+ * no separate env var needed per Workfront/Fusion server.
+ */
+function getApiBase(): string {
   const url = process.env.MCP_ENDPOINT_URL;
   if (!url) {
     throw new McpError(
@@ -57,7 +119,11 @@ function getEndpoint(): string {
         "and paste in the McpEndpointUrl SAM output from the chaunceyplum/mcp deployment.",
     );
   }
-  return url;
+  return url.replace(/\/mcp\/?$/, "");
+}
+
+function getEndpointForTool(toolName: string): string {
+  return `${getApiBase()}${resolveMcpPath(toolName)}`;
 }
 
 let requestCounter = 0;
@@ -96,7 +162,7 @@ export async function callMcpTool<T = unknown>(
 
   let res: Response;
   try {
-    res = await fetch(getEndpoint(), {
+    res = await fetch(getEndpointForTool(name), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
