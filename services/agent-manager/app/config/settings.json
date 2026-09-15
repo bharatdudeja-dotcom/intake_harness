@@ -1,0 +1,34 @@
+{
+    "retention_days": 30,
+    "head_chefs": [
+        "service-account"
+    ],
+    "user_roles": {},
+    "practices": [
+        {
+            "id": "aem",
+            "label": "AEM"
+        },
+        {
+            "id": "aep",
+            "label": "AEP / Real-Time CDP"
+        },
+        {
+            "id": "braze",
+            "label": "Braze"
+        },
+        {
+            "id": "campaign",
+            "label": "Adobe Campaign"
+        },
+        {
+            "id": "decisioning",
+            "label": "Decisioning & Personalization"
+        },
+        {
+            "id": "security",
+            "label": "Security & IT Governance"
+        }
+    ],
+    "user_practices": {}
+}

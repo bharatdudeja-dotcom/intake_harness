@@ -1,0 +1,13 @@
+node_modules
+coverage
+dist
+.git
+.env
+*.local.json
+*.local.md
+.aws.tmp.creds.json
+.keys.env.tmp
+.parcel-cache
+.aio
+test
+validation

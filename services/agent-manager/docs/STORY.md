@@ -1,106 +1,145 @@
-# STORY.md — the Agentic Hero's Journey, as this product uses it
+# STORY.md
 
-Source: *Agentic Hero's Journey Master Presentation*, TAP CXM (Josh Smith), read
-15 September 2026. Plus Josh's and Bharat's own reading in chat that same day,
-which settles two things the deck leaves open.
+The Agentic Hero's Journey, as Josh Smith actually wrote it, and how Agent
+Manager uses it.
 
-The framework is a **useful analogy, not a taxonomy to implement exhaustively**.
-Bharat: *"we don't need to map all of it."* What follows is the part that earns
-its place in the product, and nothing more.
+**Source:** *Agentic Hero's Journey Master Presentation*, TAP CXM (Josh Smith).
+Read directly. This file replaces the beats I previously inferred — see
+`docs/BRAIN-GAP.md` §3 for what was wrong and why.
+
+**Still unread:** *Story Coach Report 2*, *It's Not Magic, It's Method — TAP
+Analyst Playbook*, *TAP Story Coach (Claude Skill)*. If any of them contradicts
+this file, they win.
 
 ---
 
 ## Who is who
 
-The deck lists Hero, Ally and Trickster as the three agentic roles, with seven
-human mentor roles around them. Josh and Bharat then made it sharper, and this
-is the reading the product uses:
+Josh's deck lists Hero, Ally and Trickster as the three agentic roles, with
+seven human mentor roles around them. Josh and Bharat then sharpened it, and
+this is what the product uses:
 
-| Role | Who | Where it lives in the build |
+| Role | Who | Where it lives |
 |---|---|---|
-| **Hero** | **The data.** Not a person, not an agent. | The append-only event log. What accumulates across runs *is* the hero. |
-| **Author** | **The humans, collectively.** They edit and approve artifacts as the process runs. | `users.is_human`, gate decisions, `graph_nodes.promoted_by` |
-| **Mentor** | Agent that carries what previous runs learned and hands it over | `mentor/curator.py`, agent role `mentor` |
-| **Ally** | Agent that extends what the hero can do — prep, enrichment | Intake, Audience Creation |
-| **Trickster** | Agent that introduces friction deliberately — adversarial checks | Review/Triage, Escalation |
+| **Hero** | **The data.** Not a person, not an agent. What accumulates. | The append-only event log |
+| **Author** | **The humans, collectively.** They edit and approve the artifacts. | `users.is_human`, gate decisions, `promoted_by` |
+| **Hero Agent** | Carries what earlier runs learned and hands it over when needed. **Proposes only.** | Where the cookbook let a head chef approve |
+| **Ally** | Extends what the hero can do — prep, enrichment | Intake, Audience Creation |
+| **Trickster** | Introduces friction deliberately — adversarial checks | Review/Triage, Escalation |
 
 Deck principle 3 states it outright: *"The data is the hero; the team is the
-author."* That is why **the brief's "Hero Agent" is called the Mentor Agent
-here.** The brief already described it as *"the mentor who accompanies the hero,
-carries what every previous hero learned, and hands it over at the moment it is
-needed"* — which is Vogler's Mentor exactly: *"all the characters who teach and
-protect heroes and give them gifts."* Only the label changed, and it changed so
-that "hero" can mean the data, consistently, everywhere.
+author."* That is why the curating agent is the **Hero Agent** and not a mentor:
+"hero" has to mean one thing everywhere, and the deck already decided what.
 
 The seven human mentor roles — visionary, governor, steward, driver, informer,
-gate keeper, facilitator — are `AUTHOR_ROLES` in `journey/model.py`, and a
-stage's `approver_role` names which one signs off. Gate Keeper is the default:
+gate keeper, facilitator — are the `AUTHOR_ROLES`. Gate Keeper is the default:
 *"approves what crosses each threshold into production."*
 
 ## Stages are artifacts
 
-Bharat: *"to me, the stages in each act are the digital artifacts."* Josh: *"True,
-I agree."*
+Bharat: *"to me, the stages in each act are the digital artifacts."*
+Josh: *"True, I agree."*
 
-This is the single most load-bearing idea in the whole build, because it makes
-the framework executable rather than decorative. Each stage in
-`config/journey.*.yaml` names the artifact it produces, the agent role that
-plays it, and the human role that authors or approves it. The dashboard's stage
-badges are those artifacts, and a gate is the Author editing one.
+This is the load-bearing idea, because it makes the framework executable rather
+than decorative. Each stage names the artifact it produces, the agent role that
+plays it, and the human role that approves it.
 
-## The arc
+---
 
-| Act | Deck's intent | What it is here |
+## The beats, exactly as Josh has them
+
+**Corrected.** I previously used "Meeting with the Mentor" — that is Vogler's
+Act 1 beat and it is not in Josh's deck. I also put "Belly of the Whale" in
+Act 2; Josh closes Act 1 with it.
+
+### Prologue — Setting the Stage
+*Vision, cost and value made visible before any agent is introduced.*
+
+| Beat | Deliverable | Framework |
 |---|---|---|
-| **Prologue** — Setting the Stage | Vision, cost and value made visible before any agent is introduced | The marketer's raw brief, event 0, captured verbatim |
-| **Act 1 · Separation** | First agents enter a still-manual system; *"does the data exist, is it accessible, what does it mean?"* | Intake and grounding |
-| **Act 2 · Initiation** | Agents coordinate; cohesion becomes the real work | Review, audience creation, the Workfront write, escalation |
-| **Act 3 · Return** | *"Return with new mastery."* Humans move from operating agents to governing them | Proposal and promotion into the knowledge graph |
+| The Dream | Goals, Objectives, Moments & Outcomes; Use Case Narratives | VSMO · UML |
+| Cost Landscape | Data Architecture; System Architecture | DAMA-DMBOK + Microservices |
+| Value Landscape | Value-Based Outcomes; VBO Hierarchy | TAP CXM proprietary |
+| The Plan for Separation | Ideal Business Case; Prioritized Use Cases; Roadmap | TAP CXM proprietary |
 
-**Act 3 is the product.** Bharat: *"I think we always position the data as the
-hero agent as the recursive learning is the Act 3 'return with new mastery' —
-realizing the dream of a truly recursive learning closed loop system."*
+### Act 1 · Separation
+*First agents enter a still-manual system. "Does the data exist, is it
+accessible, and what does it mean?"*
 
-A run that ends with a submitted Workfront request and teaches the organisation
-nothing has not finished Act 3. That is why `promotion` is a stage with a gate
-on it and not a reporting view.
+Call to Adventure · Refusal of the Call · Supernatural Aid ·
+Crossing the Threshold · Belly of the Whale
 
-## The four guiding principles, and where each one is enforced
+### Act 2 · Initiation
+*Multiple agents coordinate for the first time. Cohesion becomes the real work.*
+
+Road of Trials · Meeting w/ the Goddess · Woman as Temptress ·
+Atonement w/ the Father · Apotheosis · Ultimate Boon
+
+### Act 3 · Return
+*"Return with new mastery." Humans move from operating agents to governing them.*
+
+Magic Flight · Crossing the Return Threshold · Master of the Two Worlds
+
+**Act 3 is the product.** Bharat: *"the recursive learning is the Act 3 'return
+with new mastery' — realizing the dream of a truly recursive learning closed
+loop system."* A run that submits a request and teaches the organisation nothing
+has not finished Act 3.
+
+---
+
+## The naming problem, unresolved
+
+Two of Josh's Act 2 beats are Campbell's originals: **"Woman as Temptress"** and
+**"Atonement w/ the Father"**. Correct scholarship, and fine in a methodology
+deck.
+
+They are not fine as headings on a dashboard a Comcast marketer opens daily.
+
+**Recommendation:** keep Josh's beats as the internal methodology, and give the
+UI plain stage names taken from the process itself. The story earns the sale;
+the dashboard has to survive daily use by someone who was not in the session.
+`config/` carries both, so this is a label swap and not a rebuild.
+
+**This is Bharat and Josh's decision, not mine.** Until it is made, the UI uses
+the process names below and the beats stay in this file.
+
+### The working mapping
+
+Josh's beats against David Ross's numbered process, with the plain UI label.
+
+| Act | Josh's beat | Process step | UI label | Agent |
+|---|---|---|---|---|
+| Prologue | The Dream | 1.1 marketer's prompt | **Brief** | — |
+| Act 1 | Call to Adventure | 1.2 build intake | **Intake** | Intake |
+| Act 1 | Supernatural Aid | 1.2 grounding in AEP schemas | **Grounding** | Intake |
+| Act 1 | Refusal of the Call | 1.2a bounce back to marketer (B1) | **Clarification** | Intake |
+| Act 2 | Road of Trials | 1.5a rejection and rework (B2) | **Triage** | Review |
+| Act 2 | Meeting w/ the Goddess | 2.3–2.7 audience build (B3, B4) | **Audience Build** | Audience Creation |
+| Act 2 | Atonement w/ the Father | 3.1 FAC vs rule builder (B5) | **Build Route** | Audience Creation |
+| Act 2 | Apotheosis | 3.3–3.5 counts and approval (B6) | **Count Validation** | Audience Creation |
+| Act 2 | Ultimate Boon | 3.2 activation to channels | **Activation** | — |
+| Act 3 | Magic Flight | 4.1–4.4 reconciliation (B7, B8) | **Reconciliation** | — |
+| Act 3 | Crossing the Return Threshold | 4.6 escalation classified (B9) | **Escalation** | Escalation |
+| Act 3 | Master of the Two Worlds | promotion into the shared graph | **Promotion** | Hero Agent proposes; a human decides |
+
+Two things this mapping makes visible:
+
+- **Act 3 has no agent owner in Chauncey's system.** B7, B8 and B9 are
+  unclaimed or unassigned. That is Agent Manager's territory.
+- **"Belly of the Whale" and "Woman as Temptress" have no process step.** Rather
+  than invent one, they are left unmapped. An honest gap beats a forced fit.
+
+---
+
+## The four principles, and where each is enforced
 
 1. **Performance is variable, and must be discovered.** No metric is cached into
    its own table; every figure derives from events at read time.
 2. **Diversity of tests drives performance.** The registry is dynamic and the
-   journey is data, so adding an agent or a stage does not require a deploy.
-3. **The data is the hero; the team is the author.** The event log is
-   append-only; the humans decide.
-4. **Governance-through-transparency is the precondition.** *"No agent gets
-   more autonomy than the organization can see, explain, and correct."* This is
-   the reason the Mentor Agent has no promotion code path, and the reason a
-   stage badge is derived from evidence rather than from an upstream status
-   field.
-
-## Reusability — why the process is data
-
-Bharat: *"we should be able to take any as-is process, imagine a future process
-and feed it into this solution we're building. should be highly reusable."*
-
-So the process is a YAML file, not code:
-
-- `config/journey.*.yaml` — acts, stages, artifacts, approver roles, gates
-- `config/artifact.*.yaml` — the fields of an artifact and what makes it complete
-- `config/agents.yaml` — which agents exist, discovered live where possible
-- `config/workfront.yaml` — the system-of-record object model
-
-Nothing in `src/` names an act, a stage, an agent or a client. To onboard a
-different process — a different client, a different as-is-to-future-state
-mapping — write those files and restart. The maturity ladder on deck slide 17
-(L0–L4) is the honest way to say which act a given client's process is
-currently in, and the journey file is where that judgement gets written down.
-
-## Still open
-
-The other three files are still unread: the *Story Coach Report 2*, the *TAP
-Analyst Playbook*, and the *TAP Story Coach (Claude Skill)* zip. The master
-presentation was enough to fix the naming and the arc. If the Story Coach report
-contradicts anything above, it wins — correct this file and the journey YAML
-together, since the UI reads its language from the YAML.
+   process is data, so adding an agent or a stage needs no deploy.
+3. **The data is the hero; the team is the author.** The log is append-only; the
+   humans decide.
+4. **Governance-through-transparency is the precondition.** *"No agent gets more
+   autonomy than the organization can see, explain, and correct."* This is why
+   the Hero Agent has no promotion code path, and why a stage badge is derived
+   from evidence rather than from an upstream status field.

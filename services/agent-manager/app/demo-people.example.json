@@ -1,0 +1,60 @@
+{
+  "_comment": "Template for validation/seed-logins.mjs. Copy to demo-people.local.json (git-ignored) and set a real password for each person. NEVER put passwords in this example file - it IS committed.",
+  "_usage": "cp demo-people.example.json demo-people.local.json && node validation/seed-logins.mjs",
+  "people": [
+    {
+      "id": "jesse.pinkman",
+      "name": "Jesse Pinkman",
+      "email": "jesse.pinkman@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["chef"],
+      "practices": ["braze"],
+      "blurb": "Braze developer/marketer"
+    },
+    {
+      "id": "saul.goodman",
+      "name": "Saul Goodman",
+      "email": "saul.goodman@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["chef"],
+      "practices": ["braze", "aem"],
+      "blurb": "Braze marketing expert, some AEM"
+    },
+    {
+      "id": "mike.ehrmantraut",
+      "name": "Mike Ehrmantraut",
+      "email": "mike.ehrmantraut@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["chef", "head-chef"],
+      "practices": ["decisioning"],
+      "blurb": "Decisioning lead + pre-sales (Head Chef)"
+    },
+    {
+      "id": "hank.schrader",
+      "name": "Hank Schrader",
+      "email": "hank.schrader@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["chef"],
+      "practices": ["security"],
+      "blurb": "IT/security gatekeeper"
+    },
+    {
+      "id": "walter.white",
+      "name": "Walter White",
+      "email": "walter.white@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["chef", "head-chef", "admin"],
+      "practices": ["aem"],
+      "blurb": "AEM expert - HEAD CHEF + admin"
+    },
+    {
+      "id": "guest",
+      "name": "Guest (read-only)",
+      "email": "guest@tapcxm.example",
+      "password": "CHANGE-ME-min-8-chars",
+      "roles": ["viewer"],
+      "practices": [],
+      "blurb": "Read-only observer"
+    }
+  ]
+}
