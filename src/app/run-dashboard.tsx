@@ -55,6 +55,9 @@ export function RunDashboard() {
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) setRuns(data.runs ?? []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
       });
     return () => {
       cancelled = true;

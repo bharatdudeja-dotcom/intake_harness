@@ -64,10 +64,13 @@ function getPool(): Pool {
       // here with the RDS combined CA bundle instead of rejectUnauthorized.
       ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
     pool = new Pool({
-      connectionString,
-      ssl: connectionString.includes("sslmode=require") || connectionString.includes("ssl=true")
-        ? { rejectUnauthorized: false }
-        : undefined,
+      connectionString: url.toString(),
+      // RDS's cert chain isn't in Node's default trust store, so this
+      // encrypts the connection without verifying the certificate/hostname
+      // (matches sslmode=require's actual guarantee, not verify-full's).
+      // For real hostname+CA verification, pass `ca: fs.readFileSync(...)`
+      // here with the RDS combined CA bundle instead of rejectUnauthorized.
+      ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
     });
   }
   return pool;
