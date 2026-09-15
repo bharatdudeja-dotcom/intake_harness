@@ -66,6 +66,7 @@ const settings = require('../../lib/settings')
 const usersLib = require('../../lib/auth/users')
 const cxGraph = require('../../lib/cx-graph')
 const agentSystems = require('../../lib/agent-systems')
+const narrate = require('../../lib/narrate')
 const approvalConfig = require('../../config/approval.json')
 
 const TASK_STATUSES = ['open', 'in_progress', 'done']
@@ -1188,7 +1189,7 @@ function registerTools (server, context = {}) {
 
             // Artifact 0 is the brief, verbatim. Everything downstream is judged
             // against it, so it is captured before any agent touches it.
-            addStep('message', brief, { tags: ['brief'] })
+            addStep('message', narrate.narrateBrief(brief, system), { format: 'md', tags: ['brief'] })
 
             const waited = await agentSystems.waitForRun(
                 system, started.upstream_run_id, { timeoutMs: waitMs == null ? 25000 : waitMs }
@@ -1201,13 +1202,10 @@ function registerTools (server, context = {}) {
             }
 
             for (const st of steps) {
-                addStep('doc', JSON.stringify({
-                    agent: st.agent_id,
-                    upstream_status: st.upstream_status,
-                    output: st.output,
-                    metadata: st.metadata
-                }, null, 2), {
-                    format: 'json',
+                // Markdown, not a JSON dump. A record nobody can read is not a
+                // record - see lib/narrate.js.
+                addStep('doc', narrate.narrateStep(st, labelFor(st.agent_id)), {
+                    format: 'md',
                     tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
                     provenance: {
                         upstream_task_run_id: st.upstream_task_run_id,
@@ -1217,6 +1215,11 @@ function registerTools (server, context = {}) {
                     }
                 })
             }
+
+            // Where the time went, and what is unresolved. Written every run.
+            addStep('decision', narrate.narrateLedger(steps, { labelFor, settled: waited.settled }), {
+                format: 'md', tags: ['ledger']
+            })
 
             resource.content = stepsLib.composeContent(resource.steps)
             resource.content_hash = contentHash(resource.content)
