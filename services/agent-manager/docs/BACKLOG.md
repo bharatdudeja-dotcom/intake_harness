@@ -109,3 +109,43 @@ Both need a human and neither is safe to do alone. See the credential section in
 | Josh | Story Coach Report 2, Analyst Playbook, Story Coach zip; and a ruling on the Campbell naming problem | UI copy |
 | Client | Is the 9:45pm job time fixed? | B6, and the cheapest win on the map |
 | Bharat | Hosting target; Comcast logo asset | 1, 6 |
+
+---
+
+## Verified against Chauncey's MCP, 16 Sep 2026
+
+Endpoint: `https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp` (238 tools).
+Recorded in `app/config/agent-systems.json`.
+
+### The intake bug has a one-word cause
+
+The knowledge tool is **`search_adobe_knowledge`**. **`search_knowledge_base` does not
+exist** — zero matches across all 238 tools.
+
+`intake/route.ts` calls `search_knowledge_base`, gets `Unknown tool`, writes the error
+into its payload and returns `status: "completed"`. So every run has failed its grounding
+step since the beginning, every run records as a clean success, and because `failed` never
+fires Agent 4 has never once been invoked.
+
+**Fix is one string in Chauncey's repo**, plus the allowlist entry in
+`src/lib/pipeline/registry.ts`. Worth raising today — it is the cheapest win on the board.
+
+### No Workfront tools are deployed
+
+`/mcp/workfront/core`, `/comments`, `/search` and `/metadata` all return **zero tools**,
+and no `wf_*` name appears among the 238.
+
+So `wf_core_project_*`, `wf_core_issue_*` and `wf_comments_*` — the allowlists for Agents 1
+and 2 — reference tools that are not deployed at this endpoint. **This blocks our Agent 2
+from posting a redraft via `wf_comments_create`**, which is most of B2.
+
+The code for them exists in `chaunceyplum/mcp` (ten Workfront Lambdas). Either they are
+not deployed to this API Gateway, or they are behind a different one. **Ask Chauncey
+which.** Until then Agent 2 can parse a rejection and decide `needs_input`, but it cannot
+write back to Workfront.
+
+### Agent 3 is genuinely ready
+
+All of its AEP tools are live: `adobe_create_segment_estimate`, `adobe_get_segment_estimate`,
+`adobe_list_schemas`, `adobe_get_schema`, `adobe_list_segments`. Chauncey's assessment that
+Agent 3 is the most ready of the four is correct.

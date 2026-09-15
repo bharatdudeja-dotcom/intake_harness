@@ -349,6 +349,22 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
 .palette-item.sel { background: var(--accent-soft); color: var(--accent-text); }
 .palette-item small { margin-left: auto; color: var(--muted); font-size: 11px; }
 
+
+/* Agent faces. Dormant sits back; active steps forward. */
+.agent-face{flex:0 0 auto;display:block}
+.agent-face.is-active{filter:drop-shadow(0 1px 2px rgba(31,30,28,.10))}
+.agent-card-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.agent-card-head .who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.agent-card-head .who b{font-size:15px;line-height:1.2}
+.agent-card-head .who .sub{font-size:12px;color:var(--muted)}
+.agent-cast{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* The empty proposal state is a quiet line, not a card the size of a headline. */
+.quiet-note{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;
+  padding:10px 2px 16px;border-bottom:1px solid var(--border);margin-bottom:16px}
+
+#role-chip{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+#role-chip .chip-role{color:var(--muted);font-weight:400;font-size:11px}
+#role-chip.head-chef .chip-role{color:var(--baked)}
 </style>
 </head>
 <body>
@@ -377,7 +393,7 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
     <div style="margin-top:6px">No-secret proxy · key stays server-side</div>
   </div>
   <div class="whoami">
-    <span id="role-chip" class="chip" title="Everyone is a marketer. The Hero Agent proposes what should be learned; a named human always decides. An admin manages roles and settings."><i data-lucide="user"></i> marketer</span>
+    <span id="role-chip" class="chip" title="Everyone is a marketer. The Hero Agent proposes what should be learned; a named human always decides. An admin manages roles and settings."><i data-lucide="user"></i> <b>Not signed in</b></span>
     <button class="btn" id="signout-btn" style="display:none" title="Sign out so someone else can sign in"><i data-lucide="log-out"></i> <span id="signout-label">Sign out</span></button>
   </div>
 </aside>
@@ -557,6 +573,75 @@ const AGENT_MARK = {
                                      // runs learned, and hands it over
   human: '\u{1F464}'                 // a person, wherever one decided
 }
+/* ---------------------------------------------------------------------------
+ * Agent faces.
+ *
+ * Each agent gets its own face, and the face WAKES UP once that agent has
+ * produced something: dormant is muted with closed eyes, active is coloured
+ * with its eyes open. So the Agents page reads at a glance as a cast that
+ * arrives over time, rather than a list that is mostly empty.
+ *
+ * The face is derived from the agent id, not looked up in a table. A fifth
+ * agent appearing in the registry gets a distinct, stable face with nobody
+ * drawing one - the same rule that keeps agent names out of this file.
+ * ------------------------------------------------------------------------- */
+function agentHash (id) {
+  let h = 0
+  const str = String(id || '')
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0
+  return h
+}
+
+/* Drawn from the palette already on :root, so faces inherit both themes. */
+const FACE_HUES = ['--ready', '--house', '--exp', '--ingredient', '--accent', '--baked']
+
+/* Eye shapes. Index chosen by hash, so it is stable per agent and varied across them. */
+const EYES = [
+  (c) => `<circle cx="15" cy="21" r="3.2" fill="${c}"/><circle cx="29" cy="21" r="3.2" fill="${c}"/>`,
+  (c) => `<rect x="12" y="18.5" width="7" height="5" rx="2.5" fill="${c}"/><rect x="25" y="18.5" width="7" height="5" rx="2.5" fill="${c}"/>`,
+  (c) => `<path d="M12 21.5q3-4 6 0" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M26 21.5q3-4 6 0" stroke="${c}" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
+  (c) => `<path d="M12.5 18l5 5M17.5 18l-5 5" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/><path d="M26.5 18l5 5M31.5 18l-5 5" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`,
+  (c) => `<circle cx="15" cy="21" r="4" fill="none" stroke="${c}" stroke-width="2.2"/><circle cx="29" cy="21" r="4" fill="none" stroke="${c}" stroke-width="2.2"/>`,
+  (c) => `<path d="M15 16.5l1.6 3.4 3.4 1.6-3.4 1.6L15 26.5l-1.6-3.4L10 21.5l3.4-1.6z" fill="${c}"/><circle cx="29" cy="21" r="3.2" fill="${c}"/>`
+]
+
+/* Mouths, same idea. Keeps two agents with similar eyes still distinguishable. */
+const MOUTHS = [
+  (c) => `<path d="M15 30q7 5 14 0" stroke="${c}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`,
+  (c) => `<rect x="15" y="29" width="14" height="3.4" rx="1.7" fill="${c}"/>`,
+  (c) => `<path d="M16 31h12" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`,
+  (c) => `<path d="M15 32q7-5 14 0" stroke="${c}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`
+]
+
+/**
+ * @param {string} id agent id from the registry
+ * @param {boolean} active has this agent produced anything yet
+ * @param {number} size px
+ * @returns {string} inline SVG
+ */
+function agentFace (id, active = false, size = 46) {
+  const h = agentHash(id)
+  const hue = `var(${FACE_HUES[h % FACE_HUES.length]})`
+  const eyes = EYES[(h >> 3) % EYES.length]
+  const mouth = MOUTHS[(h >> 7) % MOUTHS.length]
+  const antenna = (h >> 11) % 2 === 0
+
+  // Dormant: muted, eyes shut. Nothing has happened, and the face says so.
+  const ink = active ? hue : 'var(--muted)'
+  const shell = active ? hue : 'var(--border-strong)'
+  const fill = active ? 'var(--surface)' : 'var(--surface-2)'
+  const closed = `<path d="M12 21.5h6M26 21.5h6" stroke="var(--muted)" stroke-width="2.4" stroke-linecap="round"/>`
+
+  return `<svg class="agent-face${active ? ' is-active' : ''}" width="${size}" height="${size}"
+      viewBox="0 0 44 44" role="img" aria-label="${esc(id)}">
+    ${antenna ? `<path d="M22 4v4" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="22" cy="3" r="2.2" fill="${active ? hue : 'var(--border-strong)'}"/>` : ''}
+    <rect x="4" y="8" width="36" height="32" rx="11" fill="${fill}" stroke="${shell}" stroke-width="2"/>
+    ${active ? eyes(ink) : closed}
+    ${mouth(ink)}
+  </svg>`
+}
+
 function agentMark (id) { return AGENT_MARK[String(id || '').toLowerCase()] || '' }
 function agentLabel (id, label) {
   const mark = agentMark(id)
@@ -1038,7 +1123,12 @@ function updateRoleUI () {
   const chip = $('#role-chip')
   const isHead = state.role === 'head-chef'
   chip.classList.toggle('head-chef', isHead)
-  chip.innerHTML = `<i data-lucide="${isHead ? 'crown' : 'user'}"></i> ${esc(state.role)}`
+  // Who you are comes first. The role is how you are allowed to act, which is a
+  // detail next to your name - and "head-chef" was never a thing here anyway.
+  const ROLE_LABEL = { 'head-chef': 'Hero Agent approver', admin: 'Admin', chef: 'Marketer', viewer: 'Read-only' }
+  const who = auth.owner ? displayName(auth.owner) : 'Not signed in'
+  const roleText = ROLE_LABEL[state.role] || state.role
+  chip.innerHTML = `<i data-lucide="${isHead ? 'sparkles' : 'user'}"></i> <b>${esc(who)}</b><span class="chip-role">${esc(roleText)}</span>`
   // D65: when signed in per-user, show who + a sign-out control.
   const signout = $('#signout-btn')
   if (auth.loginEnabled && auth.token) {
@@ -1334,7 +1424,7 @@ function renderProjects () {
   const projs = state.projects.slice().sort((a, b) => (a.status || 'active').localeCompare(b.status || 'active') || a.name.localeCompare(b.name))
   const byProject = name => state.recipes.filter(r => recProject(r) === name)
   $('#panel-projects').innerHTML = `
-    <p class="panel-intro">Engagements. Each holds the recipes captured for it.</p>
+    <p class="panel-intro">Engagements. Each holds the runs captured for it.</p>
     ${projs.length ? projs.map(p => {
       const rs = byProject(p.name).sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || ''))
       const cook = rs.filter(inCookbook).length; const st = p.status || 'active'
@@ -1351,7 +1441,7 @@ function renderProjects () {
           ${rs.length ? rs.map(r => `<button class="recipe-item" data-open-worklog="${esc(r.id)}" style="flex-direction:row; align-items:center; gap:8px;">
             <i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b style="flex:1 1 10ch; min-width:0">${esc(r.title)}</b>${statusBadge(r)}<span class="sub" style="flex:0 0 auto">${r.step_count || 1} ingr.</span></button>`).join('') : '<span class="sub">No recipes yet. Start one from your assistant.</span>'}
         </div></div>`
-    }).join('') : '<p class="empty"><i data-lucide="folder-plus"></i><br>No projects yet. Call start_project from your assistant.</p>'}`
+    }).join('') : '<p class="empty"><i data-lucide="folder-plus"></i><br>No programmes yet. Ask Claude to start one.</p>'}`
   refreshIcons()
 }
 
@@ -1684,17 +1774,23 @@ function renderAgents () {
             : '<span class="sub"><i data-lucide="lock"></i> needs a Hero Agent approver</span>'}
           </div>`).join('')}
       </div>`
-    : `<div class="card section-gap"><h3 class="head"><i data-lucide="check-circle-2"></i> Nothing waiting on a human</h3>
-        <p class="help">The Hero Agent has nothing to propose right now.</p></div>`
+    : `<div class="quiet-note"><i data-lucide="check-circle-2"></i>
+        Nothing waiting on a human. The Hero Agent proposes once it has runs to read.</div>`
 
   const sections = known.map(a => {
     const mine = rows.filter(r => r.practice === a.id)
         .sort((x, y) => (y.updated_at || y.updated || '').localeCompare(x.updated_at || x.updated || ''))
     const artifacts = mine.reduce((n, r) => n + (r.step_count || 0), 0)
     const open = mine.filter(r => !inCookbook(r)).length
+    const awake = mine.length > 0
     return `<div class="card">
-      <div class="card-head"><b>${agentMark(a.id)} ${esc(a.label)}</b>
-        <span class="sub">${mine.length} run(s) &middot; ${artifacts} artifact(s)${open ? ` &middot; ${open} open` : ''}</span></div>
+      <div class="agent-card-head">
+        ${agentFace(a.id, awake)}
+        <div class="who">
+          <b>${agentMark(a.id)} ${esc(a.label)}</b>
+          <span class="sub">${mine.length} run(s) &middot; ${artifacts} artifact(s)${open ? ` &middot; ${open} open` : ''}</span>
+        </div>
+      </div>
       ${mine.length ? `<div>${mine.slice(0, 8).map(r => `
         <div class="listrow">
           <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
