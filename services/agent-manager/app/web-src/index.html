@@ -12,7 +12,9 @@
   spine: a Recipe is an ordered log of Steps; the Work Log is that log; the Cookbook is its
   approved steps in order.
 -->
-<link rel="icon" href="assets/tap-cxm-logo.svg" type="image/svg+xml">
+<!-- Swap assets/brand-mark.svg for the licensed Comcast file and the tab,
+     sidebar and PDF export all follow. -->
+<link rel="icon" href="assets/brand-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -423,12 +425,17 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
 .lstat .v{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
 .lstat .v small{font-size:.65em;font-weight:500;color:var(--muted)}
 .lstat.hot .v{color:var(--reject)}
+
+/* An empty badge still occupied width, which pushed the Agents digit out of
+   line with every other one in the rail. */
+#tasks-badge:empty, #headchef-badge:empty { display: none; }
+nav button .key, nav button .nav-badge { margin-left: auto; }
 </style>
 </head>
 <body>
 <aside>
   <div class="logo">
-    <div class="mark"><img src="assets/tap-cxm-symbol.svg" alt="Tap CXM" style="width:20px;height:20px;object-fit:contain"></div>
+    <div class="mark"><img src="assets/brand-mark.svg" alt="Agent Manager" style="width:22px;height:22px;object-fit:contain"></div>
     <div><b>Agent Manager</b><small>Comcast &middot; Xfinity</small></div>
   </div>
   <nav id="nav">
@@ -552,7 +559,7 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
 
 <div class="modal-scrim" id="login-gate">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="login-title" style="text-align:center">
-    <div class="mark" style="margin:0 auto 12px"><img src="assets/tap-cxm-symbol.svg" alt="Tap CXM" style="width:28px;height:28px;object-fit:contain"></div>
+    <div class="mark" style="margin:0 auto 12px"><img src="assets/brand-mark.svg" alt="Agent Manager" style="width:30px;height:30px;object-fit:contain"></div>
     <h3 id="login-title">Sign in to Agent Manager</h3>
     <p class="sub" id="login-desc" style="margin:8px 0 18px">Your Adobe account keeps your recipes private to you. Sign in to continue.</p>
     <p class="sub" id="login-error" style="color:var(--reject); display:none; margin-bottom:12px"></p>
@@ -737,6 +744,8 @@ const API_BASE = (() => {
   return `${location.origin}/dashboard-api`
 })()
 let rpcId = 0
+/* Long enough for a slow upstream, short enough that a stall surfaces. */
+const RPC_TIMEOUT_MS = 45000
 async function rpc (method, params = {}) {
   const headers = { 'Content-Type': 'application/json' }
   // D65: when signed in, forward the user's IMS token so the proxy resolves THEIR identity.
@@ -745,7 +754,22 @@ async function rpc (method, params = {}) {
   if (auth.passcode) headers['x-cookbook-passcode'] = auth.passcode
   // D79: the viewer's own access key, so the proxy resolves THEIR identity (not a shared one).
   if (!auth.token && auth.cred) Object.assign(headers, credentialHeaders(auth.cred))
-  const res = await fetch(API_BASE, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }) })
+  // A request that never settles is worse than one that fails: every view that
+  // awaits it sits on a spinner for ever with nothing to report. Bound it.
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), RPC_TIMEOUT_MS)
+  let res
+  try {
+    res = await fetch(API_BASE, {
+      method: 'POST', headers, signal: ctl.signal,
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params })
+    })
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`${method} timed out after ${RPC_TIMEOUT_MS / 1000}s`)
+    throw new Error(`${method} could not reach the server: ${e.message}`)
+  } finally {
+    clearTimeout(timer)
+  }
   if (res.status === 401) {
     if (auth.loginEnabled) { handleAuthExpired(); throw new Error('Your session expired. Sign in again.') }
     if (auth.passcodeRequired) { handlePasscodeRejected(); throw new Error('Agent Manager is locked. Enter the access code.') }
@@ -2608,6 +2632,12 @@ async function buildGraph () {
   const capped = total > CAP
   if (capped) rows = rows.slice().sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || '')).slice(0, CAP)
 
+  if (stepErrors.length) {
+    // A graph drawn from partial data, silently, is the same mistake the
+    // pipeline makes. Say which runs could not be read.
+    sub.innerHTML += ` <span style="color:var(--reject)">${stepErrors.length} run(s) could not be read: ${esc(stepErrors[0])}${stepErrors.length > 1 ? ' …' : ''}</span>`
+  }
+
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
   for (const r of rows) stageCounts[recipeStage(r)]++
   sub.innerHTML = `<b>Your</b> work in ${where}, at every stage, private drafts included. ` +
@@ -2623,9 +2653,10 @@ async function buildGraph () {
   container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="loader"></i><br>Loading artifacts &amp; lineage…</div>'; refreshIcons()
 
   let stepLists, handoffs
+  const stepErrors = []
   try {
     [stepLists, handoffs] = await Promise.all([
-      Promise.all(rows.map(r => callTool('list_steps', { recipe_id: r.id }).catch(() => []))),
+      Promise.all(rows.map(r => callTool('list_steps', { recipe_id: r.id }).catch(e => { stepErrors.push(`${r.title}: ${e.message}`); return [] }))),
       callTool('list_resources', { project: state.project, type: 'handoff-prompt' }).catch(() => [])
     ])
   } catch (e) { container.innerHTML = `<div class="empty">Failed to load: ${esc(e.message)}</div>`; return }
