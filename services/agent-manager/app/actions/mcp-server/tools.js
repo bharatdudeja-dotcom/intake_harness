@@ -65,6 +65,7 @@ const retention = require('../../lib/retention')
 const settings = require('../../lib/settings')
 const usersLib = require('../../lib/auth/users')
 const cxGraph = require('../../lib/cx-graph')
+const agentSystems = require('../../lib/agent-systems')
 const approvalConfig = require('../../config/approval.json')
 
 const TASK_STATUSES = ['open', 'in_progress', 'done']
@@ -209,7 +210,9 @@ const WRITE_TOOLS = new Set([
     'update_settings', 'set_head_chefs', 'set_user_roles', 'set_practices', 'set_user_practices',
     'headchef_approve', 'headchef_reject',
     'rebuild_cx_graph', 'purge_expired', 'admin_reset_data',
-    'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_recipe', 'assign_step', 'unassign_step', 'set_user_display_name'
+    'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_recipe', 'assign_step', 'unassign_step', 'set_user_display_name',
+    // Starts a run upstream AND writes the captured run here.
+    'start_intake'
 ])
 
 /** Guides any connected AI on reuse-first + capture behavior (MCP `initialize` instructions). */
@@ -1078,6 +1081,208 @@ function registerTools (server, context = {}) {
             }
             await store.saveResource(resource)
             return jsonResult({ id, title, project, practice: resolvedPractice || null, status: resource.status, created: now })
+        }
+    )
+
+    /* -----------------------------------------------------------------
+       Agent systems: the bridge between a marketer's brief and the
+       upstream pipeline that executes it.
+
+       start_intake is the one tool a marketer's assistant actually needs.
+       The others are for seeing what is registered.
+       ----------------------------------------------------------------- */
+
+    server.tool(
+        'list_agent_systems',
+        'List the upstream agent systems registered with Agent Manager - one per executing system, each bound to a domain and an adapter. Use this to see what can run a brief. Agent names are NOT listed here; call list_system_agents, which reads them from the upstream itself.',
+        {},
+        async () => jsonResult(agentSystems.list())
+    )
+
+    server.tool(
+        'list_system_agents',
+        "List the agents an upstream system actually has, read live from that system's own catalog rather than from any list held here. An agent added upstream appears immediately, with nothing changed on this side.",
+        {
+            system_id: z.string().optional().describe('Which system. Omit when only one is active.')
+        },
+        async ({ system_id: systemId }) => {
+            const { system, error } = agentSystems.resolve(systemId)
+            if (error) return errorResult(error)
+            try {
+                return jsonResult({ system: system.id, agents: await agentSystems.discoverAgents(system) })
+            } catch (e) {
+                return errorResult(`Could not reach ${system.id}: ${e.message}`)
+            }
+        }
+    )
+
+    server.tool(
+        'start_intake',
+        "Start a campaign intake from a marketer's brief in plain English. Hands the brief to the upstream agent pipeline, waits for it, and logs every stage as artifacts of ONE run so the whole thing is reviewable afterwards. Returns the run id, what each agent did, and anything that failed - including a tool failure an agent reported as a success. Use this rather than calling the upstream directly, or nothing is captured.",
+        {
+            brief: z.string().min(1).describe("The marketer's brief, in their own words"),
+            title: z.string().optional().describe('A short title for the run. Defaults to the first line of the brief.'),
+            project: z.string().optional().describe('Programme this run belongs to. Defaults to the active work context.'),
+            system_id: z.string().optional().describe('Which agent system to run it on. Omit when only one is active.'),
+            wait_ms: z.number().int().min(0).max(120000).optional().describe('How long to wait for the pipeline before returning what it has so far. Default 25000.')
+        },
+        async ({ brief, title, project, system_id: systemId, wait_ms: waitMs }) => {
+            const { system, error } = agentSystems.resolve(systemId)
+            if (error) return errorResult(error)
+
+            const now = new Date().toISOString()
+            const owner = resolvePrincipal(context)
+            const runTitle = title || brief.split('\n')[0].slice(0, 120)
+            const workContext = await store.getWorkContext(owner)
+            const resolvedProject = project || (workContext && workContext.project)
+            if (!resolvedProject) {
+                return errorResult('No programme set. Pass project, or call start_project first.')
+            }
+
+            let started
+            try {
+                started = await agentSystems.startRun(system, brief)
+            } catch (e) {
+                return errorResult(`${system.id} refused the brief: ${e.message}`)
+            }
+
+            const id = makeResourceId('recipe', runTitle)
+            const resource = {
+                id,
+                title: runTitle,
+                type: 'recipe',
+                content: '',
+                content_hash: contentHash(''),
+                project: resolvedProject,
+                practice: system.practice || settings.defaultPracticeFor(owner) || undefined,
+                segments: { project: resolvedProject },
+                owner,
+                author: resolveAuthor(context),
+                created: now,
+                updated: now,
+                updated_at: now,
+                version: 1,
+                status: statusLib.EXPERIMENTAL,
+                // The upstream run is REFERENCED, never joined. Their database stays
+                // theirs; this is a typed pointer we resolve through the adapter.
+                upstream: { system_id: system.id, run_id: started.upstream_run_id },
+                steps: []
+            }
+
+            const addStep = (kind, content, extra = {}) => {
+                const order = stepsLib.nextOrder(resource.steps)
+                const at = new Date().toISOString()
+                resource.steps.push({
+                    id: stepsLib.makeStepId(id, order),
+                    recipe_id: id,
+                    order,
+                    source: 'agent-manager',
+                    kind,
+                    content,
+                    status: statusLib.EXPERIMENTAL,
+                    created: at,
+                    expires_at: stepsLib.computeExpiry(at),
+                    ...extra
+                })
+            }
+
+            // Artifact 0 is the brief, verbatim. Everything downstream is judged
+            // against it, so it is captured before any agent touches it.
+            addStep('message', brief, { tags: ['brief'] })
+
+            const waited = await agentSystems.waitForRun(
+                system, started.upstream_run_id, { timeoutMs: waitMs == null ? 25000 : waitMs }
+            )
+            const steps = agentSystems.toSteps(waited.envelope)
+            const agents = await agentSystems.discoverAgents(system).catch(() => [])
+            const labelFor = (agentId) => {
+                const hit = agents.find(a => a.id === agentId)
+                return (hit && hit.label) || agentId
+            }
+
+            for (const st of steps) {
+                addStep('doc', JSON.stringify({
+                    agent: st.agent_id,
+                    upstream_status: st.upstream_status,
+                    output: st.output,
+                    metadata: st.metadata
+                }, null, 2), {
+                    format: 'json',
+                    tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
+                    provenance: {
+                        upstream_task_run_id: st.upstream_task_run_id,
+                        duration_ms: st.duration_ms,
+                        started_at: st.started_at,
+                        finished_at: st.finished_at
+                    }
+                })
+            }
+
+            resource.content = stepsLib.composeContent(resource.steps)
+            resource.content_hash = contentHash(resource.content)
+            resource.step_count = resource.steps.length
+            await store.saveResource(resource)
+
+            const faults = steps.filter(st => st.embedded_error)
+
+            return jsonResult({
+                run_id: id,
+                upstream: { system_id: system.id, run_id: started.upstream_run_id },
+                upstream_status: (waited.envelope && waited.envelope.run && waited.envelope.run.status) || 'unknown',
+                settled: waited.settled,
+                stages: steps.map(st => ({
+                    agent: labelFor(st.agent_id),
+                    reported: st.upstream_status,
+                    // What the stage ACTUALLY did, which is not always what it reported.
+                    actual: st.embedded_error ? 'faulted' : st.upstream_status,
+                    failure: st.embedded_error || undefined,
+                    ms: st.duration_ms
+                })),
+                loop_count: agentSystems.loopCount(steps),
+                // Stated explicitly so an assistant repeats it to the marketer
+                // instead of reporting a green run.
+                warnings: faults.map(f => `${labelFor(f.agent_id)} reported "${f.upstream_status}" but its tool call failed: ${f.embedded_error}`),
+                note: waited.settled
+                    ? undefined
+                    : 'The pipeline had not finished when this returned. Call get_intake with the run_id for the rest.'
+            })
+        }
+    )
+
+    server.tool(
+        'get_intake',
+        'Re-read an intake run from its upstream and return where each stage got to. Use after start_intake when the pipeline had not finished, or to check a run later.',
+        {
+            run_id: z.string().min(1).describe('The Agent Manager run id returned by start_intake')
+        },
+        async ({ run_id: runId }) => {
+            const resource = await store.getResource(runId)
+            if (!resource) return errorResult(`No run found with id '${runId}'`)
+            const ref = resource.upstream
+            if (!ref || !ref.run_id) return errorResult(`Run '${runId}' has no upstream reference`)
+            const { system, error } = agentSystems.resolve(ref.system_id)
+            if (error) return errorResult(error)
+
+            let envelope
+            try {
+                envelope = await agentSystems.getRun(system, ref.run_id)
+            } catch (e) {
+                return errorResult(`Could not reach ${system.id}: ${e.message}`)
+            }
+            const steps = agentSystems.toSteps(envelope)
+            return jsonResult({
+                run_id: runId,
+                upstream: ref,
+                upstream_status: (envelope && envelope.run && envelope.run.status) || 'unknown',
+                loop_count: agentSystems.loopCount(steps),
+                stages: steps.map(st => ({
+                    agent: st.agent_id,
+                    reported: st.upstream_status,
+                    actual: st.embedded_error ? 'faulted' : st.upstream_status,
+                    failure: st.embedded_error || undefined,
+                    ms: st.duration_ms
+                }))
+            })
         }
     )
 

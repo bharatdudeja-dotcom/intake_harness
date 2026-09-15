@@ -244,7 +244,7 @@ describe('MCP Server - Company Connector', () => {
             expect(body.result.serverInfo.name).toBe('tap-mcp-connector')
         })
 
-        test('tools/list should show all fifty-nine control-plane tools', async () => {
+        test('tools/list should show every control-plane tool', async () => {
             const { body } = await rpc('tools/list')
 
             const toolNames = body.result.tools.map(tool => tool.name)
@@ -283,7 +283,11 @@ describe('MCP Server - Company Connector', () => {
                 // D96: the name directory
                 'list_people', 'set_user_display_name'
             ]))
-            expect(toolNames).toHaveLength(60)
+            expect(toolNames).toContain('list_agent_systems')
+            expect(toolNames).toContain('list_system_agents')
+            expect(toolNames).toContain('start_intake')
+            expect(toolNames).toContain('get_intake')
+            expect(toolNames).toHaveLength(64)
         })
 
     })

@@ -46,10 +46,12 @@
         "  * The Workfront routes are NOT deployed at this gateway: /mcp/workfront/core, /comments,",
         "    /search and /metadata all return HTTP 404 'Not Found'. template.yaml in chaunceyplum/mcp",
         "    declares all eight of them, so the deployed stack is behind the repo, or they live behind",
-        "    a different API. Nothing can call wf_* here until that is resolved."
+        "    a different API. Nothing can call wf_* here until that is resolved.",
+        "  * POST /api/runs requires { \"input\": { \"brief\": ... } } - the payload is nested, not top level."
       ],
       "mcp_endpoint": "https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp",
-      "mcp_verified": "2026-09-16"
+      "mcp_verified": "2026-09-16",
+      "input_envelope": "input"
     },
     {
       "id": "aep-agents",
