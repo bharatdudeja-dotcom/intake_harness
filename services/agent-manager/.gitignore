@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+.pytest_cache/
+server.log
+
+# The repo root ignores .env*; re-include ours. A child .gitignore can
+# re-include a file when the parent directory itself is not excluded,
+# so this needs no change to the root .gitignore.
+!.env.example

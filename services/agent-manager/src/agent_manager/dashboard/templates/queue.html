@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set nav = 'queue' %}
+{% block title %}Queue · Agent Manager{% endblock %}
+{% block body %}
+<h1>Live queue</h1>
+<p class="sub">Everything in flight. Drift, blocked runs and a loop count above two sort to the top.
+{% if pending_nodes %}<a href="/knowledge">{{ pending_nodes }} proposal{{ '' if pending_nodes == 1 else 's' }} waiting on a human.</a>{% endif %}</p>
+
+<form class="filters" method="get">
+  <div><label>Marketer</label>
+    <select name="marketer" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for m in marketers %}<option value="{{ m }}" {{ 'selected' if selected.marketer == m }}>{{ m }}</option>{% endfor %}
+    </select></div>
+  <div><label>Agent</label>
+    <select name="agent" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for a in agents %}<option value="{{ a.id }}" {{ 'selected' if selected.agent == a.id }}>{{ a.name }}</option>{% endfor %}
+    </select></div>
+  <div><label>Status</label>
+    <select name="status" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for st in ['open','blocked','submitted','closed'] %}
+      <option value="{{ st }}" {{ 'selected' if selected.status == st }}>{{ st }}</option>{% endfor %}
+    </select></div>
+  <div><button class="ghost" type="submit">Filter</button></div>
+</form>
+
+{% if not rows %}
+<div class="card"><strong>Nothing ingested yet.</strong>
+<p class="muted" style="margin:6px 0 0">Run <span class="mono">python -m agent_manager.ingest</span> to pull runs from the harness.</p></div>
+{% endif %}
+
+<table>
+  <tr><th>Run</th><th>Stages</th><th>Loop</th><th>Elapsed</th><th>Status</th><th>Needs attention</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>
+      <a href="/run/{{ r.run.id }}"><strong>{{ r.run.upstream_run_id[:8] if r.run.upstream_run_id else r.run.id[:8] }}</strong></a><br>
+      <span class="muted mono">{{ r.run.marketer_id }}</span>
+    </td>
+    <td>
+      {% for act in journey.acts %}{% for st in act.stages %}
+        {% set s = r.stages.get(st.key) %}
+        {% if s and s.state != 'pending' %}
+          <span class="pill {{ s.state }}" title="{{ st.title }}{% if s.why %} — {{ s.why }}{% endif %}">{{ st.title }}</span>
+        {% endif %}
+      {% endfor %}{% endfor %}
+    </td>
+    <td>{% if r.run.loop_count > 2 %}<span class="pill faulted">{{ r.run.loop_count }}</span>{% else %}{{ r.run.loop_count }}{% endif %}</td>
+    <td class="mono">{{ (r.elapsed_ms / 1000) | round(1) }}s</td>
+    <td><span class="pill {{ 'waiting' if r.run.status == 'blocked' else 'done' if r.run.status == 'submitted' else 'pending' }}">{{ r.run.status }}</span></td>
+    <td>
+      {% for f in r.flags %}<div class="flag">{{ f }}</div>{% endfor %}
+      {% for g in r.open_gates %}<div><a href="/gate/{{ g.id }}">Waiting on {{ g.required_role.replace('_',' ') }}</a></div>{% endfor %}
+      {% if not r.flags and not r.open_gates %}<span class="muted">—</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

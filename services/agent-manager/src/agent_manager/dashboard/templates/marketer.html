@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set nav = 'queue' %}
+{% block title %}{{ email }} · Agent Manager{% endblock %}
+{% block body %}
+<h1>{{ email }}</h1>
+<p class="sub">{{ runs | length }} run(s) and this person's personal knowledge graph.</p>
+
+<h2>Runs</h2>
+<table>
+  <tr><th>Run</th><th>Status</th><th>Loop</th><th>Opened</th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><a href="/run/{{ r.id }}">{{ r.upstream_run_id[:8] if r.upstream_run_id else r.id[:8] }}</a></td>
+    <td><span class="pill pending">{{ r.status }}</span></td>
+    <td>{{ r.loop_count }}</td>
+    <td class="mono">{{ r.opened_at.strftime('%d %b %H:%M') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Personal knowledge graph</h2>
+{% if not nodes %}<div class="card muted">Nothing learned yet.</div>{% endif %}
+<table>
+  {% if nodes %}<tr><th>Kind</th><th>Title</th><th>Scope</th><th>Status</th></tr>{% endif %}
+  {% for n in nodes %}
+  <tr><td><span class="pill pending">{{ n.kind }}</span></td><td>{{ n.title }}</td>
+      <td>{{ n.scope }}</td>
+      <td><span class="pill {{ 'done' if n.status == 'promoted' else 'waiting' }}">{{ n.status }}</span></td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set nav = 'knowledge' %}
+{% block title %}Knowledge · Agent Manager{% endblock %}
+{% block body %}
+<h1>Shared knowledge graph</h1>
+<p class="sub">Act 3 &mdash; return with new mastery. Every promoted node traces to the run and event it came
+from, and shows the human who decided it was true.</p>
+
+<h2>Waiting on a human ({{ proposed | length }})</h2>
+{% if not proposed %}<div class="card muted">Nothing proposed. The Mentor Agent proposes when a
+correction recurs &mdash; a thing that happened once is an anecdote.</div>{% endif %}
+{% for n in proposed %}
+<div class="card">
+  <div><span class="pill pending">{{ n.kind }}</span> <strong>{{ n.title }}</strong></div>
+  <div class="muted" style="font-size:13px;margin:6px 0">
+    proposed by <strong>{{ n.proposed_by }}</strong>
+    {% if n.source_run_id %} &middot; <a href="/run/{{ n.source_run_id }}">see the run</a>{% endif %}
+  </div>
+  {% if n.body %}<pre>{{ n.body | tojson(indent=2) }}</pre>{% endif %}
+  <form method="post" action="/knowledge/{{ n.id }}/promote" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <select name="user_id" required>
+      <option value="">Who is promoting this?</option>
+      {% for u in humans %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
+    </select>
+    <input type="text" name="note" placeholder="On what evidence?" style="flex:1;min-width:220px">
+    <button type="submit">Promote to shared</button>
+    <button type="submit" class="danger" formaction="/knowledge/{{ n.id }}/reject">Reject</button>
+  </form>
+  <p class="muted" style="font-size:12px;margin:8px 0 0">The Mentor Agent cannot do this. There is no
+  code path from a proposal to a promotion that does not pass through a person.</p>
+</div>
+{% endfor %}
+
+<h2>Promoted ({{ nodes | length }})</h2>
+{% if not nodes %}<div class="card muted">Nothing promoted yet.</div>{% endif %}
+<table>
+  {% if nodes %}<tr><th>Kind</th><th>What we learned</th><th>Promoted by</th><th>When</th><th>Source</th></tr>{% endif %}
+  {% for n in nodes %}
+  <tr>
+    <td><span class="pill done">{{ n.kind }}</span></td>
+    <td><strong>{{ n.title }}</strong>
+      {% if n.body.get('promotion_note') %}<div class="muted" style="font-size:12.5px">{{ n.body.get('promotion_note') }}</div>{% endif %}</td>
+    <td>{{ n.body.get('promoted_by_name') or '&mdash;' }}</td>
+    <td class="mono">{{ n.promoted_at.strftime('%d %b %H:%M') if n.promoted_at else '' }}</td>
+    <td>{% if n.source_run_id %}<a href="/run/{{ n.source_run_id }}">run</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

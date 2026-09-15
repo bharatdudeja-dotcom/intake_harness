@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set nav = 'programme' %}
+{% block title %}Programme · Agent Manager{% endblock %}
+{% block body %}
+<h1>{{ journey.name }}</h1>
+<p class="sub">Roll-up across {{ runs | length }} run(s). Every figure derives from events at read time;
+nothing here is a cached metric.</p>
+
+<div class="acts">
+  <div class="act"><h3>Throughput</h3><p style="font-size:26px;color:var(--navy);margin:4px 0">{{ runs | length }}</p><p>runs captured</p></div>
+  <div class="act"><h3>Promoted knowledge</h3><p style="font-size:26px;color:var(--navy);margin:4px 0">{{ promoted }}</p><p>nodes a human stood behind</p></div>
+  <div class="act"><h3>Failure classes</h3><p style="font-size:26px;color:var(--navy);margin:4px 0">{{ failures | length }}</p><p>distinct, accumulating across runs</p></div>
+</div>
+
+<h2>Loop-count distribution</h2>
+<p class="sub">B1: more than two rounds means the agent failed, not the marketer.</p>
+<table>
+  <tr><th>Loop count</th><th>Runs</th><th></th></tr>
+  {% for count, n in loop_dist.items() %}
+  <tr><td>{{ count }}{% if count > 2 %} <span class="pill faulted">over</span>{% endif %}</td><td>{{ n }}</td>
+      <td><div style="background:var(--navy);height:10px;border-radius:5px;width:{{ n * 40 }}px;max-width:100%"></div></td></tr>
+  {% endfor %}
+</table>
+
+<h2>Failure classifications by frequency</h2>
+<p class="sub">The cross-run home Agent 4 does not have. A classification that lives only in one
+run's row cannot tell you it has happened before.</p>
+{% if not failures %}<div class="card muted">Nothing classified yet.</div>{% endif %}
+<table>
+  {% if failures %}<tr><th>Classification</th><th>Failure mode</th><th>Occurrences</th><th>First seen</th></tr>{% endif %}
+  {% for f in failures %}
+  <tr>
+    <td><span class="pill faulted">{{ f.classification }}</span></td>
+    <td class="mono" style="max-width:520px">{{ f.failure_mode }}</td>
+    <td><strong>{{ f.occurrences }}</strong></td>
+    <td class="mono">{{ f.first_seen_at.strftime('%d %b %H:%M') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Where the time goes</h2>
+<table>
+  <tr><th>Stage</th><th>Events</th><th>Total clock</th></tr>
+  {% for act in journey.acts %}{% for st in act.stages %}
+  {% if by_stage.get(st.key) %}
+  <tr><td>{{ st.title }} <span class="muted">&middot; {{ act.title }}</span></td>
+      <td>{{ by_stage.get(st.key) }}</td>
+      <td class="mono">{{ ((time_by_stage.get(st.key) or 0) / 1000) | round(2) }}s</td></tr>
+  {% endif %}
+  {% endfor %}{% endfor %}
+</table>
+{% endblock %}

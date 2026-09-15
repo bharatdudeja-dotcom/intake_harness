@@ -1,0 +1,210 @@
+# The intake artifact, as data.
+#
+# This is the real Comcast/Xfinity Campaign Brief form (shared 15 Sep 2026),
+# not a guess. It is what Agent 1 must produce, what a human validates, and
+# what the Workfront request is built from. Chauncey's question — "I need
+# someone to validate whether what the agent created is enough for the task" —
+# is answered by `required` and `blocks_submission` below: the gate opens when
+# a required field is missing, naming the field.
+#
+# To support a different process, write a different artifact file. No code.
+
+key: campaign-brief
+name: Campaign Brief — Audience Build
+stage: intake
+version: "2"   # "that is a newer form, sorry I just found this"
+
+sections:
+  - key: request_type
+    title: "Request type"
+    fields:
+      - key: request_type
+        label: "What type of request is this?"
+        type: enum
+        required: true
+        blocks_submission: true
+        options: ["Audience Build-Only", "Campaign + Audience", "Creative Only"]
+      - key: campaign_name
+        label: "Campaign Name"
+        type: string
+        required: true
+        blocks_submission: true
+        # Succinct, descriptive, no spaces. e.g. AppleNPI, XOSSpeedUptier
+        pattern: "^[A-Za-z0-9]+$"
+        hint: "No spaces. States the subject clearly and distinguishes it from other campaigns."
+      - key: audience_support
+        label: "What type of audience support do you need?"
+        type: enum
+        required: true
+        options: ["Audience Build (New)", "Audience Update", "Audience Clone"]
+
+  - key: overview
+    title: "Campaign & creative need overview"
+    fields:
+      - key: approved_por
+        label: "Is this request tied to an approved POR?"
+        type: enum
+        required: true
+        options: ["Yes", "No"]
+      - key: customer_type
+        label: "Customer Type?"
+        type: enum
+        required: true
+        options: ["Subscriber - Existing Customers", "Prospect", "Former Customer"]
+      - key: non_por_reason
+        label: "What best describes this Non-POR request?"
+        type: enum
+        required_when: { approved_por: "No" }
+        options: ["Revenue/Acceleration", "Retention", "Compliance", "Crisis"]
+      - key: business_objective
+        label: "What is your primary business objective?"
+        type: enum
+        required: true
+        options: ["Growth/Upsell", "Retention", "Acquisition", "Engagement"]
+      - key: lifecycle_journey
+        label: "Customer Lifecycle Journey"
+        type: enum
+        required: true
+        options: ["Upgrade", "Onboard", "Renew", "Winback"]
+      - key: journey_subcategory
+        label: "Upgrade Journey Subcategory"
+        type: string
+      - key: product_mix
+        label: "Product Mix"
+        type: string
+        required: true
+      - key: cadence
+        label: "How often will this campaign run?"
+        type: enum
+        options: ["One-time", "Recurring Campaign"]
+      - key: line_of_business
+        label: "Which line of business does this support?"
+        type: enum
+        required: true
+        options: ["Residential (RES)", "Business (SMB)"]
+      - key: creative_needs
+        label: "What are the creative needs for this campaign?"
+        type: enum
+        options:
+          - "Creative is already in production/approved"
+          - "New Creative"
+          - "Update Creative"
+      - key: linked_creative_project
+        label: "Linked Creative Project"
+        type: workfront_ref
+        object: PROJ
+        hint: "Links campaign and creative for tracking, dependencies and reporting."
+      - key: email_template_id
+        label: "Email Template Catalog ID/Number"
+        type: string
+
+  - key: timeline
+    title: "Timeline and priority"
+    fields:
+      - key: launch_date
+        label: "When do you need this campaign to launch?"
+        type: date
+        required: true
+        blocks_submission: true
+      - key: priority
+        label: "What is the priority of this request?"
+        type: enum
+        required: true
+        options: ["Standard Priority", "High Priority", "Critical"]
+
+  - key: audience
+    title: "Audience specifications & model integration"
+    fields:
+      - key: build_method
+        label: "How should the audience be built?"
+        type: enum
+        required: true
+        options:
+          - "1) Simple Workflow Audience"
+          - "2) AEP Rule Builder"
+          - "3) FAC"
+        # B4/3.1 — Agent 3 decides FAC vs rule builder. We capture and stop.
+        owned_by: audience_creation
+      - key: expected_size
+        label: "What is the expected audience size?"
+        type: enum
+        required: true
+        options: ["Small (<100k)", "Medium (100k-1M)", "Very Large (1M+)"]
+        # B6 — predicted count via adobe_create_segment_estimate before 9:45pm.
+        verified_by: segment_estimate
+      - key: refresh
+        label: "How often should this audience refresh?"
+        type: enum
+        options: ["One-time snapshot", "Dynamic Audience Updates"]
+      - key: exclusions
+        label: "Are there any exclusions or suppressions that must be applied?"
+        type: text
+      - key: historical_performance
+        label: "How would you describe the historical performance for this audience?"
+        type: enum
+        options: ["Unproven", "Modified Proven", "Proven"]
+      - key: data_available
+        label: "Is all required targeting data already available today?"
+        type: enum
+        required: true
+        options: ["Yes", "No"]
+        # B5 — attribute availability. "No" opens a GTO request.
+        escalates_when: { value: "No", to: gto_request }
+      - key: data_location
+        label: "Where does this data live today?"
+        type: string
+        # "Not sure" is the single most common blocker in the observed form.
+        ambiguous_values: ["Not sure", "Unknown", "N/A"]
+        flag_when_ambiguous: true
+      - key: predictive_model
+        label: "Does this require a predictive model that is not yet live?"
+        type: enum
+        options: ["Yes", "No"]
+      - key: activation_pattern
+        label: "Activation pattern"
+        type: enum
+        options: ["Batch", "Near-real time trigger", "Scheduled"]
+      - key: trigger_active
+        label: "Is this trigger already active in the platform?"
+        type: enum
+        options: ["Yes", "No", "Not sure"]
+        ambiguous_values: ["Not sure"]
+        flag_when_ambiguous: true
+      - key: campaign_duration
+        label: "Is this a one-time or evergreen campaign?"
+        type: enum
+        options: ["One-time", "Evergreen (ongoing)"]
+
+  - key: channels
+    title: "Channels"
+    fields:
+      - key: channels
+        label: "Which channels will you use?"
+        type: multi
+        required: true
+        options: ["Email", "SMS", "Digital/Display", "Direct Mail", "TV", "Streaming", "Xfinity App"]
+      - key: channel_launch
+        label: "How should the channels launch?"
+        type: enum
+        required_when: { channels_count_gt: 1 }
+        options: ["Simultaneous Launch", "Staggered"]
+      - key: channel_offers
+        label: "Will different offers or treatments be used across channels?"
+        type: enum
+        required_when: { channels_count_gt: 1 }
+        options: ["Same offer across all channels", "Different per channel"]
+      - key: channel_dependencies
+        label: "Do any channels depend on another channel's timing or outcome?"
+        type: enum
+        required_when: { channels_count_gt: 1 }
+        options: ["No Dependencies", "Sequenced"]
+      - key: attribution
+        label: "How should performance be measured across channels?"
+        type: enum
+        required_when: { channels_count_gt: 1 }
+        options: ["First-Touch Attribution", "Last-Touch", "Multi-Touch"]
+      - key: cross_channel_strategy
+        label: "Cross Channel Strategy Refinement"
+        type: enum
+        required_when: { channels_count_gt: 1 }
+        options: ["Coordinated Multi-Channel", "Independent"]
