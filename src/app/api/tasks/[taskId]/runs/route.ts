@@ -6,6 +6,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ task
   const { taskId } = await params;
   const limitParam = req.nextUrl.searchParams.get("limit");
   const limit = limitParam ? Math.min(Number(limitParam) || 50, 200) : 50;
-  const taskRuns = await listTaskRuns(taskId, limit);
-  return NextResponse.json({ taskRuns });
+  try {
+    const taskRuns = await listTaskRuns(taskId, limit);
+    return NextResponse.json({ taskRuns });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 }
