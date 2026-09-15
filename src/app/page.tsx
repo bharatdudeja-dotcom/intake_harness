@@ -1,4 +1,4 @@
-import { PIPELINE } from "@/lib/pipeline/registry";
+import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
 import { RunDashboard } from "./run-dashboard";
 
 export default function Home() {
@@ -11,7 +11,7 @@ export default function Home() {
           </h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Submits a request through the 3-agent pipeline, one HTTP call per
-            agent, in order.
+            agent, in order. A 4th agent handles escalation if a run fails.
           </p>
         </div>
 
@@ -29,6 +29,21 @@ export default function Home() {
               <code className="text-xs text-zinc-400">{agent.path}</code>
             </li>
           ))}
+          {/* Escalation isn't step 4 of the sequence above — it's called out
+              of band by the orchestrator only when a run fails, so it's
+              rendered separately rather than numbered 4 in the same list. */}
+          <li
+            key={ESCALATION.name}
+            className="flex items-center gap-3 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/30"
+          >
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-medium text-white dark:bg-amber-600">
+              !
+            </span>
+            <span className="font-medium text-black dark:text-zinc-50">{ESCALATION.label}</span>
+            <span className="text-xs text-amber-700 dark:text-amber-500">on failure</span>
+            <span className="ml-auto text-xs text-zinc-500">{ESCALATION.owner}</span>
+            <code className="text-xs text-zinc-400">{ESCALATION.path}</code>
+          </li>
         </ol>
 
         <RunDashboard />
