@@ -32,10 +32,6 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const limitParam = req.nextUrl.searchParams.get("limit");
   const limit = limitParam ? Math.min(Number(limitParam) || 50, 200) : 50;
-  try {
-    const runs = await listRuns(limit);
-    return NextResponse.json({ runs });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
-  }
+  const runs = await listRuns(limit);
+  return NextResponse.json({ runs });
 }
