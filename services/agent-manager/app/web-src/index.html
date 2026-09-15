@@ -684,15 +684,16 @@ const MOUTHS = [
  */
 function agentFace (id, awake = false, size = 52) {
   const h = agentHash(id)
-  const hue = `var(${FACE_HUES[h % FACE_HUES.length]})`
-  const head = HEADS[(h >> 4) % HEADS.length]
-  const mouth = MOUTHS[(h >> 9) % MOUTHS.length]
-  const antenna = (h >> 13) % 3 !== 0
+  const hue = `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
+  const pick = (arr, shift) => arr[((h >>> shift) % arr.length + arr.length) % arr.length]
+  const head = pick(HEADS, 4)
+  const mouth = pick(MOUTHS, 9)
+  const antenna = (h >>> 13) % 3 !== 0
   // Each agent drifts and blinks on its own clock, so a row of them never
   // pulses in unison like a loading spinner.
-  const drift = 3.2 + ((h >> 17) % 26) / 10
-  const blink = 5 + ((h >> 21) % 40) / 10
-  const uid = `f${(h % 100000).toString(36)}`
+  const drift = 3.2 + ((h >>> 17) % 26) / 10
+  const blink = 5 + ((h >>> 21) % 40) / 10
+  
 
   const ink = awake ? hue : 'var(--muted)'
   const shell = awake ? hue : 'var(--border-strong)'
@@ -1185,17 +1186,17 @@ async function loadAll (silent) {
   ])
   const fails = []
   if (info.status === 'fulfilled') state.info = info.value; else fails.push('info')
-  if (init.status === 'fulfilled') state.instructions = init.value.instructions || ''
-  if (tools.status === 'fulfilled') state.tools = tools.value.tools || []
+  if (init.status === 'fulfilled') state.instructions = (init.value && init.value.instructions) || ''
+  if (tools.status === 'fulfilled') state.tools = (tools.value && tools.value.tools) || []
   if (policy.status === 'fulfilled') state.policy = policy.value; else fails.push('policy')
   if (recipes.status === 'fulfilled') { state.recipesAll = recipes.value || []; state.recipes = state.recipesAll } else fails.push('recipes')
   if (projects.status === 'fulfilled') state.projects = projects.value || []
   // Never fatal: an empty board is a fine degradation, a failed load screen is not.
   if (cookoff.status === 'fulfilled') state.cookoff = cookoff.value || []
   if (tasks.status === 'fulfilled') state.tasks = tasks.value || []
-  if (seg.status === 'fulfilled') state.segLevels = seg.value.levels || state.segLevels
+  if (seg.status === 'fulfilled') state.segLevels = (seg.value && seg.value.levels) || state.segLevels
   if (settings.status === 'fulfilled') state.settings = settings.value
-  if (role.status === 'fulfilled') { state.role = role.value.role || 'chef'; state.roles = role.value.roles || [state.role]; state.headChefs = role.value.head_chefs || []; state.owner = role.value.owner }
+  if (role.status === 'fulfilled') { const rv = role.value || {}; state.role = rv.role || 'chef'; state.roles = rv.roles || [state.role]; state.headChefs = rv.head_chefs || []; state.owner = rv.owner }
   if (pending.status === 'fulfilled') state.cxPending = pending.value || []
   if (cxg.status === 'fulfilled') state.cxGraph = cxg.value || null
   // owner -> the name their admin gave them, so nothing has to guess a name from an email (D96).
@@ -1204,7 +1205,7 @@ async function loadAll (silent) {
     state.assignableNames = (people.value || []).map(p => p.id)
   }
   // Practices (D79/D81): drives the practice filter and the create-login form's dropdown.
-  if (practices.status === 'fulfilled') { state.practices = practices.value.practices || []; state.myPractices = practices.value.my_practices || [] }
+  if (practices.status === 'fulfilled') { const pv = practices.value || {}; state.practices = pv.practices || []; state.myPractices = pv.my_practices || [] }
 
   if (fails.length) banner(`Some data failed to load: ${fails.join(', ')}. The proxy or upstream may be unavailable.`); else banner('')
   const approved = state.recipes.filter(inCookbook).length
@@ -1279,7 +1280,21 @@ function renderProjectSwitcher () {
 }
 
 function renderAll () {
-  renderHome(); renderProjects(); renderWorklogList(); renderTasks(); renderCookbook(); renderHeadChef(); renderAgents(); renderSettings(); renderConnections()
+  // Each panel renders independently. One throwing used to take every panel
+  // after it with it - which is how a single bad render emptied Settings and
+  // Connections at the same time. Now a broken panel says so and the rest load.
+  const panels = [
+    ['home', renderHome], ['projects', renderProjects], ['worklog', renderWorklogList],
+    ['tasks', renderTasks], ['cookbook', renderCookbook], ['headchef', renderHeadChef],
+    ['agents', renderAgents], ['settings', renderSettings], ['connections', renderConnections]
+  ]
+  for (const [name, fn] of panels) {
+    try { fn() } catch (e) {
+      console.error(`panel ${name} failed`, e)
+      const el = $(`#panel-${name}`)
+      if (el) el.innerHTML = `<p class="empty"><i data-lucide="triangle-alert"></i><br>This panel failed to render.<br><span class="sub">${esc(e.message)}</span></p>`
+    }
+  }
   updateRoleUI()
   const pend = scoped(state.recipes).filter(r => !inCookbook(r)).length
   $('#tasks-badge').outerHTML = '' // placeholder; tasks badge set below
