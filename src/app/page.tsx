@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
-import { RunDashboard } from "./run-dashboard";
+import { SubmitRunForm } from "./submit-run-form";
 
 export default function Home() {
   return (
@@ -12,6 +13,8 @@ export default function Home() {
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Submits a request through the 3-agent pipeline, one HTTP call per
             agent, in order. A 4th agent handles escalation if a run fails.
+            See every run in the database on the{" "}
+            <Link href="/runs" className="underline">Runs</Link> page.
           </p>
         </div>
 
@@ -46,7 +49,7 @@ export default function Home() {
           </li>
         </ol>
 
-        <RunDashboard />
+        <SubmitRunForm />
       </main>
     </div>
   );

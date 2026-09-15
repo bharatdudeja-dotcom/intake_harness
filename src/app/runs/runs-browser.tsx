@@ -2,27 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
+import { StatusBadge } from "../status-badge";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 
-export function RunDashboard() {
-  const [brief, setBrief] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+/**
+ * The "see runs from the database" page. Lists every row in `runs`
+ * (GET /api/runs) and, on selection, every task_runs row for it
+ * (GET /api/runs/[runId]) — the same observability API the harness's
+ * pipeline writes to, just browsable on its own rather than only
+ * appearing right after you submit something.
+ */
+export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const [runs, setRuns] = useState<RunRow[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId ?? null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
-
-  const refreshRuns = useCallback(async () => {
-    const res = await fetch("/api/runs");
-    if (!res.ok) {
-      setError(`Failed to load runs (HTTP ${res.status}). Is DATABASE_URL set in .env.local?`);
-      return;
-    }
-    const data = await res.json();
-    setRuns(data.runs ?? []);
-  }, []);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingList, setLoadingList] = useState(true);
 
   const loadDetail = useCallback(async (runId: string) => {
     setSelectedRunId(runId);
@@ -34,9 +30,9 @@ export function RunDashboard() {
     setDetail(await res.json());
   }, []);
 
-  // Fetch-on-mount, not via refreshRuns directly: the effect subscribes to
-  // the fetch's own callback rather than calling a setState-holding function
-  // synchronously, so a stale response can't overwrite state after unmount.
+  // Fetch-on-mount via the fetch's own callback, not by calling a
+  // setState-holding function directly in the effect body, so a stale
+  // response can't overwrite state after unmount.
   useEffect(() => {
     let cancelled = false;
     fetch("/api/runs")
@@ -52,56 +48,72 @@ export function RunDashboard() {
       })
       .catch((err) => {
         if (!cancelled) setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingList(false);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function submit() {
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { brief } }),
+  // Deep-link support for /runs/[runId]: load that run's detail on mount,
+  // same inline-callback pattern as above rather than calling loadDetail
+  // (a setState-holding function) directly from the effect.
+  useEffect(() => {
+    if (!initialRunId) return;
+    let cancelled = false;
+    fetch(`/api/runs/${initialRunId}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          if (!cancelled) setError(`Failed to load run ${initialRunId} (HTTP ${res.status}).`);
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) setDetail(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    return () => {
+      cancelled = true;
+    };
+  }, [initialRunId]);
 
-      await refreshRuns();
-      await loadDetail(data.run.run_id);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSubmitting(false);
+  async function refresh() {
+    setError(null);
+    const res = await fetch("/api/runs");
+    if (!res.ok) {
+      setError(`Failed to load runs (HTTP ${res.status}).`);
+      return;
     }
+    const data = await res.json();
+    setRuns(data.runs ?? []);
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-4">
-        <textarea
-          className="min-h-24 rounded-lg border border-zinc-300 bg-white p-3 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-          placeholder="Describe the campaign / audience brief..."
-          value={brief}
-          onChange={(e) => setBrief(e.target.value)}
-        />
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-12">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Runs</h1>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            Every pipeline invocation recorded in the <code className="text-xs">runs</code> table, most recent first.
+          </p>
+        </div>
         <button
-          onClick={submit}
-          disabled={submitting || !brief.trim()}
-          className="self-start rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
+          onClick={refresh}
+          className="rounded-full border border-zinc-300 px-4 py-1.5 text-sm text-zinc-700 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-600"
         >
-          {submitting ? "Running..." : "Run pipeline"}
+          Refresh
         </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-black dark:text-zinc-50">
-            Recent runs ({runs.length})
+            {loadingList ? "Loading…" : `${runs.length} run${runs.length === 1 ? "" : "s"}`}
           </h2>
           <ol className="flex flex-col gap-1">
             {runs.map((run) => (
@@ -117,12 +129,12 @@ export function RunDashboard() {
                   <span className="font-mono text-zinc-500">{run.run_id.slice(0, 8)}</span>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={run.status} />
-                    <span className="text-zinc-400">{new Date(run.created_at).toLocaleTimeString()}</span>
+                    <span className="text-zinc-400">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
                 </button>
               </li>
             ))}
-            {runs.length === 0 && <p className="text-xs text-zinc-400">No runs yet.</p>}
+            {!loadingList && runs.length === 0 && <p className="text-xs text-zinc-400">No runs yet.</p>}
           </ol>
         </div>
 
@@ -133,6 +145,9 @@ export function RunDashboard() {
                 <span className="font-mono text-xs text-zinc-500">run_id: {detail.run.run_id}</span>
                 <StatusBadge status={detail.run.status} />
               </div>
+              <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
+                {JSON.stringify(detail.run.input, null, 2)}
+              </pre>
               <ol className="flex flex-col gap-2">
                 {detail.taskRuns.map((taskRun) => (
                   <li
@@ -164,16 +179,4 @@ export function RunDashboard() {
       </div>
     </div>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const color =
-    status === "completed"
-      ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-400"
-      : status === "failed"
-        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-400"
-        : status === "needs_input"
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400"
-          : "bg-zinc-100 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{status}</span>;
 }
