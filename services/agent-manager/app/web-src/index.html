@@ -489,8 +489,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
             <option value="">Any stage</option>
             <option value="draft">Experimental</option>
             <option value="ready">Ready for the Hero Agent</option>
-            <option value="awaiting">Awaiting Hero Agent</option>
-            <option value="incx">In the CX graph</option>
+            <option value="awaiting">With the Hero Agent</option>
+            <option value="incx">In the Shared Knowledge Graph</option>
           </select>
           <span class="sub" id="worklog-count"></span>
         </div>
@@ -1651,7 +1651,7 @@ async function openWorklog (id) {
       </div>
       ${['draft', 'ready'].includes(recipeStage(meta)) ? '<p class="help">Approve the run to hand it to the Hero Agent. It proposes; a named person decides.</p>' : ''}
     </div>
-    ${runLedger(ingredients)}
+    ${runLedger(r.steps || [])}
     ${legend}
     <div class="steps" id="steps-wrap">${(r.steps || []).length ? '' : '<p class="empty"><i data-lucide="inbox"></i><br>This recipe has no artifacts yet.</p>'}</div>`
   const wrap = $('#steps-wrap')
@@ -2057,7 +2057,7 @@ function renderCookbook () {
     <input class="field" id="cookbook-search" placeholder="Search recipes…" value="${esc(q)}" style="max-width:240px" oninput="cookbookSearch(this.value)"></div>`
   if (!rows.length) {
     const exp = scoped(state.recipes).filter(r => !inCookbook(r)).length
-    html += `<p class="empty"><i data-lucide="chef-hat"></i><br>${q ? 'No matching recipes.' : (exp ? `Nothing certified yet. ${exp} experimental run(s) are in the Work Log.` : 'No recipes captured yet.')}</p>`
+    html += `<p class="empty"><i data-lucide="chef-hat"></i><br>${q ? 'No matching recipes.' : (exp ? `Nothing promoted yet. ${exp} experimental run(s) are in the Work Log.` : 'No recipes captured yet.')}</p>`
   } else {
     for (const [project, plist] of [...byProject.entries()].sort()) {
       const byKind = new Map()
@@ -2647,12 +2647,6 @@ async function buildGraph () {
   const capped = total > CAP
   if (capped) rows = rows.slice().sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || '')).slice(0, CAP)
 
-  if (stepErrors.length) {
-    // A graph drawn from partial data, silently, is the same mistake the
-    // pipeline makes. Say which runs could not be read.
-    sub.innerHTML += ` <span style="color:var(--reject)">${stepErrors.length} run(s) could not be read: ${esc(stepErrors[0])}${stepErrors.length > 1 ? ' …' : ''}</span>`
-  }
-
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
   for (const r of rows) stageCounts[recipeStage(r)]++
   sub.innerHTML = `<b>Your</b> work in ${where}, at every stage, private drafts included. ` +
@@ -2686,6 +2680,12 @@ async function buildGraph () {
     refreshIcons(); return
   }
 
+  if (stepErrors.length) {
+    // A graph drawn from partial data, silently, is the same mistake the
+    // pipeline makes. Say which runs could not be read.
+    sub.innerHTML += ` <span style="color:var(--reject)">${stepErrors.length} run(s) could not be read: ${esc(stepErrors[0])}${stepErrors.length > 1 ? ' …' : ''}</span>`
+  }
+
   const stepsByRecipe = {}
   rows.forEach((r, i) => { stepsByRecipe[r.id] = stepLists[i] || [] })
   const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#1F1E1C'
@@ -2707,7 +2707,7 @@ async function buildGraph () {
     const stage = recipeStage(r)
     const vis = STAGE_VIS[stage]
     const artifacts = stepsByRecipe[r.id]
-    const steered = ingredients.some(s => s.kind === 'steering' && s.signal === 'correct')
+    const steered = artifacts.some(s => s.kind === 'steering' && s.signal === 'correct')
     nodes.push({
       id: r.id, group: 'recipe', label: r.title.length > 26 ? r.title.slice(0, 24) + '…' : r.title,
       shape: vis.shape, size: vis.size,

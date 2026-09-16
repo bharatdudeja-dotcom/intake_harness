@@ -163,12 +163,20 @@ function serveStatic (res, pathname) {
     if (err) {
       fs.readFile(path.join(WEB_ROOT, 'index.html'), (e2, index) => {
         if (e2) { res.writeHead(404); res.end('not found'); return }
-        res.writeHead(200, { 'Content-Type': MIME['.html'] })
+        res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store, must-revalidate' })
         res.end(index)
       })
       return
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' })
+    // The SPA is one file that changes on every deploy. Without this a browser
+    // keeps serving yesterday's copy, and a fix that is live on the server looks
+    // like it did not work - which is worse than an obvious failure.
+    const ext = path.extname(full)
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' }
+    if (ext === '.html' || ext === '.js' || ext === '.json') {
+      headers['Cache-Control'] = 'no-store, must-revalidate'
+    }
+    res.writeHead(200, headers)
     res.end(data)
   })
 }
