@@ -111,6 +111,46 @@ interface ToolCallResult {
  * (the original .../mcp AEC endpoint) by stripping its trailing /mcp —
  * no separate env var needed per Workfront/Fusion server.
  */
+/**
+ * A gateway, if one is configured.
+ *
+ * MCP_GATEWAY_URL points at something that fronts an estate of MCP servers -
+ * CX Agent Manager's /mcp, in our deployment. It resolves a bare tool name to
+ * whichever registered server actually exposes it, so this client needs no
+ * route map and no per-server URL, and the choice of backing server becomes
+ * configuration in one place instead of an env var in this app.
+ *
+ * MCP_GATEWAY_TOKEN is sent as a bearer token when present. It is the gateway's
+ * credential, NOT the upstream's: the gateway holds the Adobe tokens, and this
+ * app never sees them.
+ */
+function getGatewayUrl(): string | null {
+  const url = process.env.MCP_GATEWAY_URL;
+  return url && url.trim() ? url.trim().replace(/\/+$/, "") : null;
+}
+
+/**
+ * The gateway namespaces every tool it re-exposes by the server it came from -
+ * `adobe-aec__search_adobe_knowledge` - so that two upstreams shipping a tool
+ * with the same name cannot shadow each other, and so nothing upstream can
+ * shadow one of the gateway's own tools.
+ *
+ * MCP_GATEWAY_PREFIX is which registered server this harness should be talking
+ * to. It is the ONLY thing this app needs to know about the estate: what that
+ * name actually points at - the endpoint, the credential, whether it is
+ * Workfront in-house or Adobe's official connector - is configuration in the
+ * gateway. Changing which MCP the agents reach stops being a redeploy here.
+ *
+ * Unset, names are sent through untouched, so a gateway that resolves bare
+ * names needs no prefix.
+ */
+function applyGatewayPrefix(toolName: string): string {
+  const prefix = process.env.MCP_GATEWAY_PREFIX;
+  if (!getGatewayUrl() || !prefix || !prefix.trim()) return toolName;
+  if (toolName.includes("__")) return toolName; // already namespaced
+  return `${prefix.trim()}__${toolName}`;
+}
+
 function getApiBase(): string {
   const url = process.env.MCP_ENDPOINT_URL;
   if (!url) {
@@ -123,7 +163,22 @@ function getApiBase(): string {
 }
 
 function getEndpointForTool(toolName: string): string {
+  // One endpoint for everything when a gateway is configured. The prefix-to-path
+  // map below describes ONE deployment's topology; a gateway's whole job is that
+  // its callers do not need to know any topology.
+  const gateway = getGatewayUrl();
+  if (gateway) return gateway;
   return `${getApiBase()}${resolveMcpPath(toolName)}`;
+}
+
+/** Headers for an MCP call. A gateway may require a bearer token; a bare estate does not. */
+function mcpHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = process.env.MCP_GATEWAY_TOKEN;
+  if (getGatewayUrl() && token && token.trim()) {
+    headers.Authorization = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
+  }
+  return headers;
 }
 
 let requestCounter = 0;
@@ -164,12 +219,16 @@ export async function callMcpTool<T = unknown>(
   try {
     res = await fetch(getEndpointForTool(name), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: mcpHeaders(),
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: ++requestCounter,
         method: "tools/call",
-        params: { name, arguments: args },
+        // The prefixed name goes on the wire. assertToolAllowed above has
+        // already run against the BARE name: the allowlist is a statement about
+        // what this agent is permitted to do, and must not change meaning
+        // because of how the call happens to be routed.
+        params: { name: applyGatewayPrefix(name), arguments: args },
       }),
       signal: controller.signal,
     });

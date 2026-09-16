@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
   let groundingHits: unknown = null;
   try {
-    groundingHits = await callMcpTool("intake", "search_knowledge_base", {
+    groundingHits = await callMcpTool("intake", "search_adobe_knowledge", {
       query: body.input.brief,
       agent: "adobe",
       top_k: 3,

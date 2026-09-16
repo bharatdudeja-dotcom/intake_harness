@@ -54,7 +54,7 @@ export const PIPELINE: AgentDefinition[] = [
     // for an existing duplicate before creating one. No update/delete —
     // intake shouldn't be able to modify or remove existing records.
     allowedTools: [
-      "search_knowledge_base",
+      "search_adobe_knowledge",
       "wf_core_project_list",
       "wf_core_project_get",
       "wf_core_project_create",
@@ -74,7 +74,7 @@ export const PIPELINE: AgentDefinition[] = [
     // rejection (B2), and read/post comments — that's where a rejection
     // reason and the redraft explanation most likely live.
     allowedTools: [
-      "search_knowledge_base",
+      "search_adobe_knowledge",
       "wf_core_project_get",
       "wf_core_project_update",
       "wf_core_issue_get",
@@ -93,7 +93,7 @@ export const PIPELINE: AgentDefinition[] = [
     label: "Agent 3 — Audience Creation",
     owner: "Dev 3 (you)",
     allowedTools: [
-      "search_knowledge_base",
+      "search_adobe_knowledge",
       // B5 (3.1): decide FAC vs. AEP rule builder, and predict membership
       // count before the nightly cutoff (B6) — segment estimation, not the
       // full segmentation-job tools.
@@ -138,7 +138,12 @@ export const ESCALATION: AgentDefinition = {
   path: "/api/agents/escalation",
   label: "Agent 4 — Escalation",
   owner: "Unassigned",
-  allowedTools: ["search_knowledge_base"], // TODO: look up prior similar failures once a real classification store exists
+  // NOTE: the knowledge tool is `search_adobe_knowledge`. `search_knowledge_base`
+  // does NOT exist on any server in the estate - it was asked for here and in
+  // all three agents above, every call failed, the failure was written into the
+  // payload rather than raised, and the run still reported `completed`. That is
+  // why escalation has never fired. Verified against the live endpoint, 238 tools.
+  allowedTools: ["search_adobe_knowledge"], // TODO: look up prior similar failures once a real classification store exists
   contextAccess: ["intake", "review", "audience_creation"],
 };
 
