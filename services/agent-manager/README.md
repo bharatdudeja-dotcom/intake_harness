@@ -61,3 +61,24 @@ Bharat.
 **Before any deploy:** change the App Builder namespace and the package name in
 `app/app.config.yaml`. The package key sets the deploy URL segment, so deploying
 as-is would land on top of the original connector.
+
+
+## Running it locally
+
+```bash
+docker compose up --build          # http://localhost:8080
+```
+
+Or directly:
+
+```bash
+docker run -d --name agent-manager -p 3000:8080   -e DASHBOARD_REQUIRE_IDENTITY=true   -e BOOTSTRAP_ADMINS=you@tapcxm.com   -v agent-manager-data:/data agent-manager:latest
+```
+
+**On Windows, run that from PowerShell, or prefix it with `MSYS_NO_PATHCONV=1`.**
+Git Bash rewrites POSIX-looking values into Windows paths, so
+`-e STORAGE_ROOT=/data` silently becomes `C:/Program Files/Git/data`, the store
+points at a directory that does not exist in the container, and every request
+returns 500. Don't pass `STORAGE_ROOT` at all unless you mean to change it — the
+image already sets `/data`. If you do get it wrong, the container now refuses to
+serve and says exactly this, rather than failing per-request.

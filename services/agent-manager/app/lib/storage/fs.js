@@ -39,7 +39,27 @@ async function walk (dir, out = []) {
 }
 
 async function init () {
-  await fs.mkdir(ROOT(), { recursive: true })
+  const root = ROOT()
+  try {
+    await fs.mkdir(root, { recursive: true })
+  } catch (e) {
+    /*
+     * A bad STORAGE_ROOT used to surface as EACCES on EVERY request, with a
+     * path nobody recognised, and the dashboard just returned 500 forever. The
+     * cause is usually mundane and invisible: running the container from Git
+     * Bash on Windows, where MSYS path conversion silently rewrites
+     * `-e STORAGE_ROOT=/data` into `C:/Program Files/Git/data`. The process then
+     * starts happily and fails on first use.
+     *
+     * Fail here instead, once, naming the value it was actually given - the
+     * whole cost of that bug was that the error never mentioned STORAGE_ROOT.
+     */
+    const detail = `STORAGE_ROOT resolved to "${root}" (from ${process.env.STORAGE_ROOT === undefined ? 'the default' : `STORAGE_ROOT="${process.env.STORAGE_ROOT}"`}), which cannot be created: ${e.message}.`
+    const hint = /^[A-Za-z]:/.test(String(process.env.STORAGE_ROOT || ''))
+      ? ' That is a Windows path. If you started this container from Git Bash, MSYS rewrote the value - prefix the command with MSYS_NO_PATHCONV=1, or drop the flag and let the image default apply.'
+      : ' Check the path exists and is writable by the container user.'
+    throw new Error(detail + hint)
+  }
 
   return {
     async read (key) {
