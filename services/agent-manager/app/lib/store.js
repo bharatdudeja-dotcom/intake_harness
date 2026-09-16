@@ -108,6 +108,13 @@ function toMetadata (resource) {
     // Rolled up by projectRecipe; projected here so every list view can draw the
     // journey without loading each recipe's steps.
     agents, agent_faults: agentFaults,
+    // The marketer's own words, kept so runs can be compared on what was
+    // actually asked for rather than on a truncated title.
+    brief,
+    // Set by start_intake and by nothing else. Its presence is what makes a
+    // record an agent run rather than something a person captured by hand, and
+    // without it in the catalog the two are indistinguishable in a list.
+    upstream,
     // Increment 18 (D64): Head Chef CX-graph gate - a baked recipe is only a CANDIDATE for the
     // Company CX Graph; cx_approved flips true when a Head Chef admits it. Projected into the
     // catalog so list_cx_pending and the CX compiler can read it without loading every full doc.
@@ -127,6 +134,8 @@ function toMetadata (resource) {
     recipe_id: recipeId, baked, baked_at: bakedAt, baked_by: bakedBy,
     models_used: modelsUsed, step_count: stepCount, expires_at: expiresAt,
     agents, agent_faults: agentFaults,
+    brief,
+    upstream,
     cx_approved: cxApproved, cx_approved_by: cxApprovedBy, cx_approved_at: cxApprovedAt,
     practice,
     assigned_to: assignedTo

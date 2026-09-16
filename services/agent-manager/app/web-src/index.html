@@ -488,6 +488,11 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 .hero-card .hero-top b{font-size:15px}
 .hero-card .hero-role{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
   color:var(--hero);font-weight:650}
+#graph-sub{display:flex;align-items:flex-start;gap:9px}
+#graph-sub .agent-face{flex:0 0 auto;margin-top:-3px}
+.hero-queue{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.hero-queue h4{font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--hero);
+  display:flex;align-items:center;gap:6px;margin:0 0 6px}
 .hero-face .am-scan{animation:am-scan 3.8s ease-in-out infinite}
 @keyframes am-scan{0%,100%{transform:translateX(0)}50%{transform:translateX(17px)}}
 
@@ -495,6 +500,15 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
    length is known - it is however many agents the system lists - and a
    percentage would hide which stage the run is actually sitting on. */
 .mcp-row{border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:10px;background:var(--surface-2)}
+.mcp-row.on{background:var(--surface);border-color:var(--border-strong)}
+.mcp-dot{width:8px;height:8px;border-radius:99px;background:var(--border-strong);flex:0 0 auto}
+.mcp-dot.on{background:var(--house);box-shadow:0 0 0 3px color-mix(in oklab,var(--house) 20%,transparent)}
+.switch{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text-2);
+  border:1px solid var(--border);border-radius:99px;padding:3px 9px;background:var(--surface);cursor:pointer}
+.switch input{margin:0;cursor:pointer}
+.mcp-row details summary{cursor:pointer;user-select:none}
+.chip.agent-chip{gap:5px;padding-left:5px}
+.chip.agent-chip .agent-face{margin:-1px 0}
 .mcp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
 .mcp-head .grow{flex:1}
 .mcp-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 12px}
@@ -534,9 +548,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <button data-panel="tasks"><i data-lucide="list-checks"></i> Live Queue <span id="tasks-badge" class="key">4</span></button>
     <div class="group">Knowledge</div>
     <button data-panel="cookbook"><i data-lucide="book-marked"></i> Playbooks <span class="key">5</span></button>
-    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span></button>
-    <button data-panel="headchef"><i data-lucide="stamp"></i> Approvals <span id="headchef-badge" class="key"></span></button>
-    <button data-panel="graph"><i data-lucide="git-fork"></i> My Graph <span class="key">7</span></button>
+    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span><span id="headchef-badge"></span></button>
+    <button data-panel="graph"><i data-lucide="git-fork"></i> Hero Agent Graph <span class="key">7</span></button>
     <button data-panel="cx"><i data-lucide="network"></i> Shared Graph <span class="key">8</span></button>
     <div class="group">Admin</div>
     <button data-panel="settings"><i data-lucide="sliders-horizontal"></i> Settings <span class="key">9</span></button>
@@ -591,7 +604,6 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
   </section>
   <section class="panel" id="panel-tasks"></section>
   <section class="panel" id="panel-cookbook"></section>
-  <section class="panel" id="panel-headchef"></section>
   <section class="panel" id="panel-agents"></section>
   <section class="panel" id="panel-graph">
     <div class="panel-intro" id="graph-sub"></div>
@@ -754,26 +766,56 @@ function agentHash (id) {
    a new agent upstream gets one without a code change. */
 const FACE_HUES = ['--pk-orange', '--pk-red', '--pk-purple', '--pk-blue', '--pk-green', '--pk-yellow']
 
-/* Silhouettes. Different enough that two agents never read as the same character. */
-const HEADS = [
-  'M10 10h24a7 7 0 0 1 7 7v14a7 7 0 0 1-7 7H10a7 7 0 0 1-7-7V17a7 7 0 0 1 7-7z',
-  'M22 4c10 0 17 6 17 15v8c0 7-7 11-17 11S5 34 5 27v-8C5 10 12 4 22 4z',
-  'M22 5l16 8v18l-16 7-16-7V13z',
-  'M9 13h26a5 5 0 0 1 5 5v9a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9v-9a5 5 0 0 1 5-5z'
+/* ---------------------------------------------------------------------------
+ * One silhouette, one cast.
+ *
+ * Every agent is the same robot: the same jaw, the same visor, the same
+ * proportions. Four different head SHAPES made them read as four unrelated
+ * characters that happened to be in the same panel, which is the opposite of
+ * what they are - four stages of one pipeline.
+ *
+ * What separates them is colour and eyes. Each takes one peacock feather, flat,
+ * and its own eye treatment, so it is still identifiable in greyscale or at
+ * 16px where the hue has gone.
+ *
+ * The Hero Agent is the same robot too, and that is deliberate - it belongs to
+ * this cast. It gets exactly two things none of the others do: the crest, and a
+ * visor carrying all six feathers instead of one. Those two differences are the
+ * whole of its glorification, which is why nothing else is allowed to have
+ * them.
+ * ------------------------------------------------------------------------- */
+
+/** The shared body. Both faces are drawn from these two paths and nothing else. */
+const BOT_JAW = 'M11 15h22a6 6 0 0 1 6 6v9a8 8 0 0 1-8 8H13a8 8 0 0 1-8-8v-9a6 6 0 0 1 6-6z'
+const BOT_VISOR = 'M10 21.5h24v4.5a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4z'
+
+/**
+ * What shows through the visor. Index by hash, so an agent keeps its eyes for
+ * ever and a fifth agent gets its own without a code change.
+ * @param {string} glow colour the eyes are drawn in
+ */
+const BOT_EYES = [
+  // round
+  (g) => `<circle cx="16.5" cy="25.5" r="2.5" fill="${g}"/><circle cx="27.5" cy="25.5" r="2.5" fill="${g}"/>`,
+  // wide slits
+  (g) => `<rect x="13" y="24.2" width="7" height="2.6" rx="1.3" fill="${g}"/><rect x="24" y="24.2" width="7" height="2.6" rx="1.3" fill="${g}"/>`,
+  // squared
+  (g) => `<rect x="14" y="23.4" width="5.4" height="4.2" rx="1.1" fill="${g}"/><rect x="24.6" y="23.4" width="5.4" height="4.2" rx="1.1" fill="${g}"/>`,
+  // stacked bars
+  (g) => `<rect x="13.6" y="23.4" width="6.2" height="1.8" rx=".9" fill="${g}"/><rect x="13.6" y="26.2" width="6.2" height="1.8" rx=".9" fill="${g}" opacity=".55"/>` +
+         `<rect x="24.2" y="23.4" width="6.2" height="1.8" rx=".9" fill="${g}"/><rect x="24.2" y="26.2" width="6.2" height="1.8" rx=".9" fill="${g}" opacity=".55"/>`
 ]
 
-const MOUTHS = [
-  (c) => `<path d="M16 31q6 4.5 12 0" stroke="${c}" stroke-width="2.1" fill="none" stroke-linecap="round"/>`,
-  (c) => `<rect x="16.5" y="30" width="11" height="2.8" rx="1.4" fill="${c}" opacity=".8"/>`,
-  (c) => `<path d="M17 31.5h10" stroke="${c}" stroke-width="2.1" stroke-linecap="round"/>`,
-  (c) => `<path d="M16 30.5q6 5 12 0" stroke="${c}" stroke-width="2.1" fill="none" stroke-linecap="round"/><path d="M19.5 34h5" stroke="${c}" stroke-width="1.5" stroke-linecap="round" opacity=".45"/>`
+/** Mouths, kept quiet. The hero has the only expressive one. */
+const BOT_MOUTHS = [
+  (c) => `<path d="M17.5 34h9" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`,
+  (c) => `<rect x="17.5" y="33" width="9" height="2.4" rx="1.2" fill="${c}" opacity=".75"/>`,
+  (c) => `<path d="M17.5 33.4h9" stroke="${c}" stroke-width="1.8" stroke-linecap="round"/><path d="M20 36h4" stroke="${c}" stroke-width="1.4" stroke-linecap="round" opacity=".4"/>`,
+  (c) => `<path d="M18 33.6q4 2.2 8 0" stroke="${c}" stroke-width="2" fill="none" stroke-linecap="round"/>`
 ]
 
 /**
- * The Hero Agent is drawn by a different function (heroFace) rather than as a
- * flag in here. It is not a fifth member of the cast with a nicer colour - it
- * is the thing that reads across all of their runs, and a face built from the
- * same parts would say the opposite.
+ * One agent of the cast.
  *
  * @param {string} id agent id from the registry
  * @param {boolean} awake has it produced anything
@@ -781,54 +823,44 @@ const MOUTHS = [
  */
 function agentFace (id, awake = false, size = 44) {
   if (String(id || '').toLowerCase() === 'hero') return heroFace(awake, size)
+
   const h = agentHash(id)
   // Unsigned shifts, and a guarded pick: a signed shift on a hash above 2^31
   // goes negative, a negative modulo stays negative, and the lookup returns
   // undefined - which took the whole panel down once already.
   const pick = (arr, shift) => arr[((h >>> shift) % arr.length + arr.length) % arr.length]
   const hue = `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
-  const head = pick(HEADS, 4)
-  const mouth = pick(MOUTHS, 9)
-  const antenna = (h >>> 13) % 3 !== 0
-  const drift = 3.4 + ((h >>> 17) % 28) / 10
+  const eyes = pick(BOT_EYES, 5)
+  const mouth = pick(BOT_MOUTHS, 11)
   const blink = 4.5 + ((h >>> 21) % 45) / 10
 
-  const ink = awake ? hue : 'var(--muted)'
   const shell = awake ? hue : 'var(--border-strong)'
   const fill = awake ? 'var(--surface)' : 'var(--surface-2)'
-
-  const eyes = awake
-    ? `<g class="am-eyes" style="--drift:${drift}s;--blink:${blink}s">
-         <ellipse cx="16" cy="22" rx="5" ry="5.4" fill="var(--surface)" stroke="${hue}" stroke-width="1.7"/>
-         <ellipse cx="28" cy="22" rx="5" ry="5.4" fill="var(--surface)" stroke="${hue}" stroke-width="1.7"/>
-         <g class="am-pupils">
-           <circle cx="16" cy="22" r="2.3" fill="${hue}"/><circle cx="28" cy="22" r="2.3" fill="${hue}"/>
-           <circle cx="17.1" cy="20.7" r=".8" fill="var(--surface)" opacity=".9"/>
-           <circle cx="29.1" cy="20.7" r=".8" fill="var(--surface)" opacity=".9"/>
-         </g>
-         <g class="am-lids"><rect x="10.5" y="15" width="11" height="13" fill="${fill}"/><rect x="22.5" y="15" width="11" height="13" fill="${fill}"/></g>
-       </g>`
-    : `<path d="M11.5 22.5h9M23.5 22.5h9" stroke="var(--muted)" stroke-width="2.3" stroke-linecap="round"/>`
+  // Mono, flat: one feather per agent, and the visor is the only place it lands
+  // at full strength. A gradient here would start to look like the hero.
+  const visorFill = awake ? hue : 'var(--surface-3)'
+  const glow = awake ? 'var(--surface)' : 'var(--muted)'
 
   return `<svg class="agent-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
       viewBox="0 0 44 44" role="img" aria-label="${esc(id)}">
-    ${antenna ? `<path d="M22 3.5v6" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
-      <circle class="${awake ? 'am-blip' : ''}" cx="22" cy="2.6" r="2.4" fill="${awake ? hue : 'var(--border-strong)'}"/>` : ''}
-    <path d="${head}" fill="${fill}" stroke="${shell}" stroke-width="2" stroke-linejoin="round"/>
-    ${eyes}
-    ${mouth(ink)}
+    <path d="${BOT_JAW}" fill="${fill}" stroke="${shell}" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${BOT_VISOR}" fill="${visorFill}" stroke="${shell}" stroke-width="1.6"
+      stroke-linejoin="round" opacity="${awake ? '1' : '.65'}"/>
+    ${awake
+      ? `<g class="am-eyes" style="--blink:${blink}s">${eyes(glow)}</g>`
+      : `<path d="M13.5 25.5h6.5M24 25.5h6.5" stroke="var(--muted)" stroke-width="2.1" stroke-linecap="round"/>`}
+    ${mouth(awake ? hue : 'var(--muted)')}
   </svg>`
 }
 
 /**
  * The Hero Agent.
  *
- * Distinct on purpose, in three ways a person reads before they read a label:
- * a crest instead of an antenna, a visor instead of two separate eyes, and a
- * confident set to the mouth rather than the neutral line the others carry.
- * Its colour is --hero, the mix of the peacock rather than one feather of it.
+ * The same robot as the rest of the cast, with exactly two things none of them
+ * have: a crest, and a visor carrying all six feathers rather than one. It
+ * reads across every agent's runs, so it wears all of their colours.
  *
- * Dormant it keeps the visor dark and the crest unlit, so "no runs to read yet"
+ * Dormant it keeps the visor dark and the crest unlit, so "nothing to read yet"
  * looks like waiting rather than like the hero is missing.
  *
  * @param {boolean} awake has it anything to read across
@@ -853,25 +885,23 @@ function heroFace (awake = false, size = 44) {
       </linearGradient>
     </defs>
 
-    <!-- crest: the six feathers, folded into one mark -->
+    <!-- the crest: the six feathers folded into one mark. Nothing else gets this -->
     <path d="M22 1.5l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"
       fill="${awake ? `url(#${gid})` : 'var(--surface-2)'}"
       stroke="${shell}" stroke-width="1.3" stroke-linejoin="round"/>
 
-    <!-- a taller, squarer jaw than any of the cast heads -->
-    <path d="M11 15h22a6 6 0 0 1 6 6v9a8 8 0 0 1-8 8H13a8 8 0 0 1-8-8v-9a6 6 0 0 1 6-6z"
-      fill="${fill}" stroke="${shell}" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="${BOT_JAW}" fill="${fill}" stroke="${shell}" stroke-width="2.2" stroke-linejoin="round"/>
 
-    <!-- one visor, not two eyes -->
-    <path d="M10 21.5h24v4.5a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4z"
-      fill="${awake ? `url(#${gid})` : 'var(--surface-3)'}"
+    <!-- all six feathers, where the cast each carry one -->
+    <path d="${BOT_VISOR}" fill="${awake ? `url(#${gid})` : 'var(--surface-3)'}"
       stroke="${shell}" stroke-width="1.6" stroke-linejoin="round" opacity="${awake ? '1' : '.65'}"/>
     ${awake ? `<rect class="am-scan" x="10" y="21.5" width="7" height="8.5" fill="var(--surface)" opacity=".34"/>` : ''}
 
-    <!-- confident, not neutral -->
+    <!-- the only expressive mouth in the cast -->
     <path d="M17 34q5 3.6 10 0" stroke="${ink}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
   </svg>`
 }
+
 
 function agentMark (id) { return AGENT_MARK[String(id || '').toLowerCase()] || '' }
 function agentLabel (id, label) {
@@ -1286,7 +1316,25 @@ function typeLabel (t) { return TYPE_LABEL[t] || t }
    store's type is still "recipe" and renaming a stored value would orphan
    every record written before the rename. */
 function kindChip (kind) { return `<span class="chip"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i>${esc(typeLabel(kind))}</span>` }
-function sourceChip (src) { if (!src || src === 'unknown') return ''; return `<span class="chip"><i data-lucide="terminal"></i>${esc(src)}</span>` }
+/*
+ * Who produced this artifact.
+ *
+ * A source that matches a registered agent is drawn AS that agent - its face and
+ * its label - because "Agent 2 - Review / Triage" is the answer to the question
+ * the reader is actually asking, and `review` next to a terminal icon is not.
+ * Anything else (desktop-ai, ide-agent, agent-manager) keeps the plain chip: it
+ * is a client, not a member of the cast, and dressing it as one would be a lie
+ * about who did the work.
+ */
+function sourceChip (src) {
+  if (!src || src === 'unknown') return ''
+  const agent = (state.systemAgents || []).find(a => a.id === src)
+  if (agent) {
+    return `<span class="chip agent-chip" title="Produced by ${esc(agent.label || agent.id)}">` +
+      `${agentFace(agent.id, true, 16)}${esc(agent.label || agent.id)}</span>`
+  }
+  return `<span class="chip"><i data-lucide="terminal"></i>${esc(src)}</span>`
+}
 function modelChip (m) { return m ? `<span class="chip"><i data-lucide="cpu"></i>${esc(m)}</span>` : '' }
 /**
  * Token cost chip (D84). Distinguishes "the client never reported it" from "it cost nothing",
@@ -1420,6 +1468,8 @@ function updateRoleUI () {
     signout.style.display = 'none'
   }
 
+  // The pending-decision count now badges the Agents entry, because that is
+  // where the queue lives.
   const badge = $('#headchef-badge')
   if (badge) {
     const n = state.cxPending.length
@@ -1464,7 +1514,7 @@ function renderAll () {
   // Connections at the same time. Now a broken panel says so and the rest load.
   const panels = [
     ['home', renderHome], ['projects', renderProjects], ['worklog', renderWorklogList],
-    ['tasks', renderTasks], ['cookbook', renderCookbook], ['headchef', renderHeadChef],
+    ['tasks', renderTasks], ['cookbook', renderCookbook],
     ['agents', renderAgents], ['settings', renderSettings], ['connections', renderConnections]
   ]
   for (const [name, fn] of panels) {
@@ -2128,7 +2178,15 @@ function journeyAgents () {
  * @param {object} r catalog row
  * @param {object[]} [steps] when the caller already has them, faults are shown too
  */
+function isAgentRun (r) {
+  // Started through start_intake (upstream is set by nothing else), or it has
+  // already recorded an artifact from a named agent. Anything else is somebody's
+  // captured work and has no journey to be part of.
+  return !!(r && (r.upstream || (r.agents && r.agents.length)))
+}
+
 function runProgress (r, steps) {
+  if (!isAgentRun(r)) return null
   const journey = journeyAgents()
   if (!journey.length) return null
   // r.agents is the server's rollup of which agents actually produced an
@@ -2150,7 +2208,11 @@ function runProgress (r, steps) {
   return {
     journey, reached, stage, total: journey.length, faulted,
     live: !settled && stage < journey.length,
-    current: !settled && stage < journey.length ? journey[stage] : null
+    // The agent in flight is the one AFTER the last that reported. With nothing
+    // reported yet there is no such agent, and naming journey[0] would be a
+    // guess dressed as an observation - the run may not have reached it.
+    current: (!settled && stage > 0 && stage < journey.length) ? journey[stage] : null,
+    started: stage > 0
   }
 }
 
@@ -2165,7 +2227,11 @@ function journeyBar (r, steps) {
   const cap = p.current
     ? `<span class="live"><i data-lucide="loader"></i> ${esc(p.current.label)}</span>
        <span>step <b>${p.stage + 1}</b> of ${p.total}</span>`
-    : `<span><b>${p.stage}</b> of ${p.total} ${p.stage === p.total ? 'complete' : 'stages recorded'}</span>`
+    : p.live && !p.started
+      // Handed over and nothing back yet. True, and not the same as "working on step 1".
+      ? `<span class="live"><i data-lucide="loader"></i> sent, no stage reported yet</span>
+         <span>0 of ${p.total}</span>`
+      : `<span><b>${p.stage}</b> of ${p.total} ${p.stage === p.total ? 'complete' : 'stages recorded'}</span>`
   const faults = p.faulted.size
     ? `<span style="color:var(--reject)"><i data-lucide="triangle-alert"></i> ${p.faulted.size} faulted</span>` : ''
   return `<div class="jrn"><div class="jrn-bar">${segs}</div><div class="jrn-cap">${cap}${faults}</div></div>`
@@ -2205,15 +2271,43 @@ function renderAgents () {
       </div>
       <p class="help" style="margin:10px 0 0">It proposes only. A named human always decides what
         reaches the Shared Knowledge Graph &mdash; that gate is the point, not an obstacle.</p>
-      ${pending.length ? pending.map(r => `
+      ${pending.length ? `<div class="hero-queue">
+        <h4><i data-lucide="stamp"></i> Waiting for a decision <span class="sub">(${pending.length})</span></h4>
+        ${pending.map(r => `
         <div class="listrow">
           <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
-          ${isHead ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="check"></i> Promote</button>
+          ${statusBadge(r)}
+          <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'}${r.baked_at ? ` · ${esc(relTime(r.baked_at))}` : ''}</span>
+          ${isHead ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="check"></i> Admit</button>
             <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>`
-            : '<span class="sub"><i data-lucide="lock"></i> needs an approver</span>'}
-        </div>`).join('')
+            : '<span class="sub"><i data-lucide="lock"></i> waiting on an approver</span>'}
+        </div>`).join('')}
+      </div>`
         : `<div class="quiet-note" style="margin-top:10px"><i data-lucide="check-circle-2"></i>
             Nothing waiting on a human right now.</div>`}
+
+      ${(() => {
+        /*
+         * Approved but not handed over.
+         *
+         * This used to be the Approvals panel's own section, and it belongs
+         * here for the same reason the queue does: an approver waiting on
+         * something could not otherwise tell "nothing submitted" from "sitting
+         * with its author". Whose move it is, is the information.
+         */
+        const notSubmitted = rows.filter(r => recipeStage(r) === 'ready')
+        if (!notSubmitted.length) return ''
+        return `<div class="hero-queue">
+          <h4><i data-lucide="clock"></i> Approved, not yet handed over <span class="sub">(${notSubmitted.length})</span></h4>
+          <p class="help">These cannot be admitted yet - their author still needs to approve them across.</p>
+          ${notSubmitted.map(r => `
+            <div class="listrow">
+              <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
+              <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'}</span>
+              ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Hero Agent</button>` : ''}
+            </div>`).join('')}
+        </div>`
+      })()}
     </div>`
 
   const systemCard = (sys) => {
@@ -2282,48 +2376,6 @@ function renderAgents () {
   refreshIcons()
 }
 
-function renderHeadChef () {
-  const el = $('#panel-headchef')
-  if (!el) return
-  const canApprove = state.role === 'head-chef'
-  const pending = state.cxPending.slice().sort((a, b) => (b.baked_at || b.updated || '').localeCompare(a.baked_at || a.updated || ''))
-  // D84: work that is consented but NOT baked can never reach this queue, and a Hero Agent waiting
-  // on it had no way to tell that from "nothing submitted". Show it, clearly separated, with whose
-  // action is outstanding.
-  const notSubmitted = scoped(state.recipes)
-    .filter(r => recipeStage(r) === 'ready')
-    .sort((a, b) => (b.updated_at || b.updated || '').localeCompare(a.updated_at || a.updated || ''))
-  el.innerHTML = `
-    <p class="panel-intro">Runs approved and handed over, waiting to be admitted to the
-      <b>Shared Knowledge Graph</b>. Approving a run makes it a candidate; an approver admits it.
-      ${canApprove ? 'You are an approver.'
-        : 'You are not an approver, so the decisions here are read-only for you &mdash; but your own runs are in this list, and you can see exactly where they are.'}</p>
-    ${pending.length ? `<div class="cards">${pending.map(r => `
-      <div class="card">
-        <div class="card-head"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b>${esc(r.title)}</b>${statusBadge(r)}</div>
-        ${crumb(r)}
-        <div class="meta">${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}<span>${r.step_count || 0} artifact(s)</span>${r.baked_at ? `<span>baked ${relTime(r.baked_at)}</span>` : ''}</div>
-        <div class="rowbtns">
-          <button class="btn tiny" data-open-recipe="${esc(r.id)}"><i data-lucide="eye"></i> Review</button>
-          ${canApprove ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="network"></i> Admit to the Shared Graph</button>
-          <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>`
-          : '<span class="sub"><i data-lucide="lock"></i> waiting on an approver</span>'}
-        </div>
-      </div>`).join('')}</div>` : '<p class="empty"><i data-lucide="check-circle-2"></i><br>Queue clear. Nothing is waiting for admission.</p>'}
-
-    ${notSubmitted.length ? `<div class="card section-gap" style="border-left:3px solid var(--ready)">
-      <h3 class="head"><i data-lucide="clock"></i> Not submitted yet (${notSubmitted.length})</h3>
-      <p class="help">Approved but not handed over, so they are not candidates yet and cannot be
-        admitted. If you are waiting on one, its author still needs to approve it across.</p>
-      ${notSubmitted.map(r => `
-        <div class="listrow">
-          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
-          ${statusBadge(r)}
-          <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'} · ${r.step_count || 0} artifact(s)</span>
-        </div>`).join('')}
-    </div>` : ''}`
-  refreshIcons()
-}
 
 /* =====================================================================
    Cookbook: baked/approved recipes, grouped by kind, approved steps in order
@@ -2512,39 +2564,60 @@ function renderSettings () {
         capability on its next tool list &mdash; no deploy. Names are prefixed with the server id, so two
         upstreams can both ship a <span class="mono">search</span> without shadowing each other or anything
         native.</p>
-      <p class="help"><b>Never paste a real token.</b> Put it in the environment and reference it as
-        <span class="mono">\${ENV_VAR}</span> &mdash; the value is resolved at call time and is never
-        stored or shown here.</p>
+      <p class="help"><b>Authenticate</b> opens the provider&rsquo;s own login page. Agent Manager
+        discovers what the server needs, registers itself, and takes the token back &mdash; nobody mints a
+        service token in a developer console and nobody pastes a secret into this form. The token is
+        written server-side and is <b>never sent to this page</b>: all the browser is ever told is
+        whether there is one. Servers with no sign-in still accept a value under Configure, and an
+        <span class="mono">\${ENV_VAR}</span> there is resolved from the environment at call time.</p>
       ${(state.mcpServers || []).length ? (state.mcpServers || []).map(m => `
-        <div class="mcp-row" data-mcp-row="${esc(m.id)}">
+        <div class="mcp-row${m.active ? ' on' : ''}" data-mcp-row="${esc(m.id)}">
           <div class="mcp-head">
+            <span class="mcp-dot${m.active ? ' on' : ''}"></span>
             <b>${esc(m.label || m.id)}</b>
             <span class="chip mono">${esc(m.id)}</span>
-            ${m.active ? '<span class="badge house"><i data-lucide="check"></i>active</span>'
-              : '<span class="badge"><i data-lucide="pause"></i>inactive</span>'}
-            ${m.auth_configured ? '<span class="chip"><i data-lucide="key-round"></i>credential set</span>'
-              : (m.auth_source ? `<span class="chip" style="color:var(--reject)"><i data-lucide="key-round"></i>${esc(m.auth_source)} not set</span>` : '')}
+            ${m.practice ? `<span class="chip">${esc(m.practice)}</span>` : ''}
+${m.oauth_connected
+              ? `<span class="chip" style="color:var(--house)" title="Signed in ${esc(relTime(m.oauth_connected_at))}${m.oauth_expires_at ? `, token expires ${esc(relTime(m.oauth_expires_at))}` : ''}"><i data-lucide="badge-check"></i>authenticated</span>`
+              : m.auth_configured
+                ? '<span class="chip"><i data-lucide="key-round"></i>credential set</span>'
+                : (m.auth_source && m.auth_source !== 'oauth'
+                    ? `<span class="chip" style="color:var(--reject)"><i data-lucide="key-round"></i>${esc(m.auth_source)} not set</span>`
+                    : '')}
             <span class="grow"></span>
+            ${m.oauth_connected
+              ? `<button class="btn tiny" data-mcp-signout="${esc(m.id)}"><i data-lucide="log-out"></i> Sign out</button>`
+              : m.endpoint
+                ? `<button class="btn tiny primary" data-mcp-signin="${esc(m.id)}"><i data-lucide="log-in"></i> Authenticate</button>`
+                // Sign-in starts by asking the endpoint what it needs, so
+                // offering the button without one can only produce a failure.
+                : `<span class="sub"><i data-lucide="link-2-off"></i> add an endpoint first</span>`}
+            <label class="switch" title="Registered but unused when off"><input type="checkbox" data-mcp-toggle="active" data-mcp-id="${esc(m.id)}" ${m.active ? 'checked' : ''}> on</label>
+            <label class="switch" title="Re-exposes this server's own tools through Agent Manager, so Claude can call them directly"><input type="checkbox" data-mcp-toggle="gateway" data-mcp-id="${esc(m.id)}" ${m.gateway ? 'checked' : ''}> to Claude</label>
             <button class="btn tiny" data-mcp-check="${esc(m.id)}"><i data-lucide="stethoscope"></i> Check</button>
           </div>
-          <div class="mcp-fields">
-            <label class="flabel">Name<input class="field" data-mcp-field="label" value="${esc(m.label || '')}"></label>
-            <label class="flabel">Domain<input class="field" data-mcp-field="practice" value="${esc(m.practice || '')}" placeholder="workfront | aep | aem"></label>
-            <label class="flabel" style="grid-column:1/-1">Endpoint<input class="field mono" data-mcp-field="endpoint" value="${esc(m.endpoint || '')}"></label>
-            <label class="flabel">Instance<input class="field mono" data-mcp-field="instance" value="${esc(m.instance || '')}" placeholder="tenant, where one is needed"></label>
-            <label class="flabel">Authorization<input class="field mono" data-mcp-field="auth" placeholder="\${WORKFRONT_TOKEN}"></label>
-          </div>
-          <div class="rowbtns">
-            <label class="chip"><input type="checkbox" data-mcp-field="active" ${m.active ? 'checked' : ''}> Active</label>
-            <label class="chip" title="Re-exposes this server's own tools through Agent Manager, so Claude can call them directly. Names are prefixed with the server id, so an upstream tool can never shadow a native one."><input type="checkbox" data-mcp-field="gateway" ${m.gateway ? 'checked' : ''}> Expose its tools to Claude</label>
-            <button class="btn tiny sage" data-mcp-save="${esc(m.id)}"><i data-lucide="save"></i> Save</button>
-            <span class="sub" data-mcp-result></span>
-          </div>
-          ${(m.notes || []).length ? `<p class="help">${esc((m.notes || []).join(' '))}</p>` : ''}
+          <div class="sub mono" style="margin:-2px 0 0 18px">${esc(m.endpoint || 'no endpoint set')}</div>
+          <span class="sub" data-mcp-result style="margin-left:18px"></span>
+          <details style="margin-top:8px">
+            <summary class="sub">Configure</summary>
+            <div class="mcp-fields" style="margin-top:8px">
+              <label class="flabel">Name<input class="field" data-mcp-field="label" value="${esc(m.label || '')}"></label>
+              <label class="flabel">Domain<input class="field" data-mcp-field="practice" value="${esc(m.practice || '')}" placeholder="workfront | aep | aem"></label>
+              <label class="flabel" style="grid-column:1/-1">Endpoint<input class="field mono" data-mcp-field="endpoint" value="${esc(m.endpoint || '')}"></label>
+              <label class="flabel">Instance<input class="field mono" data-mcp-field="instance" value="${esc(m.instance || '')}" placeholder="tenant, where one is needed"></label>
+              <label class="flabel">Authorization <span class="sub">(only if the server has no sign-in)</span>
+                <input class="field mono" type="password" autocomplete="off" data-mcp-field="auth" placeholder="leave blank to keep what is stored">
+              </label>
+            </div>
+            <div class="rowbtns">
+              <button class="btn tiny sage" data-mcp-save="${esc(m.id)}"><i data-lucide="save"></i> Save</button>
+            </div>
+            ${(m.notes || []).length ? `<p class="help">${esc((m.notes || []).join(' '))}</p>` : ''}
+          </details>
         </div>`).join('')
         : '<p class="empty"><i data-lucide="plug"></i><br>No MCP servers registered.</p>'}
       <div class="rowbtns section-gap">
-        <button class="btn tiny" id="mcp-add"><i data-lucide="plus"></i> Register another server</button>
+        <button class="btn tiny" id="mcp-add"><i data-lucide="plus"></i> Add an MCP server</button>
       </div>
     </div>
     <div class="card">
@@ -3066,9 +3139,11 @@ async function buildGraph () {
   let rows = scoped(state.recipes).filter(isMine)
   const where = state.project ? `<b>${esc(state.project)}</b>` : 'all projects'
   if (!rows.length) {
-    sub.innerHTML = `Nothing of yours in ${where} yet.`
+    sub.innerHTML = `${agentFace('hero', false, 30)} The Hero Agent has nothing of yours to read in ${where} yet.`
     legend.innerHTML = ''
-    container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="inbox"></i><br>You have not captured anything here yet. This graph only ever shows your own work.</div>'
+    container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="inbox"></i><br>' +
+      'Nothing captured here yet. This graph only ever shows YOUR work, private drafts included &mdash; ' +
+      'which is exactly why it can never be pointed at somebody else. Shared knowledge has its own graph.</div>'
     refreshIcons(); return
   }
   const CAP = 40
@@ -3078,7 +3153,8 @@ async function buildGraph () {
 
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
   for (const r of rows) stageCounts[recipeStage(r)]++
-  sub.innerHTML = `<b>Your</b> work in ${where}, at every stage, private drafts included. ` +
+  sub.innerHTML = `${agentFace('hero', true, 30)} <b>What the Hero Agent reads across your work</b> in ${where} ` +
+    `&mdash; every run at every stage, private drafts included, and the artifacts each agent produced drawn as that agent. ` +
     `${stageCounts.draft} in progress · ${stageCounts.ready} ready to approve · ${stageCounts.awaiting} with the Hero Agent · ${stageCounts.incx} in the Shared Knowledge Graph. ` +
     `${capped ? `Showing the ${CAP} most recent of ${total}.` : ''}`
   // Legend mirrors the four stages exactly, so the colour tells you where the work stands.
@@ -3508,7 +3584,7 @@ async function quietPoll () {
     const [recipes, projects, tasks, pending, cookoff] = await Promise.all([recipesPromise(), projectsPromise(), callTool('list_active_tasks'), callTool('list_cx_pending'), callTool('get_cookoff')])
     state.recipesAll = recipes; state.recipes = recipes; state.projects = projects; state.tasks = tasks; state.cxPending = pending; state.cookoff = cookoff
     renderProjectSwitcher(); updateRoleUI()
-    renderHome(); renderProjects(); renderWorklogList(); renderTasks(); renderCookbook(); renderHeadChef()
+    renderHome(); renderProjects(); renderWorklogList(); renderTasks(); renderCookbook(); renderAgents()
   } catch (e) { /* transient - stay silent, the next tick tries again */ }
 }
 setInterval(quietPoll, 20000)
@@ -3594,7 +3670,18 @@ $('#attach-confirm').addEventListener('click', async () => {
 /* =====================================================================
    Navigation, project switcher, theme, palette
    ===================================================================== */
-const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', headchef: '🦸 Hero Agent proposals', agents: 'Agents', graph: 'My Knowledge Graph', cx: 'Shared Knowledge Graph', settings: 'Settings', connections: 'Connections' }
+/*
+ * "My Graph" described whose LOGIN it belonged to. What a person is actually
+ * looking at is the Hero Agent's own view - the runs it reads across, and the
+ * artifacts each agent produced, drawn as those agents. Naming it after the
+ * thing doing the reading says what the picture is.
+ *
+ * It stays scoped to your own work, private drafts included, which is why the
+ * Shared Knowledge Graph is a separate panel rather than a filter on this one.
+ * The headchef entry is gone: approvals moved into the Hero Agent's card in
+ * Agents, so there is no panel left to title.
+ */
+const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', agents: 'Agents', graph: 'Hero Agent Graph', cx: 'Shared Knowledge Graph', settings: 'Settings', connections: 'Connections' }
 function activePanel () { const s = document.querySelector('section.panel.active'); return s ? s.id.replace('panel-', '') : 'home' }
 function rebuildActiveGraph () { const p = activePanel(); if (p === 'graph') buildGraph(); else if (p === 'cx') renderCxNetwork() }
 /**
@@ -3746,6 +3833,16 @@ document.addEventListener('click', async (e) => {
   const id = (check || save).dataset.sysCheck || (check || save).dataset.sysSave
 
   if (check) {
+    // Same rule as the MCP rows: not configured, or switched off, is not a failure.
+    const known = (state.agentSystems || []).find(x => x.id === id)
+    if (known && !known.base_url) {
+      if (out) { out.style.color = 'var(--muted)'; out.textContent = 'no base URL set yet - add one under Configure' }
+      return
+    }
+    if (known && !known.active) {
+      if (out) { out.style.color = 'var(--muted)'; out.textContent = 'switched off - turn it on to check it' }
+      return
+    }
     if (out) { out.textContent = 'asking…'; out.style.color = '' }
     try {
       const r = await callTool('check_agent_system', { id })
@@ -3782,6 +3879,66 @@ document.addEventListener('click', async (e) => {
    Registering a server is configuration, so it happens here rather than in a
    deploy. Check is offered separately from Save on purpose: a saved server that
    has never answered is the state that wasted the most time on this project. */
+/* Signing in to an upstream.
+   A popup, not a fetch: the browser has to land on the provider's own domain,
+   and only a real navigation can do that. The state parameter is minted and
+   consumed server-side, so this page never handles it - and never handles the
+   token either. */
+let mcpConnectWindow = null
+document.addEventListener('click', async (e) => {
+  const signin = e.target.closest('[data-mcp-signin]')
+  const signout = e.target.closest('[data-mcp-signout]')
+  if (!signin && !signout) return
+
+  if (signout) {
+    const id = signout.dataset.mcpSignout
+    if (!confirm(`Sign out of ${id}? Its stored token is discarded and the server is switched off.`)) return
+    try {
+      await callTool('set_mcp_server', { id, disconnect: true })
+      toast('Signed out'); await reloadLight()
+    } catch (err) { banner(`Could not sign out: ${err.message}`) }
+    return
+  }
+
+  const id = signin.dataset.mcpSignin
+  const url = `${location.origin}/mcp-connect/start?id=${encodeURIComponent(id)}`
+  mcpConnectWindow = window.open(url, 'mcp-connect', 'width=520,height=720')
+  if (!mcpConnectWindow) { banner('Allow pop-ups for this site to sign in to an MCP server.'); return }
+  banner('')
+})
+
+/* The popup tells us when it is done. A poll would be simpler and would also
+   keep running after the user gave up, so listen instead. */
+window.addEventListener('message', async (ev) => {
+  if (!ev.data || ev.data.type !== 'mcp-connect') return
+  if (ev.data.ok) { toast('Authenticated'); await reloadLight() }
+  else banner('Sign-in did not complete. The window shows what the provider said.')
+})
+
+/* A switch writes straight through: the point of putting it on the row is that
+   turning a server on is one click, not open-form-edit-save. */
+document.addEventListener('change', async (e) => {
+  const t = e.target.closest('[data-mcp-toggle]')
+  if (!t) return
+  const row = t.closest('.mcp-row')
+  const out = row ? row.querySelector('[data-mcp-result]') : null
+  const args = { id: t.dataset.mcpId, [t.dataset.mcpToggle]: t.checked }
+  if (out) { out.textContent = 'saving…'; out.style.color = '' }
+  try {
+    const r = await callTool('set_mcp_server', args)
+    if (out) {
+      out.style.color = r.ready ? 'var(--house)' : 'var(--exp)'
+      out.textContent = r.ready ? 'saved · ready' : `saved · ${r.blocked_because || 'not ready'}`
+    }
+    await reloadLight()
+  } catch (err) {
+    // Put the switch back where it was: leaving it showing a state that was
+    // never saved is worse than the failure.
+    t.checked = !t.checked
+    if (out) { out.style.color = 'var(--reject)'; out.textContent = err.message }
+  }
+})
+
 document.addEventListener('click', async (e) => {
   const check = e.target.closest('[data-mcp-check]')
   const save = e.target.closest('[data-mcp-save]')
@@ -3803,6 +3960,21 @@ document.addEventListener('click', async (e) => {
   const id = (check || save).dataset.mcpCheck || (check || save).dataset.mcpSave
 
   if (check) {
+    /*
+     * A server that is switched off, or has no endpoint, has not FAILED - there
+     * was nothing to ask. Reporting "did not answer: registered but not active"
+     * in the reject colour put two red lines on a Settings page where nothing
+     * was wrong, and that is how a red line that matters stops being noticed.
+     */
+    const known = (state.mcpServers || []).find(x => x.id === id)
+    if (known && !known.endpoint) {
+      if (out) { out.style.color = 'var(--muted)'; out.textContent = 'no endpoint set yet - add one under Configure' }
+      return
+    }
+    if (known && !known.active) {
+      if (out) { out.style.color = 'var(--muted)'; out.textContent = 'switched off - turn it on to check it' }
+      return
+    }
     if (out) { out.textContent = 'asking…'; out.style.color = '' }
     try {
       const r = await callTool('check_mcp_server', { id })

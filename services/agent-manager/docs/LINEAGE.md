@@ -187,7 +187,7 @@ and the 2256-line inline script still passes `node --check`.
 | Head chef | **Hero Agent** | nav, panel title, all copy |
 | Practice | **Agent** (with a mark) | graph filter, recipe meta, login form |
 | Company CX Graph | Shared Knowledge Graph | nav, panel title |
-| Knowledge Graph | My Knowledge Graph | nav |
+| Knowledge Graph | **Hero Agent Graph** | nav |
 | Active tasks | Live Queue | nav, panel title |
 | Cookbook | Playbooks | nav, panel title |
 | Cook-off | **removed** | nav entry deleted |

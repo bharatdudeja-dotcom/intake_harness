@@ -7,6 +7,7 @@ const RUNS = [
     updated: '2026-09-16T01:00:00Z', updated_at: '2026-09-16T01:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 4200,
     baked: false, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-1' },
     agents: ['intake'], agent_faults: ['intake']
   },
   {
@@ -16,7 +17,18 @@ const RUNS = [
     updated: '2026-09-15T09:00:00Z', updated_at: '2026-09-15T09:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 9100,
     baked: true, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-0' },
     agents: ['intake', 'review', 'audience_creation'], agent_faults: []
+  }
+  ,
+  {
+    id: 'recipe-handmade', title: 'As-built architecture, verified 16 Sep', type: 'recipe',
+    owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com',
+    project: 'Comcast Intake', segments: { project: 'Comcast Intake' },
+    status: 'experimental', step_count: 2, version: 1,
+    created: '2026-09-16T02:00:00Z', updated: '2026-09-16T02:00:00Z', updated_at: '2026-09-16T02:00:00Z',
+    models_used: ['opus-5'], tokens_used: 1200, baked: false, cx_approved: false
+    // deliberately NO upstream and NO agents: nothing here ever touched an agent
   }
 ]
 

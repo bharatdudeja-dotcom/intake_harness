@@ -36,7 +36,61 @@
  * quietly did not work. A missing upstream means missing tools, visibly.
  */
 
+const { z } = require('zod')
 const mcpServers = require('./mcp-servers')
+
+/**
+ * JSON Schema -> a Zod raw shape.
+ *
+ * The MCP wire format describes a tool's arguments in JSON Schema, and the
+ * server SDK's registerTool wants Zod. Handing it the JSON Schema verbatim gets
+ * "inputSchema must be a Zod schema or raw shape" and the tool is silently not
+ * registered - which is how 238 discovered tools became 0 exposed ones.
+ *
+ * Only the subset real MCP tools use is translated. Anything unrecognised
+ * becomes z.any() rather than being dropped: an argument we cannot describe is
+ * still an argument the upstream wants, and refusing to pass it through would
+ * break the call for the sake of a type we failed to parse.
+ */
+function zodForProperty (schema) {
+    if (!schema || typeof schema !== 'object') return z.any()
+    // A union of types, or anything expressed via anyOf/oneOf, is not worth
+    // reconstructing faithfully - pass it through.
+    if (Array.isArray(schema.type) || schema.anyOf || schema.oneOf || schema.allOf) return z.any()
+
+    let out
+    switch (schema.type) {
+        case 'string':
+            out = Array.isArray(schema.enum) && schema.enum.length
+                ? z.enum(schema.enum.map(String))
+                : z.string()
+            break
+        case 'number': out = z.number(); break
+        case 'integer': out = z.number().int(); break
+        case 'boolean': out = z.boolean(); break
+        case 'array': out = z.array(zodForProperty(schema.items)); break
+        case 'object':
+            out = schema.properties && Object.keys(schema.properties).length
+                ? z.object(zodShape(schema)).passthrough()
+                : z.record(z.any())
+            break
+        default: out = z.any()
+    }
+    if (schema.description) out = out.describe(String(schema.description))
+    return out
+}
+
+/** @returns {object} property name -> ZodType, with non-required fields optional */
+function zodShape (schema) {
+    const props = (schema && schema.properties) || {}
+    const required = new Set((schema && schema.required) || [])
+    const shape = {}
+    for (const [key, spec] of Object.entries(props)) {
+        const zt = zodForProperty(spec)
+        shape[key] = required.has(key) ? zt : zt.optional()
+    }
+    return shape
+}
 
 /** Discovery is over the network; cache it so only the first caller pays. */
 const TTL_MS = 60_000
@@ -114,6 +168,8 @@ async function catalog (overrides) {
                 // between two similar tools from two vendors needs to know.
                 description: `[via ${server.label || server.id}] ${t.description || t.name}`,
                 inputSchema: t.inputSchema || { type: 'object' },
+                // What registerTool actually accepts.
+                zodShape: zodShape(t.inputSchema || { type: 'object' }),
                 _server: server.id,
                 _tool: t.name
             })
@@ -131,18 +187,59 @@ async function catalog (overrides) {
 }
 
 /**
- * Call a proxied tool.
+ * Resolve a BARE tool name to the server that actually has it.
+ *
+ * The namespaced form is what a fresh client should use, but an existing client
+ * cannot be expected to rename its calls to adopt a gateway. The agent harness
+ * asks for `search_adobe_knowledge` and `wf_core_project_list`, and it is the
+ * gateway's job to know where those live - that is the whole point of putting a
+ * gateway in front of an estate.
+ *
+ * Ambiguity is refused, never guessed. Two servers exposing the same tool name
+ * is exactly the case where picking one silently would send a write to the
+ * wrong tenant.
+ *
+ * @returns {Promise<{serverId: string, tool: string}>}
+ */
+async function resolveBareName (name, overrides) {
+    const servers = gatewayServers(overrides)
+    const hits = []
+    for (const s of servers) {
+        const { tools } = await discover(s)
+        if (tools.some(t => t.name === name)) hits.push(s.id)
+    }
+    if (hits.length === 1) return { serverId: hits[0], tool: name }
+    if (hits.length > 1) {
+        throw new Error(`"${name}" is exposed by more than one server (${hits.join(', ')}). Call it by its namespaced name, e.g. ${proxyName(hits[0], name)}.`)
+    }
+    // Say what IS available. A bare "unknown tool" is what let
+    // search_knowledge_base fail silently on every run for weeks.
+    const near = []
+    for (const s of servers) {
+        const { tools } = await discover(s)
+        for (const t of tools) {
+            if (t.name.includes(name) || name.includes(t.name.split('_')[0])) near.push(proxyName(s.id, t.name))
+        }
+    }
+    throw new Error(`No gateway server exposes a tool called "${name}".` +
+        (near.length ? ` Did you mean: ${near.slice(0, 5).join(', ')}?` : ' Check list_gateway_tools for what is available.'))
+}
+
+/**
+ * Call a proxied tool, by namespaced name or bare name.
  * Errors are THROWN. Folding an upstream failure into a result that still looks
  * successful is the exact pattern that has kept the intake pipeline reading
  * healthy while every grounding call failed.
  */
 async function callProxied (name, args, overrides) {
-    const parsed = parseProxyName(name)
-    if (!parsed) throw new Error(`${name} is not a gateway tool`)
+    let parsed = parseProxyName(name)
+    // A bare name is resolved against the estate rather than refused, so a
+    // client can be pointed at the gateway without being rewritten first.
+    if (!parsed) parsed = await resolveBareName(name, overrides)
     const server = mcpServers.get(parsed.serverId, overrides)
     if (!server) throw new Error(`No MCP server registered with id '${parsed.serverId}'`)
     if (!server.gateway) throw new Error(`${parsed.serverId} is registered but not in the gateway`)
     return mcpServers.callTool(server, parsed.tool, args || {})
 }
 
-module.exports = { catalog, callProxied, discover, gatewayServers, proxyName, parseProxyName, reset, TTL_MS }
+module.exports = { catalog, callProxied, resolveBareName, zodShape, zodForProperty, discover, gatewayServers, proxyName, parseProxyName, reset, TTL_MS }

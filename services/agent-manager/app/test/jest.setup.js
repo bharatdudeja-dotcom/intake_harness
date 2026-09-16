@@ -88,3 +88,16 @@ afterEach(() => {
 beforeEach(() => {
     try { require('../lib/storage').resetStorage() } catch (e) { /* not loaded */ }
 })
+
+/*
+ * Capture is closed by default in production (settings.captureMode). Most of
+ * this suite drives save_resource / start_recipe / append_step to test the STORE
+ * - ordering, versioning, approval, retention - not the capture policy, and
+ * those assertions are about a mechanism that still has to work when the policy
+ * allows it. So the policy is relaxed here, once, and tested on purpose in
+ * capture-policy.test.js instead of incidentally in every other file.
+ */
+// Set on the environment, not the settings cache: individual files call
+// settings._setCache() in their own setup, which runs after this and would wipe
+// it. captureMode() falls back to the environment when the override is silent.
+process.env.CAPTURE_MODE = 'open'

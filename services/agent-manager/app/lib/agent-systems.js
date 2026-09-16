@@ -118,11 +118,18 @@ function get (id, overrides) {
 function resolve (id, practice, overrides) {
     if (id) {
         const found = get(id, overrides)
-        if (!found) return { system: null, error: `Unknown agent system '${id}'. Known: ${list().map(s => s.id).join(', ')}` }
+        if (!found) return { system: null, error: `Unknown agent system '${id}'. Known: ${list(overrides).map(s => s.id).join(', ')}` }
         if (!found.active) return { system: null, error: `Agent system '${id}' is registered but not active.` }
         return { system: found, error: null }
     }
-    const active = registry().systems.filter(s => s.active && (!practice || s.practice === practice))
+    /*
+     * merged(), not registry(): the seed FILE is not the answer once an admin
+     * has changed something in Settings. This line read the file, so pointing
+     * the harness at a different host from Settings appeared to work - the
+     * registry showed the new URL - while every run went on being sent to the
+     * old one. The override was correct and simply not consulted.
+     */
+    const active = merged(overrides).filter(s => s.active && (!practice || s.practice === practice))
     if (active.length === 1) return { system: active[0], error: null }
     if (active.length === 0) return { system: null, error: 'No active agent system is registered.' }
     return {
@@ -232,8 +239,73 @@ async function waitForRun (system, upstreamRunId, { timeoutMs = 25000, intervalM
  * the MCP server (the tool is `search_adobe_knowledge`), and the run still
  * reads as completed.
  */
+/* ---------------------------------------------------------------------------
+ * Finding a failure a stage did not admit to.
+ *
+ * This is the product. Everything else is presentation.
+ *
+ * The first version looked for a key called `error`, `err` or `exception`, and
+ * on that basis reported zero silent failures on a run where Agent 1 had failed
+ * to create the Workfront issue. The failure was shaped like this:
+ *
+ *   "workfront": { "created": false,
+ *                  "reason": "MCP tool ... returned an error: ... not found",
+ *                  "wouldHaveCreated": { ... } }
+ *
+ * No key called error, so nothing was found, so the time ledger printed "No
+ * stage contradicted its own status this run" underneath a stage that had. A
+ * detector that only catches the shape somebody thought of is worse than no
+ * detector, because the clean bill of health is believed.
+ *
+ * THE DIFFICULTY IS NOT FINDING FAILURES, IT IS NOT CRYING WOLF.
+ *
+ * These two are structurally identical:
+ *
+ *   { created:  false, reason: "MCP tool ... not found" }   <- a real failure
+ *   { grounded: false, reason: "nothing missing to ground" } <- correct, normal
+ *
+ * So a false flag is not a matter of a stricter regex. It needs both halves: a
+ * flag whose name asserts an ATTEMPT AT AN ACTION, and a reason that reads like
+ * something went wrong. `grounded` is not an action, and "nothing missing to
+ * ground" is not a complaint.
+ *
+ * And a stage that says openly in its status message that it could not
+ * determine something is NOT failing silently - it is doing the opposite. Only
+ * a contradiction counts here.
+ * ------------------------------------------------------------------------- */
+
+/** Keys that assert an action was attempted, so `false` means it did not happen. */
+const OUTCOME_FLAGS = [
+    'created', 'saved', 'sent', 'written', 'applied', 'updated', 'deleted',
+    'ok', 'success', 'succeeded', 'completed', 'posted', 'submitted', 'set'
+]
+
+/** Keys that carry the explanation next to such a flag. */
+const REASON_KEYS = ['reason', 'message', 'detail', 'details', 'error_message', 'errormessage']
+
+/**
+ * Does this text read like something went wrong?
+ *
+ * Deliberately about failure, not about absence. "nothing missing to ground"
+ * and "no existing segment matched" are both normal outcomes and neither is
+ * matched here.
+ */
+const FAILURE_TEXT = /\b(error|errored|failed|failure|exception|not found|missing tool|unknown tool|refused|rejected|denied|unauthori[sz]ed|forbidden|timed? ?out|unreachable|unavailable|not permitted|invalid)\b|-3\d{4}\b/i
+
+function looksLikeFailure (text) {
+    return FAILURE_TEXT.test(String(text || ''))
+}
+
+/**
+ * A failure hiding inside an otherwise successful-looking payload.
+ *
+ * @param {*} value the stage's output
+ * @param {number} [depth]
+ * @returns {string|null} what went wrong, or null
+ */
 function findEmbeddedError (value, depth = 0) {
-    if (depth > 6 || value == null) return null
+    if (depth > 8 || value == null) return null
+
     if (Array.isArray(value)) {
         for (const v of value) {
             const hit = findEmbeddedError(v, depth + 1)
@@ -241,12 +313,51 @@ function findEmbeddedError (value, depth = 0) {
         }
         return null
     }
-    if (typeof value === 'object') {
-        for (const [k, v] of Object.entries(value)) {
-            if (['error', 'err', 'exception'].includes(k.toLowerCase()) && v) return String(v).slice(0, 500)
-            const hit = findEmbeddedError(v, depth + 1)
-            if (hit) return hit
+
+    if (typeof value !== 'object') return null
+
+    // 1. An explicit error field. The original check, kept.
+    for (const [k, v] of Object.entries(value)) {
+        if (['error', 'err', 'exception', 'errors'].includes(k.toLowerCase()) && v) {
+            const text = typeof v === 'string' ? v : JSON.stringify(v)
+            if (text && text !== '{}' && text !== '[]' && text !== 'false' && text !== 'null') {
+                return text.slice(0, 500)
+            }
         }
+    }
+
+    // 2. MCP's own error envelope.
+    if (value.isError === true) {
+        const content = Array.isArray(value.content)
+            ? value.content.map(c => (c && c.text) || '').filter(Boolean).join(' ')
+            : ''
+        return (content || 'the tool returned isError: true').slice(0, 500)
+    }
+
+    // 3. A declared action that did not happen, with a reason that reads like a
+    //    failure. Both halves are required - see the header.
+    const keys = Object.keys(value)
+    const flag = keys.find(k => OUTCOME_FLAGS.includes(k.toLowerCase()) && value[k] === false)
+    if (flag) {
+        const reasonKey = keys.find(k => REASON_KEYS.includes(k.toLowerCase()) && value[k])
+        const reason = reasonKey ? String(value[reasonKey]) : ''
+        if (reason && looksLikeFailure(reason)) {
+            return `${flag} is false: ${reason}`.slice(0, 500)
+        }
+    }
+
+    // 4. A nested status that says failed, where the payload also explains it.
+    //    The stage's OWN upstream_status is handled separately; this is for an
+    //    inner call that failed inside an outer success.
+    const status = String(value.status || '').toLowerCase()
+    if (['failed', 'error', 'errored'].includes(status)) {
+        const reasonKey = keys.find(k => REASON_KEYS.includes(k.toLowerCase()) && value[k])
+        return `status is "${status}"${reasonKey ? `: ${String(value[reasonKey])}` : ''}`.slice(0, 500)
+    }
+
+    for (const v of Object.values(value)) {
+        const hit = findEmbeddedError(v, depth + 1)
+        if (hit) return hit
     }
     return null
 }
@@ -291,6 +402,7 @@ function loopCount (steps) {
 module.exports = {
     FIELDS,
     merged,
+    looksLikeFailure,
     registry, reset, list, get, resolve,
     discoverAgents, startRun, getRun, waitForRun,
     toSteps, loopCount, findEmbeddedError

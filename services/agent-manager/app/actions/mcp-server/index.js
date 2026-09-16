@@ -78,7 +78,7 @@ async function registerGatewayTools (server) {
         try {
             server.registerTool(
                 t.name,
-                { description: t.description, inputSchema: t.inputSchema },
+                { description: t.description, inputSchema: t.zodShape },
                 async (args) => {
                     const result = await mcpGateway.callProxied(t.name, args, settings.mcpServers())
                     return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }] }

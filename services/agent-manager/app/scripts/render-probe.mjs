@@ -20,6 +20,7 @@ const RUNS = [
     updated: '2026-09-16T01:00:00Z', updated_at: '2026-09-16T01:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 4200,
     baked: false, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-1' },
     agents: ['intake'], agent_faults: ['intake']
   },
   {
@@ -29,7 +30,18 @@ const RUNS = [
     updated: '2026-09-15T09:00:00Z', updated_at: '2026-09-15T09:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 9100,
     baked: true, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-0' },
     agents: ['intake', 'review', 'audience_creation'], agent_faults: []
+  }
+  ,
+  {
+    id: 'recipe-handmade', title: 'As-built architecture, verified 16 Sep', type: 'recipe',
+    owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com',
+    project: 'Comcast Intake', segments: { project: 'Comcast Intake' },
+    status: 'experimental', step_count: 2, version: 1,
+    created: '2026-09-16T02:00:00Z', updated: '2026-09-16T02:00:00Z', updated_at: '2026-09-16T02:00:00Z',
+    models_used: ['opus-5'], tokens_used: 1200, baked: false, cx_approved: false
+    // deliberately NO upstream and NO agents: nothing here ever touched an agent
   }
 ]
 
@@ -118,7 +130,7 @@ w.auth.cred = { userKey: 'x' }
 try { await w.loadAll() } catch (e) { errors.push('loadAll: ' + e.stack) }
 
 const PANELS = ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks',
-  'renderCookbook', 'renderHeadChef', 'renderAgents', 'renderSettings', 'renderConnections']
+  'renderCookbook', 'renderAgents', 'renderSettings', 'renderConnections']
 for (const fn of PANELS) {
   try { if (typeof w[fn] === 'function') w[fn](); else errors.push(fn + ': not defined') }
   catch (e) { errors.push(fn + ': ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
@@ -154,7 +166,6 @@ report('home', '#panel-home')
 report('programmes', '#panel-projects')
 report('live queue', '#panel-tasks')
 report('playbooks', '#panel-cookbook')
-report('approvals', '#panel-headchef')
 report('agents', '#panel-agents', 'Hero Agent')
 report('settings', '#panel-settings', 'MCP servers')
 report('connections', '#panel-connections')
@@ -166,8 +177,19 @@ console.log('agent tiles              :', q('#panel-agents .agent-tile'))
 console.log('progress bars rendered   :', q('.jrn-bar'))
 console.log('progress segments        :', q('.jrn-seg'))
 console.log('segments marked faulted  :', q('.jrn-seg.fault'))
+// A run no agent ever touched must get NO journey bar. It was getting one, with
+// an invented current stage, which is the precise failure this product exists to
+// catch - so it is asserted here rather than left to a screenshot.
+const handmade = [...D.querySelectorAll('[data-open-worklog],[data-open-recipe]')]
+  .map(b => b.closest('.card')).filter(Boolean)
+  .filter(c => /As-built architecture/.test(c.textContent))
+const bogus = handmade.filter(c => c.querySelector('.jrn-bar'))
+console.log('bar on a non-agent run   :', bogus.length === 0 ? 'none (correct)' : 'STILL SHOWN x' + bogus.length)
+if (bogus.length) errors.push('journey bar drawn on a run no agent touched')
 console.log('MCP rows in Settings     :', q('#panel-settings .mcp-row'))
-console.log('Approvals nav entry      :', q('nav button[data-panel="headchef"]'))
+// Approvals moved into the Hero Agent card, so the check moved with them.
+console.log('approvals in hero card   :', q('#panel-agents .hero-queue'))
+console.log('no separate approvals nav:', q('nav button[data-panel="headchef"]') === 0 ? 'correct' : 'STILL THERE')
 console.log('drawer ledger            :', q('#drawer .ledger, #drawer .jrn-bar'))
 console.log('drawer approve button    :', q('#drawer [data-submit-run]'))
 const M = { id: 'recipe-live', owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com', status: 'experimental', baked: false, cx_approved: false }

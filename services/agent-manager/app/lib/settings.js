@@ -213,6 +213,28 @@ function mcpServers () {
  * admin changed, merged by id.
  * @returns {object[]}
  */
+/**
+ * What may be captured here.
+ *
+ *   'agent-runs-only'  (default) only work an AGENT did, plus a human's
+ *                      steering of it. A normal conversation with Claude, and
+ *                      anything Claude produced in one, is NOT recorded.
+ *   'open'             the general capture the cookbook engine came with.
+ *
+ * Closed by default, and that default is the whole point. This service inherited
+ * a store whose purpose was to capture everything a connected AI produced, and
+ * the result was predictable once a client was pointed at it: architecture
+ * diagrams and chat summaries from unrelated conversations filed themselves into
+ * the agent record. Rewriting the server instructions stopped Claude being ASKED
+ * to do it; this stops it being ABLE to.
+ *
+ * @returns {'agent-runs-only'|'open'}
+ */
+function captureMode () {
+    const raw = String((cache && cache.capture_mode) || process.env.CAPTURE_MODE || '').trim()
+    return raw === 'open' ? 'open' : 'agent-runs-only'
+}
+
 function agentSystems () {
     const override = cache && cache.agent_systems
     return Array.isArray(override) ? override : []
@@ -292,6 +314,7 @@ module.exports = {
     practiceIds,
     mcpServers,
     agentSystems,
+    captureMode,
     userPracticesMap,
     practicesForOwner,
     defaultPracticeFor,

@@ -306,6 +306,94 @@ work, or set_work_context to move into an existing one, so runs do not pile into
 programme. The configured segmentation levels are ${SEGMENT_LEVEL_KEYS.join(' -> ')} (call
 get_segmentation_config for the labels).`
 
+/*
+ * Words that carry no distinguishing power in a campaign brief. Without this,
+ * "the" and "for" make every brief look like every other brief.
+ */
+const BRIEF_STOPWORDS = new Set([
+    'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'we', 'our', 'is', 'it',
+    'with', 'this', 'that', 'from', 'by', 'at', 'as', 'be', 'are', 'need', 'want', 'hey',
+    'just', 'going', 'after', 'there', 'want', 'audience', 'campaign', 'push', 'customers'
+])
+
+/** The words worth comparing two briefs on. */
+function briefTerms (text) {
+    return new Set(
+        String(text || '')
+            .toLowerCase()
+            .split(/[^a-z0-9$]+/)
+            .filter(w => w.length > 2 && !BRIEF_STOPWORDS.has(w))
+    )
+}
+
+/**
+ * Runs that look like this one, and what differs.
+ *
+ * WHY THIS IS THE POINT OF THE WHOLE LAYER
+ *
+ * A connected Claude read five runs of ours and noticed, unprompted, that four
+ * earlier "Fall Switch and Save / Northeast HSD without mobile" runs carried a
+ * $600 prepaid card and the newest carried $350 - and asked whether the offer
+ * had changed or the numbers had got crossed. That is exactly the question a
+ * cross-run record exists to raise, and it was raised by a person reading
+ * carefully rather than by the thing built to raise it.
+ *
+ * So: on every intake, look for briefs that overlap heavily and report the
+ * NUMBERS THAT DIFFER between them. Numbers are where this goes wrong - an
+ * offer, a card value, a count - and two briefs that agree on every word except
+ * a figure are either a deliberate revision or a mistake, and only a human can
+ * say which.
+ *
+ * It reports; it never blocks. A revised offer is a completely legitimate reason
+ * for two similar briefs to exist.
+ */
+async function findSimilarRuns (brief, project, context) {
+    const terms = briefTerms(brief)
+    if (terms.size < 3) return []
+
+    const entries = await store.listResources({
+        visibleTo: resolvePrincipal(context),
+        visibleSubmitted: callerCanReview(context)
+    }).catch(() => [])
+
+    const money = (text) => [...new Set(String(text || '').match(/\$\s?\d[\d,]*|\b\d[\d,]*\s*(?:dollar|usd)s?\b/gi) || [])]
+    const mine = money(brief)
+
+    const out = []
+    for (const entry of entries) {
+        if (!entry.upstream) continue
+        if (project && entry.project && entry.project !== project) continue
+        // Older runs predate the stored brief; the title is a weaker but real
+        // fallback rather than skipping them entirely.
+        const otherText = entry.brief || entry.title
+        const other = briefTerms(otherText)
+        if (!other.size) continue
+
+        let shared = 0
+        for (const t of terms) if (other.has(t)) shared++
+        // Jaccard against the smaller set, so a short title is not penalised.
+        const overlap = shared / Math.min(terms.size, other.size)
+        if (overlap < 0.55) continue
+
+        const theirs = money(otherText)
+        const differing = mine.filter(m => theirs.length && !theirs.includes(m))
+            .concat(theirs.filter(t => mine.length && !mine.includes(t)))
+
+        out.push({
+            recipe_id: entry.id,
+            title: entry.title,
+            created: entry.created,
+            overlap: Math.round(overlap * 100) / 100,
+            // The thing worth a second look.
+            differing_figures: [...new Set(differing)],
+            agents: entry.agents || [],
+            faulted: entry.agent_faults || []
+        })
+    }
+    out.sort((a, b) => b.overlap - a.overlap)
+    return out.slice(0, 5)
+}
+
 /**
  * Resolve the contributing author from the caller's IMS identity, if present.
  * @param {{ userInfo?: object }} context
@@ -465,6 +553,28 @@ function validateAgainstPolicy (policyEntry, { title, content, format, project, 
  * @param {McpServer} server - The MCP server instance
  * @param {{ userInfo?: object }} [context] - caller identity resolved from IMS auth, if any
  */
+/**
+ * Why a general capture was refused, said in a way that helps.
+ *
+ * Naming the right server matters: a client that has been told to capture its
+ * work will otherwise retry, or decide the call failed for a transport reason.
+ */
+function refuseCapture (what) {
+    return errorResult(
+        `Refused: ${what} is not what CX Agent Manager records. ` +
+        'This service holds what the Workfront intake AGENTS did - runs come from start_intake - ' +
+        'plus the way a human steered those runs (append_step with kind "steering" on an existing agent run). ' +
+        'A normal conversation, and anything you produced in one, belongs in the company cookbook, ' +
+        'which is a different server. ' +
+        'An admin can allow general capture with update_settings({capture_mode: "open"}) if that is genuinely wanted.'
+    )
+}
+
+/** Is this an agent run - i.e. did start_intake create it? */
+function isAgentRunResource (resource) {
+    return !!(resource && resource.upstream)
+}
+
 function registerTools (server, context = {}) {
     // READ-ONLY CHOKE POINT (D79). Wrap registration once so every write tool is gated for a
     // `viewer` identity without repeating a guard in ~20 handlers - and so a write tool added
@@ -534,6 +644,15 @@ function registerTools (server, context = {}) {
             task_status: z.enum(TASK_STATUSES).optional().describe('For kind "handoff-prompt": the task lifecycle status - defaults to "open"')
         },
         async ({ type, title, content, format, id, project, epic, story, task, segments, tags, fields, tokens_used: tokensDelta, model, recipe_id: recipeId, target_agent: targetAgent, task_status: taskStatus }) => {
+            /*
+             * A handoff-prompt is a POINTER to work somebody else will do, not a
+             * record of a conversation, and the server instructions actively ask
+             * clients to write them - so it stays allowed. Everything else is
+             * general capture, which is not this service's job.
+             */
+            if (settings.captureMode() !== 'open' && type !== HANDOFF_TYPE) {
+                return refuseCapture(`saving a "${type}"`)
+            }
             const policyEntry = policy.getResourceType(type)
             if (!policyEntry) {
                 return errorResult(`Unknown resource type '${type}'`)
@@ -1102,6 +1221,12 @@ function registerTools (server, context = {}) {
             if (practice && !settings.practiceIds().includes(practice)) {
                 return errorResult(`Unknown practice '${practice}'. Valid: ${settings.practiceIds().join(', ') || '(none configured)'} - see list_practices.`)
             }
+            // Runs are created by start_intake, from a brief, by the pipeline.
+            // An empty thread opened by a chat client is the beginning of exactly
+            // the capture this service does not do.
+            if (settings.captureMode() !== 'open') {
+                return refuseCapture('starting a new working thread')
+            }
             const resource = {
                 id,
                 title,
@@ -1165,9 +1290,26 @@ function registerTools (server, context = {}) {
             title: z.string().optional().describe('A short title for the run. Defaults to the first line of the brief.'),
             project: z.string().optional().describe('Programme this run belongs to. Defaults to the active work context.'),
             system_id: z.string().optional().describe('Which agent system to run it on. Omit when only one is active.'),
-            wait_ms: z.number().int().min(0).max(120000).optional().describe('How long to wait for the pipeline before returning what it has so far. Default 25000.')
+            wait_ms: z.number().int().min(0).max(120000).optional().describe('How long to wait for the pipeline before returning what it has so far. Default 25000.'),
+            /*
+             * Cost and provenance for the CALLING client's own work.
+             *
+             * The server instructions tell every client to "always report model
+             * and tokens_used", and this tool - the only one that starts a run -
+             * accepted neither. So Claude Desktop reported them nowhere, every
+             * run showed "tokens n/r", and the dashboard's telemetry column was
+             * empty by construction. An instruction a tool makes impossible to
+             * follow is a bug in the tool.
+             *
+             * These describe the client's work in reading the brief and calling
+             * this tool. The AGENTS' own model and tokens come from upstream, on
+             * their own artifacts, and are a different number.
+             */
+            model: z.string().optional().describe('Which model YOU are, e.g. claude-opus-5. Recorded against the brief artifact.'),
+            tokens_used: z.number().int().min(0).optional().describe('Tokens YOUR call consumed. Omitted is recorded as "not reported", never as zero.'),
+            source: z.string().optional().describe('Which client you are, e.g. "desktop-ai", "ide-agent". Defaults to agent-manager.')
         },
-        async ({ brief, title, project, system_id: systemId, wait_ms: waitMs }) => {
+        async ({ brief, title, project, system_id: systemId, wait_ms: waitMs, model, tokens_used: tokensUsed, source }) => {
             const { system, error } = agentSystems.resolve(systemId, undefined, settings.agentSystems())
             if (error) return errorResult(error)
 
@@ -1207,6 +1349,16 @@ function registerTools (server, context = {}) {
                 // The upstream run is REFERENCED, never joined. Their database stays
                 // theirs; this is a typed pointer we resolve through the adapter.
                 upstream: { system_id: system.id, run_id: started.upstream_run_id },
+                /*
+                 * The brief, verbatim, on the run itself.
+                 *
+                 * Comparing runs on their TITLE does not work: the title is a
+                 * truncated brief, and it truncates before the part that
+                 * matters. Two briefs identical except "$600" versus "$350"
+                 * scored a perfect match with no differing figures, because
+                 * neither figure was in either title.
+                 */
+                brief,
                 steps: []
             }
 
@@ -1229,13 +1381,36 @@ function registerTools (server, context = {}) {
 
             // Artifact 0 is the brief, verbatim. Everything downstream is judged
             // against it, so it is captured before any agent touches it.
-            addStep('message', narrate.narrateBrief(brief, system), { format: 'md', tags: ['brief'] })
+            addStep('message', narrate.narrateBrief(brief, system), {
+                format: 'md',
+                tags: ['brief'],
+                // Whoever called this read the brief and decided to start a run;
+                // that is their work and their cost, and it rolls up to the run
+                // through projectRecipe.
+                source: source || 'agent-manager',
+                model,
+                tokens_used: tokensUsed
+            })
 
             const waited = await agentSystems.waitForRun(
                 system, started.upstream_run_id, { timeoutMs: waitMs == null ? 25000 : waitMs }
             )
             const steps = agentSystems.toSteps(waited.envelope)
             const agents = await agentSystems.discoverAgents(system).catch(() => [])
+            /*
+             * The Workfront tenant, for deep links in the narration.
+             *
+             * Read from the registry rather than configured here: whichever
+             * Workfront MCP server is registered carries its own instance, so
+             * changing tenant is a Settings change and the links follow.
+             */
+            const workfrontInstance = (() => {
+                const servers = mcpServers.list(settings.mcpServers())
+                const wf = servers.find(x => x.practice === 'workfront' && x.instance) ||
+                    servers.find(x => x.instance)
+                return wf ? wf.instance : null
+            })()
+
             const labelFor = (agentId) => {
                 const hit = agents.find(a => a.id === agentId)
                 return (hit && hit.label) || agentId
@@ -1244,8 +1419,27 @@ function registerTools (server, context = {}) {
             for (const st of steps) {
                 // Markdown, not a JSON dump. A record nobody can read is not a
                 // record - see lib/narrate.js.
-                addStep('doc', narrate.narrateStep(st, labelFor(st.agent_id)), {
+                /*
+                 * Cost and model, where the upstream reports them. It mostly does
+                 * not, and an absent value is recorded as ABSENT rather than as
+                 * zero: "not reported" and "free" are different claims, and
+                 * quietly turning one into the other is how a token total stops
+                 * meaning anything. Read defensively - metadata is inconsistently
+                 * shaped between stages (see agent-systems.loopCount).
+                 */
+                const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
+                const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
+                const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
+                const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
+                    ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
+                const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
+
+                addStep('doc', narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }), {
                     format: 'md',
+                    // Who actually did this. Not the thing that wrote it down.
+                    source: st.agent_id,
+                    model,
+                    tokens_used: tokens,
                     tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
                     provenance: {
                         upstream_task_run_id: st.upstream_task_run_id,
@@ -1270,12 +1464,23 @@ function registerTools (server, context = {}) {
                 format: 'md', tags: ['ledger']
             })
 
-            resource.content = stepsLib.composeContent(resource.steps)
+            /*
+             * Roll the run up the same way every other save path does.
+             *
+             * This used to set content/content_hash/step_count by hand and save,
+             * which meant the ONE tool that creates agent runs was the one tool
+             * that did not compute `agents` or `agent_faults` - so a freshly
+             * captured run had five artifacts and no recorded stages, and every
+             * progress bar read zero on exactly the runs that had progress. The
+             * older runs only looked right because a backfill script had been
+             * over them.
+             */
+            projectRecipe(resource, resource.steps)
             resource.content_hash = contentHash(resource.content)
-            resource.step_count = resource.steps.length
             await store.saveResource(resource)
 
             const faults = steps.filter(st => st.embedded_error)
+            const similar = await findSimilarRuns(brief, resolvedProject, context).catch(() => [])
 
             return jsonResult({
                 run_id: id,
@@ -1293,7 +1498,13 @@ function registerTools (server, context = {}) {
                 loop_count: agentSystems.loopCount(steps),
                 // Stated explicitly so an assistant repeats it to the marketer
                 // instead of reporting a green run.
-                warnings: faults.map(f => `${labelFor(f.agent_id)} reported "${f.upstream_status}" but its tool call failed: ${f.embedded_error}`),
+                warnings: faults.map(f => `${labelFor(f.agent_id)} reported "${f.upstream_status}" but its tool call failed: ${f.embedded_error}`)
+                    .concat(similar.filter(s => s.differing_figures.length).map(s =>
+                        `A very similar brief ran before ("${s.title.slice(0, 60)}") and the figures differ: ` +
+                        `${s.differing_figures.join(' vs ')}. Confirm which is current before this is built - ` +
+                        'two briefs alike in every word but a number are either a revision or a mistake.'
+                    )),
+                similar_runs: similar,
                 note: waited.settled
                     ? undefined
                     : 'The pipeline had not finished when this returned. Call get_intake with the run_id for the rest.'
@@ -1370,6 +1581,7 @@ function registerTools (server, context = {}) {
             auth: z.string().optional().describe('Authorization header value, or ${ENV_VAR} to read it from the environment. Blank when the server owns auth.'),
             instance: z.string().optional().describe('Tenant, where the server needs one (Workfront)'),
             active: z.boolean().optional().describe('Off leaves it registered but unused'),
+            disconnect: z.boolean().optional().describe('Sign out: clears the stored credential and any OAuth tokens for this server, and switches it off'),
             gateway: z.boolean().optional().describe('Re-expose the tools of this server through Agent Manager, so a connected client (Claude) can call them directly. Names are prefixed with the server id, so an upstream tool can never shadow a native one.')
         },
         async (args) => {
@@ -1380,6 +1592,34 @@ function registerTools (server, context = {}) {
             const existing = overrides.find(s => s.id === args.id) || { id: args.id }
             const merged = { ...existing }
             for (const [k, v] of Object.entries(args)) if (v !== undefined) merged[k] = v
+            if (args.disconnect) {
+                /*
+                 * Sign out. The entry stays registered - forgetting the server
+                 * entirely is a different, louder action than forgetting its
+                 * token.
+                 *
+                 * AND IT IS RECORDED. A working Workfront token disappeared
+                 * during a session and there was no way to tell whether a person
+                 * had clicked Sign out or something in this code had called
+                 * disconnect. Losing a credential is bad; not being able to say
+                 * what lost it is worse, because the next hour goes on
+                 * speculation instead of on the cause.
+                 */
+                delete merged.disconnect
+                const had = !!existing.auth || !!(existing.oauth && existing.oauth.connected_at)
+                merged.auth = null
+                merged.oauth = null
+                merged.active = false
+                merged.disconnected_at = new Date().toISOString()
+                merged.disconnected_by = resolvePrincipal(context)
+                if (had) {
+                    // No module logger here; console is what the host captures.
+                    console.warn(
+                        `[credential] ${args.id} signed out by ${merged.disconnected_by} at ${merged.disconnected_at} - ` +
+                        'stored token and OAuth state discarded, server switched off'
+                    )
+                }
+            }
 
             const next = overrides.filter(s => s.id !== args.id).concat([merged])
             const current = await store.getSettingsOverride()
@@ -1527,6 +1767,18 @@ function registerTools (server, context = {}) {
                 return errorResult(`No recipe found with id '${recipeId}' - start one with start_recipe`)
             }
             if (!callerCanWrite(resource, context)) return notWritableError(recipeId)
+            /*
+             * Appending to an AGENT run is how a human's steering gets recorded,
+             * and that is the most valuable thing in the store - so it is allowed
+             * whatever the mode. Appending to anything else is general capture.
+             *
+             * The check is on the TARGET, not the caller: it does not matter
+             * which client is asking, it matters whether the thing being added to
+             * is a record of agent work.
+             */
+            if (settings.captureMode() !== 'open' && !isAgentRunResource(resource)) {
+                return refuseCapture(`adding an artifact to "${resource.title || recipeId}", which is not an agent run`)
+            }
             const steps = stepsLib.ensureSteps(resource)
             const order = stepsLib.nextOrder(steps)
             const now = new Date().toISOString()

@@ -42,7 +42,7 @@ await new Promise(r => w.addEventListener('load', r))
 await sleep(250)
 w.auth = w.auth || {}; w.auth.owner = 'bharat.dudeja@tapcxm.com'
 try { await w.loadAll() } catch (e) {}
-for (const fn of ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks', 'renderCookbook', 'renderHeadChef', 'renderAgents', 'renderSettings', 'renderConnections']) {
+for (const fn of ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks', 'renderCookbook', 'renderAgents', 'renderSettings', 'renderConnections']) {
   try { w[fn]() } catch (e) {}
 }
 try { await w.buildGraph() } catch (e) {}
