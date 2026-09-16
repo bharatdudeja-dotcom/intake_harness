@@ -91,7 +91,11 @@ async function buildCxGraph (now = new Date().toISOString()) {
         try { ingredients = stepsLib.ensureSteps(await store.getResource(r.id)) } catch (e) { ingredients = [] }
         for (const s of ingredients) {
             if (s.status === 'discarded' || !statusLib.isApproved(s.status)) continue
-            nodes.push({ id: s.id, node: 'ingredient', label: `${r.title} · #${s.order} ${s.kind}`, recipe: r.id, kind: s.kind, signal: s.signal || null, source: s.source || null, owner: r.owner || null })
+            nodes.push({ id: s.id, node: 'ingredient', label: `${r.title} · #${s.order} ${s.kind}`, recipe: r.id, kind: s.kind, signal: s.signal || null, source: s.source || null, owner: r.owner || null,
+                // The artifact's tags carry which agent produced it (['agent', <id>]) and
+                // whether that agent reported success while failing. The graph is where
+                // that is most legible, so it has to survive the projection.
+                tags: s.tags || [] })
             edges.push({ from: r.id, to: s.id, rel: 'ingredient' })
         }
 

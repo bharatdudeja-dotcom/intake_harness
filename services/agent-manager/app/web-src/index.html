@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Manager · Tap CXM</title>
+<title>CX Agent Manager</title>
 <!--
   The Company Cookbook - daily-driver control-plane dashboard (Increment 12, D44-D48).
   NOT an inference surface (D12/D26): no chat, no model calls. It observes, curates, and
@@ -37,6 +37,31 @@
   --shadow: 0 1px 2px rgba(31,30,28,.05), 0 2px 8px rgba(31,30,28,.05);
   --shadow-lg: 0 4px 12px rgba(31,30,28,.08), 0 12px 32px rgba(31,30,28,.10);
   --r: 13px; --r-sm: 9px;
+
+  /* -----------------------------------------------------------------------
+     Comcast. The six peacock feathers, read off the mark the client supplied,
+     plus the wordmark ink. These are the ONLY colours the agent cast is drawn
+     from - an agent does not get a colour from the app's own status palette,
+     because status and identity are different claims and sharing a hue makes
+     one read as the other.
+
+     Six feathers, four agents today. The extras are not spare: a fifth agent
+     appearing upstream takes the next one with nothing changed here.
+     --------------------------------------------------------------------- */
+  --pk-yellow: #FCB711; --pk-orange: #F37021; --pk-red: #CC004C;
+  --pk-purple: #6460AA; --pk-blue: #0089D0;   --pk-green: #0DB14B;
+  --cb-ink: #161616;
+
+  /* The Hero Agent is not one more agent in the row, so it does not take a
+     feather. It takes the mix - which is what the whole mark is. */
+  --hero: #96358C;
+  --hero-soft: #F5E9F4;
+}
+@supports (color: color-mix(in oklab, red, blue)) {
+  :root {
+    --hero: color-mix(in oklab, var(--pk-purple) 52%, var(--pk-red));
+    --hero-soft: color-mix(in oklab, var(--hero) 11%, var(--surface));
+  }
 }
 [data-theme="dark"] {
   --bg: #1F1E1D; --surface: #262624; --surface-2: #2B2A28; --surface-3: #32312E;
@@ -49,6 +74,13 @@
   --ready: #8FB6DC; --ready-soft: #22303F; --ingredient: #B99BD0;
   --shadow: 0 1px 2px rgba(0,0,0,.25), 0 2px 8px rgba(0,0,0,.25);
   --shadow-lg: 0 4px 12px rgba(0,0,0,.35), 0 12px 32px rgba(0,0,0,.4);
+  /* The brand hexes are tuned for white. On #1F1E1D the two darkest feathers
+     (red, purple) close up against the ground, so they are lifted just enough
+     to stay separable from each other - the hue is kept, the value is not. */
+  --pk-yellow: #FFC53D; --pk-orange: #FF8A4C; --pk-red: #F04C82;
+  --pk-purple: #8F8BD1; --pk-blue: #46AEE8;   --pk-green: #3DCB72;
+  --cb-ink: #EDEAE3;
+  --hero: #C77BC0; --hero-soft: #3A2438;
 }
 /* PERIODIC: a lab-green scheme for a cookbook kept by chemists. Same measured discipline as the
    other two themes; scripts/contrast-check.mjs holds all three to WCAG AA. */
@@ -430,13 +462,69 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
    line with every other one in the rail. */
 #tasks-badge:empty, #headchef-badge:empty { display: none; }
 nav button .key, nav button .nav-badge { margin-left: auto; }
+
+/* The agent estate. A system is a container; the agents inside it are the cast. */
+.sys-card{padding:16px 18px}
+.sys-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:10px}
+.sys-head b{font-size:15px}
+.sys-head .ok{color:var(--house);font-weight:600}
+.sys-head .off{color:var(--muted)}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.agent-tile{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--border);
+  border-radius:var(--r-sm);background:var(--surface-2)}
+.agent-tile.awake{background:var(--surface);border-color:var(--border-strong)}
+.agent-tile .who{min-width:0;display:flex;flex-direction:column;gap:1px}
+.agent-tile .who b{font-size:13.5px;line-height:1.25}
+.agent-tile .who .sub{font-size:11.5px}
+.agent-tile .who .owner{opacity:.7}
+.agent-tile.current{border-color:var(--tint,var(--border-strong));box-shadow:0 0 0 2px color-mix(in oklab,var(--tint,var(--accent)) 22%,transparent)}
+
+/* The Hero Agent gets its own card above the systems, not a tile inside one,
+   because it belongs to no system - it reads across all of them. */
+.hero-card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--r);
+  background:linear-gradient(135deg,var(--hero-soft),var(--surface) 62%);
+  border-left:3px solid var(--hero);margin-bottom:14px}
+.hero-card .hero-top{display:flex;align-items:center;gap:13px}
+.hero-card .hero-top b{font-size:15px}
+.hero-card .hero-role{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--hero);font-weight:650}
+.hero-face .am-scan{animation:am-scan 3.8s ease-in-out infinite}
+@keyframes am-scan{0%,100%{transform:translateX(0)}50%{transform:translateX(17px)}}
+
+/* Live progress. One segment per agent in the journey, because the journey
+   length is known - it is however many agents the system lists - and a
+   percentage would hide which stage the run is actually sitting on. */
+.mcp-row{border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:10px;background:var(--surface-2)}
+.mcp-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.mcp-head .grow{flex:1}
+.mcp-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px 12px}
+.mcp-fields .flabel{display:flex;flex-direction:column;gap:3px;margin:0}
+.mcp-row .rowbtns{margin-top:10px}
+
+.jrn{display:flex;flex-direction:column;gap:5px;margin:9px 0 2px}
+.jrn-bar{display:flex;gap:3px;height:7px}
+.jrn-seg{flex:1;border-radius:99px;background:var(--surface-3);position:relative;overflow:hidden}
+.jrn-seg.done{background:var(--seg,var(--house))}
+.jrn-seg.now{background:color-mix(in oklab,var(--seg,var(--accent)) 26%,var(--surface-3))}
+.jrn-seg.now::after{content:'';position:absolute;inset:0;border-radius:99px;
+  background:linear-gradient(90deg,transparent,var(--seg,var(--accent)),transparent);
+  animation:jrn-run 1.5s linear infinite}
+.jrn-seg.fault{background:var(--reject)}
+@keyframes jrn-run{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.jrn-cap{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--muted)}
+.jrn-cap b{color:var(--text-2);font-weight:600}
+.jrn-cap .live{color:var(--accent-text);font-weight:600}
+@media (prefers-reduced-motion:reduce){
+  .jrn-seg.now::after{animation:none;opacity:.55}
+  .hero-face .am-scan{animation:none}
+}
 </style>
 </head>
 <body>
 <aside>
   <div class="logo">
     <div class="mark"><img src="assets/brand-mark.svg" alt="Agent Manager" style="width:22px;height:22px;object-fit:contain"></div>
-    <div><b>Agent Manager</b><small>Comcast &middot; Xfinity</small></div>
+    <div><b>CX Agent Manager</b><small>Comcast &middot; Xfinity</small></div>
   </div>
   <nav id="nav">
     <div class="group">Workbench</div>
@@ -446,7 +534,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <button data-panel="tasks"><i data-lucide="list-checks"></i> Live Queue <span id="tasks-badge" class="key">4</span></button>
     <div class="group">Knowledge</div>
     <button data-panel="cookbook"><i data-lucide="book-marked"></i> Playbooks <span class="key">5</span></button>
-    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span><span id="headchef-badge"></span></button>
+    <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span></button>
+    <button data-panel="headchef"><i data-lucide="stamp"></i> Approvals <span id="headchef-badge" class="key"></span></button>
     <button data-panel="graph"><i data-lucide="git-fork"></i> My Graph <span class="key">7</span></button>
     <button data-panel="cx"><i data-lucide="network"></i> Shared Graph <span class="key">8</span></button>
     <div class="group">Admin</div>
@@ -531,7 +620,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 <div class="modal-scrim" id="consent">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="consent-title">
     <h3 id="consent-title">Certify</h3>
-    <p class="sub" id="consent-desc">Record your consent. This becomes part of the recipe's provenance.</p>
+    <p class="sub" id="consent-desc">Record your consent. This becomes part of the run's provenance.</p>
     <label class="flabel" for="consent-note">Consent note (optional)</label>
     <textarea class="field" id="consent-note" placeholder="Why is this being certified?"></textarea>
     <div class="rowbtns" style="margin-top:14px; justify-content:flex-end">
@@ -544,8 +633,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 <div class="modal-scrim" id="attach">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="attach-title">
     <h3 id="attach-title">Attach diagram / image</h3>
-    <p class="sub">For artifacts the AI can't self-serialize (a rendered image, or diagram source
-      it didn't capture). Appends a new artifact to this recipe.</p>
+    <p class="sub">For artifacts the AI can&rsquo;t self-serialize (a rendered image, or diagram source
+      it didn&rsquo;t capture). Appends a new artifact to this run.</p>
     <label class="flabel" for="attach-file">Image file (PNG/JPG/SVG etc.)</label>
     <input class="field" type="file" id="attach-file" accept="image/*">
     <label class="flabel" for="attach-source" style="margin-top:10px">…or paste Mermaid / SVG source</label>
@@ -560,8 +649,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 <div class="modal-scrim" id="login-gate">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="login-title" style="text-align:center">
     <div class="mark" style="margin:0 auto 12px"><img src="assets/brand-mark.svg" alt="Agent Manager" style="width:30px;height:30px;object-fit:contain"></div>
-    <h3 id="login-title">Sign in to Agent Manager</h3>
-    <p class="sub" id="login-desc" style="margin:8px 0 18px">Your Adobe account keeps your recipes private to you. Sign in to continue.</p>
+    <h3 id="login-title">Sign in to CX Agent Manager</h3>
+    <p class="sub" id="login-desc" style="margin:8px 0 18px">Your account keeps your runs private to you. Sign in to continue.</p>
     <p class="sub" id="login-error" style="color:var(--reject); display:none; margin-bottom:12px"></p>
     <button class="btn primary" id="login-btn" style="width:100%; justify-content:center"><i data-lucide="log-in"></i> Sign in with Adobe</button>
   </div>
@@ -570,7 +659,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 <div class="modal-scrim" id="passcode-gate">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="passcode-title" style="text-align:center; max-width:360px">
     <div class="mark" style="margin:0 auto 12px"><i data-lucide="lock"></i></div>
-    <h3 id="passcode-title">Cookbook is locked</h3>
+    <h3 id="passcode-title">CX Agent Manager is locked</h3>
     <p class="sub" style="margin:8px 0 16px">Enter the access code to continue.</p>
     <input class="field" type="password" id="passcode-input" inputmode="numeric" autocomplete="off" placeholder="Access code" style="text-align:center; letter-spacing:4px; font-size:18px">
     <p class="sub" id="passcode-error" style="color:var(--reject); display:none; margin:10px 0 0"></p>
@@ -582,7 +671,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 <div class="modal-scrim" id="userkey-gate">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userkey-title" style="max-width:420px">
     <div class="mark" style="margin:0 auto 12px"><i data-lucide="user-round"></i></div>
-    <h3 id="userkey-title" style="text-align:center">Sign in to Agent Manager</h3>
+    <h3 id="userkey-title" style="text-align:center">Sign in to CX Agent Manager</h3>
     <p class="sub" style="margin:8px 0 18px; text-align:center">Your own runs stay private to you. Approved runs and the Shared Knowledge Graph are visible to everyone.</p>
     <label class="sub" for="login-id" style="display:block; margin-bottom:6px">Login id</label>
     <input class="field" type="text" id="login-id" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="e.g. your.name" style="margin-bottom:12px">
@@ -641,15 +730,17 @@ const AGENT_MARK = {
 /* ---------------------------------------------------------------------------
  * Agent faces.
  *
- * Each agent gets a face, and it WAKES UP once that agent has produced
- * something: dormant is dimmed with its eyes shut, awake is coloured with
- * pupils that drift and blink. So the Agents page reads as a cast that arrives
- * over time rather than a list that is mostly empty.
+ * One face per AGENT - intake, review, audience creation, escalation - not per
+ * domain. The face follows that agent everywhere it appears, so a person learns
+ * the cast by sight instead of re-reading labels.
  *
- * The face is DERIVED FROM THE AGENT ID, not looked up in a table. That is the
- * same rule as the names themselves: if the upstream renames or adds an agent,
- * the new one gets its own stable face and the label follows, with nothing
- * changed here.
+ * Derived from the agent id, never a lookup table. Rename an agent upstream or
+ * add a fifth and it gets its own stable face with nothing changed here, which
+ * is the same rule that keeps agent NAMES out of this file.
+ *
+ * Awake once the agent has produced something: eyes open, pupils drifting, a
+ * slow blink on its own clock. Dormant agents keep their eyes shut, so an
+ * estate that has not run yet reads as waiting rather than broken.
  * ------------------------------------------------------------------------- */
 function agentHash (id) {
   let h = 2166136261
@@ -658,42 +749,49 @@ function agentHash (id) {
   return h
 }
 
-/* Hues from the palette already on :root, so faces inherit both themes. */
-const FACE_HUES = ['--ready', '--house', '--exp', '--ingredient', '--accent', '--baked']
+/* The cast is coloured from the peacock and nothing else (see :root). Six
+   feathers, assigned by hash so an agent's colour is stable across renders and
+   a new agent upstream gets one without a code change. */
+const FACE_HUES = ['--pk-orange', '--pk-red', '--pk-purple', '--pk-blue', '--pk-green', '--pk-yellow']
 
-/* Head silhouettes. Varied enough that two agents never read as the same character. */
+/* Silhouettes. Different enough that two agents never read as the same character. */
 const HEADS = [
-  'M8 14a14 14 0 0 1 28 0v12a14 14 0 0 1-28 0z',           // tall capsule
-  'M6 16a16 12 0 0 1 32 0v10a16 14 0 0 1-32 0z',            // wide visor
-  'M22 5 38 15v14L22 39 6 29V15z',                          // hex
-  'M10 12h24a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6V18a6 6 0 0 1 6-6z' // slab
+  'M10 10h24a7 7 0 0 1 7 7v14a7 7 0 0 1-7 7H10a7 7 0 0 1-7-7V17a7 7 0 0 1 7-7z',
+  'M22 4c10 0 17 6 17 15v8c0 7-7 11-17 11S5 34 5 27v-8C5 10 12 4 22 4z',
+  'M22 5l16 8v18l-16 7-16-7V13z',
+  'M9 13h26a5 5 0 0 1 5 5v9a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9v-9a5 5 0 0 1 5-5z'
 ]
 
-/* Mouths. Small, and enough to change the character. */
 const MOUTHS = [
-  (c) => `<path d="M16 30q6 5 12 0" stroke="${c}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`,
-  (c) => `<rect x="16" y="29.5" width="12" height="3" rx="1.5" fill="${c}" opacity=".85"/>`,
-  (c) => `<path d="M17 31h10" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/>`,
-  (c) => `<path d="M16 29q6 6 12 0" stroke="${c}" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M19 33h6" stroke="${c}" stroke-width="1.6" stroke-linecap="round" opacity=".5"/>`
+  (c) => `<path d="M16 31q6 4.5 12 0" stroke="${c}" stroke-width="2.1" fill="none" stroke-linecap="round"/>`,
+  (c) => `<rect x="16.5" y="30" width="11" height="2.8" rx="1.4" fill="${c}" opacity=".8"/>`,
+  (c) => `<path d="M17 31.5h10" stroke="${c}" stroke-width="2.1" stroke-linecap="round"/>`,
+  (c) => `<path d="M16 30.5q6 5 12 0" stroke="${c}" stroke-width="2.1" fill="none" stroke-linecap="round"/><path d="M19.5 34h5" stroke="${c}" stroke-width="1.5" stroke-linecap="round" opacity=".45"/>`
 ]
 
 /**
+ * The Hero Agent is drawn by a different function (heroFace) rather than as a
+ * flag in here. It is not a fifth member of the cast with a nicer colour - it
+ * is the thing that reads across all of their runs, and a face built from the
+ * same parts would say the opposite.
+ *
  * @param {string} id agent id from the registry
- * @param {boolean} awake has this agent produced anything yet
+ * @param {boolean} awake has it produced anything
  * @param {number} size px
  */
-function agentFace (id, awake = false, size = 52) {
+function agentFace (id, awake = false, size = 44) {
+  if (String(id || '').toLowerCase() === 'hero') return heroFace(awake, size)
   const h = agentHash(id)
-  const hue = `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
+  // Unsigned shifts, and a guarded pick: a signed shift on a hash above 2^31
+  // goes negative, a negative modulo stays negative, and the lookup returns
+  // undefined - which took the whole panel down once already.
   const pick = (arr, shift) => arr[((h >>> shift) % arr.length + arr.length) % arr.length]
+  const hue = `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
   const head = pick(HEADS, 4)
   const mouth = pick(MOUTHS, 9)
   const antenna = (h >>> 13) % 3 !== 0
-  // Each agent drifts and blinks on its own clock, so a row of them never
-  // pulses in unison like a loading spinner.
-  const drift = 3.2 + ((h >>> 17) % 26) / 10
-  const blink = 5 + ((h >>> 21) % 40) / 10
-  
+  const drift = 3.4 + ((h >>> 17) % 28) / 10
+  const blink = 4.5 + ((h >>> 21) % 45) / 10
 
   const ink = awake ? hue : 'var(--muted)'
   const shell = awake ? hue : 'var(--border-strong)'
@@ -701,26 +799,77 @@ function agentFace (id, awake = false, size = 52) {
 
   const eyes = awake
     ? `<g class="am-eyes" style="--drift:${drift}s;--blink:${blink}s">
-         <ellipse cx="16.5" cy="21" rx="4.6" ry="5" fill="var(--surface)" stroke="${hue}" stroke-width="1.6"/>
-         <ellipse cx="27.5" cy="21" rx="4.6" ry="5" fill="var(--surface)" stroke="${hue}" stroke-width="1.6"/>
+         <ellipse cx="16" cy="22" rx="5" ry="5.4" fill="var(--surface)" stroke="${hue}" stroke-width="1.7"/>
+         <ellipse cx="28" cy="22" rx="5" ry="5.4" fill="var(--surface)" stroke="${hue}" stroke-width="1.7"/>
          <g class="am-pupils">
-           <circle cx="16.5" cy="21" r="2.1" fill="${hue}"/>
-           <circle cx="27.5" cy="21" r="2.1" fill="${hue}"/>
+           <circle cx="16" cy="22" r="2.3" fill="${hue}"/><circle cx="28" cy="22" r="2.3" fill="${hue}"/>
+           <circle cx="17.1" cy="20.7" r=".8" fill="var(--surface)" opacity=".9"/>
+           <circle cx="29.1" cy="20.7" r=".8" fill="var(--surface)" opacity=".9"/>
          </g>
-         <g class="am-lids">
-           <rect x="11.5" y="15" width="10" height="12" fill="${fill}"/>
-           <rect x="22.5" y="15" width="10" height="12" fill="${fill}"/>
-         </g>
+         <g class="am-lids"><rect x="10.5" y="15" width="11" height="13" fill="${fill}"/><rect x="22.5" y="15" width="11" height="13" fill="${fill}"/></g>
        </g>`
-    : `<path d="M12.5 21.5h8M23.5 21.5h8" stroke="var(--muted)" stroke-width="2.2" stroke-linecap="round"/>`
+    : `<path d="M11.5 22.5h9M23.5 22.5h9" stroke="var(--muted)" stroke-width="2.3" stroke-linecap="round"/>`
 
   return `<svg class="agent-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
       viewBox="0 0 44 44" role="img" aria-label="${esc(id)}">
-    ${antenna ? `<path d="M22 3v5" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
-      <circle class="${awake ? 'am-blip' : ''}" cx="22" cy="2.5" r="2.3" fill="${awake ? hue : 'var(--border-strong)'}"/>` : ''}
+    ${antenna ? `<path d="M22 3.5v6" stroke="${shell}" stroke-width="2" stroke-linecap="round"/>
+      <circle class="${awake ? 'am-blip' : ''}" cx="22" cy="2.6" r="2.4" fill="${awake ? hue : 'var(--border-strong)'}"/>` : ''}
     <path d="${head}" fill="${fill}" stroke="${shell}" stroke-width="2" stroke-linejoin="round"/>
     ${eyes}
     ${mouth(ink)}
+  </svg>`
+}
+
+/**
+ * The Hero Agent.
+ *
+ * Distinct on purpose, in three ways a person reads before they read a label:
+ * a crest instead of an antenna, a visor instead of two separate eyes, and a
+ * confident set to the mouth rather than the neutral line the others carry.
+ * Its colour is --hero, the mix of the peacock rather than one feather of it.
+ *
+ * Dormant it keeps the visor dark and the crest unlit, so "no runs to read yet"
+ * looks like waiting rather than like the hero is missing.
+ *
+ * @param {boolean} awake has it anything to read across
+ * @param {number} size px
+ */
+function heroFace (awake = false, size = 44) {
+  const hue = 'var(--hero)'
+  const ink = awake ? hue : 'var(--muted)'
+  const shell = awake ? hue : 'var(--border-strong)'
+  const fill = awake ? 'var(--surface)' : 'var(--surface-2)'
+  const gid = 'heroVisor' + (awake ? 'On' : 'Off')
+
+  return `<svg class="agent-face hero-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
+      viewBox="0 0 44 44" role="img" aria-label="The Hero Agent">
+    <defs>
+      <linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0"    stop-color="var(--pk-orange)"/>
+        <stop offset=".22"  stop-color="var(--pk-red)"/>
+        <stop offset=".45"  stop-color="var(--pk-purple)"/>
+        <stop offset=".68"  stop-color="var(--pk-blue)"/>
+        <stop offset="1"    stop-color="var(--pk-green)"/>
+      </linearGradient>
+    </defs>
+
+    <!-- crest: the six feathers, folded into one mark -->
+    <path d="M22 1.5l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8z"
+      fill="${awake ? `url(#${gid})` : 'var(--surface-2)'}"
+      stroke="${shell}" stroke-width="1.3" stroke-linejoin="round"/>
+
+    <!-- a taller, squarer jaw than any of the cast heads -->
+    <path d="M11 15h22a6 6 0 0 1 6 6v9a8 8 0 0 1-8 8H13a8 8 0 0 1-8-8v-9a6 6 0 0 1 6-6z"
+      fill="${fill}" stroke="${shell}" stroke-width="2.2" stroke-linejoin="round"/>
+
+    <!-- one visor, not two eyes -->
+    <path d="M10 21.5h24v4.5a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4z"
+      fill="${awake ? `url(#${gid})` : 'var(--surface-3)'}"
+      stroke="${shell}" stroke-width="1.6" stroke-linejoin="round" opacity="${awake ? '1' : '.65'}"/>
+    ${awake ? `<rect class="am-scan" x="10" y="21.5" width="7" height="8.5" fill="var(--surface)" opacity=".34"/>` : ''}
+
+    <!-- confident, not neutral -->
+    <path d="M17 34q5 3.6 10 0" stroke="${ink}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
   </svg>`
 }
 
@@ -773,7 +922,7 @@ async function rpc (method, params = {}) {
   }
   if (res.status === 401) {
     if (auth.loginEnabled) { handleAuthExpired(); throw new Error('Your session expired. Sign in again.') }
-    if (auth.passcodeRequired) { handlePasscodeRejected(); throw new Error('Agent Manager is locked. Enter the access code.') }
+    if (auth.passcodeRequired) { handlePasscodeRejected(); throw new Error('CX Agent Manager is locked. Enter the access code.') }
   }
   const body = await res.json()
   if (body.error) throw new Error(`${method}: ${body.error.message}`)
@@ -1040,7 +1189,7 @@ const state = {
   info: null, tools: [], policy: [], recipes: [], recipesAll: [], tasks: [], projects: [], settings: null,
   segLevels: [{ key: 'project', label: 'Project' }],
   project: localStorage.getItem('dashProject') || '',
-  practices: [], myPractices: [], people: {},
+  practices: [], myPractices: [], agentSystems: [], systemAgents: [], mcpServers: [], people: {},
   worklogQuery: '',
   currentRecipe: null, graphBuilt: false, cxGraph: null, cookoff: [],
   // D64: marketer roles + Hero Agent CX-graph gate
@@ -1125,7 +1274,18 @@ function crumb (r) {
 }
 
 const KIND_ICONS = { recipe: 'scroll-text', message: 'message-square', code: 'code', diagram: 'workflow', image: 'image', decision: 'scale', doc: 'file-text', handoff: 'send', config: 'settings-2', steering: 'compass', other: 'file', 'architecture-diagram': 'workflow', 'architecture-doc': 'file-text', playbook: 'book-open', configuration: 'settings-2', 'meeting-notes': 'notebook-pen', 'code-snippet': 'code', 'handoff-prompt': 'send' }
-function kindChip (kind) { return `<span class="chip"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i>${esc(kind)}</span>` }
+/**
+ * What a run is CALLED here. The store's type is still "recipe" - renaming a
+ * stored value would orphan every record written before the rename - so the
+ * translation happens at the edge, where it is a label and nothing else.
+ */
+const TYPE_LABEL = { recipe: 'run', 'handoff-prompt': 'handoff' }
+function typeLabel (t) { return TYPE_LABEL[t] || t }
+
+/* The chip shows what a thing is CALLED, not the value stored for it: the
+   store's type is still "recipe" and renaming a stored value would orphan
+   every record written before the rename. */
+function kindChip (kind) { return `<span class="chip"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i>${esc(typeLabel(kind))}</span>` }
 function sourceChip (src) { if (!src || src === 'unknown') return ''; return `<span class="chip"><i data-lucide="terminal"></i>${esc(src)}</span>` }
 function modelChip (m) { return m ? `<span class="chip"><i data-lucide="cpu"></i>${esc(m)}</span>` : '' }
 /**
@@ -1167,9 +1327,9 @@ async function projectsPromise () { return callTool('list_projects') }
 
 async function loadAll (silent) {
   if (!silent) $('#conn-sub').textContent = `Loading…`
-  const [info, init, tools, policy, recipes, projects, tasks, seg, settings, role, pending, practices, cxg, people, cookoff] = await Promise.allSettled([
+  const [info, init, tools, policy, recipes, projects, tasks, seg, settings, role, pending, practices, agentSystems, systemAgents, mcpServers, cxg, people, cookoff] = await Promise.allSettled([
     fetch(API_BASE).then(r => r.json()),
-    rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'cookbook-daily-driver', version: '4.0.0' } }),
+    rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'cx-agent-manager-dashboard', version: '4.0.0' } }),
     rpc('tools/list'),
     callTool('get_resource_policy'),
     recipesPromise(),
@@ -1180,6 +1340,9 @@ async function loadAll (silent) {
     callTool('get_role'),
     callTool('list_cx_pending'),
     callTool('list_practices'),
+    callTool('list_agent_systems'),
+    callTool('list_system_agents'),
+    callTool('list_mcp_servers'),
     callTool('get_cx_graph'),
     callTool('list_people'),
     callTool('get_cookoff')
@@ -1206,8 +1369,24 @@ async function loadAll (silent) {
   }
   // Practices (D79/D81): drives the practice filter and the create-login form's dropdown.
   if (practices.status === 'fulfilled') { const pv = practices.value || {}; state.practices = pv.practices || []; state.myPractices = pv.my_practices || [] }
+  if (agentSystems.status === 'fulfilled') state.agentSystems = agentSystems.value || []
+  if (systemAgents.status === 'fulfilled') state.systemAgents = (systemAgents.value && systemAgents.value.agents) || []
+  if (mcpServers.status === 'fulfilled') state.mcpServers = mcpServers.value || []
 
-  if (fails.length) banner(`Some data failed to load: ${fails.join(', ')}. The proxy or upstream may be unavailable.`); else banner('')
+  if (fails.length) {
+    // These were the internal promise names - "info", "policy", "recipes" - which
+    // are not what any of it is called on screen.
+    const SAY = {
+      info: 'the connection', init: 'the connection', tools: 'the tool list',
+      policy: 'the artifact policy', recipes: 'your runs', projects: 'programmes',
+      tasks: 'the live queue', seg: 'the programme levels', settings: 'settings',
+      role: 'your role', pending: 'the approvals queue', practices: 'the agent list',
+      agentSystems: 'the agent systems', systemAgents: 'the agents',
+      mcpServers: 'the MCP servers', cxg: 'the shared graph', people: 'people',
+      cookoff: 'the leaderboard'
+    }
+    banner(`Could not load ${[...new Set(fails.map(f => SAY[f] || f))].join(', ')}. The proxy or an upstream may be unavailable.`)
+  } else banner('')
   const approved = state.recipes.filter(inCookbook).length
   $('#conn-sub').innerHTML = `Your view · ${state.recipes.length} run(s) visible · ${approved} in Playbooks`
   renderProjectSwitcher()
@@ -1522,7 +1701,7 @@ function renderHome () {
           <button class="btn tiny" data-open-worklog="${esc(r.id)}"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i> ${esc(r.title)}</button>
           ${statusBadge(r)}${!isMine(r) && r.owner ? `<span class="chip"><i data-lucide="user"></i>${esc(displayName(r.owner))}</span>` : ''}
           <span class="sub" style="margin-left:auto">${r.step_count || 1} artifact(s) · ${relTime(r.updated_at || r.updated || r.created)}</span>
-        </div>`).join('') : '<p class="empty">No recipes yet in this scope.</p>'}
+        </div>`).join('') : '<p class="empty">No runs yet in this scope.</p>'}
     </div>`
   refreshIcons()
 }
@@ -1548,10 +1727,10 @@ function renderProjects () {
             ${st !== 'archived' ? `<button class="btn tiny" data-archive-project="${esc(p.name)}"><i data-lucide="archive"></i> Archive</button>` : ''}
           </span>
         </div>
-        <div class="meta"><span>${rs.length} recipe(s)</span><span>${cook} in Playbooks</span></div>
+        <div class="meta"><span>${rs.length} run(s)</span><span>${cook} in Playbooks</span></div>
         <div class="stack section-gap">
           ${rs.length ? rs.map(r => `<button class="recipe-item" data-open-worklog="${esc(r.id)}" style="flex-direction:row; align-items:center; gap:8px;">
-            <i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b style="flex:1 1 10ch; min-width:0">${esc(r.title)}</b>${statusBadge(r)}<span class="sub" style="flex:0 0 auto">${r.step_count || 1} ingr.</span></button>`).join('') : '<span class="sub">No recipes yet. Start one from your assistant.</span>'}
+            <i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b style="flex:1 1 10ch; min-width:0">${esc(r.title)}</b>${statusBadge(r)}<span class="sub" style="flex:0 0 auto">${r.step_count || 1} artifact(s)</span></button>`).join('') : '<span class="sub">No runs yet. Ask Claude to start an intake.</span>'}
         </div></div>`
     }).join('') : '<p class="empty"><i data-lucide="folder-plus"></i><br>No programmes yet. Ask Claude to start one.</p>'}`
   refreshIcons()
@@ -1600,7 +1779,7 @@ function renderWorklogList () {
   list.innerHTML = rows.map(r => `
     <button class="recipe-item" data-worklog="${esc(r.id)}" ${state.currentRecipe && state.currentRecipe.id === r.id ? 'aria-current="true"' : ''}>
       <div class="tagrow"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b class="grow">${esc(r.title)}</b></div>
-      <div class="tagrow">${statusBadge(r)}${assignedChip(r)}${!isMine(r) && r.owner ? `<span class="chip"><i data-lucide="user"></i>${esc(displayName(r.owner))}</span>` : ''}<span class="sub">${r.step_count || 1} ingr.</span></div>
+      <div class="tagrow">${statusBadge(r)}${assignedChip(r)}${!isMine(r) && r.owner ? `<span class="chip"><i data-lucide="user"></i>${esc(displayName(r.owner))}</span>` : ''}<span class="sub">${r.step_count || 1} artifact(s)</span></div>
     </button>`).join('')
   refreshIcons()
   // Bring the open recipe's own row into view. The list scrolls independently, so arriving from a
@@ -1653,7 +1832,7 @@ async function openWorklog (id) {
     </div>
     ${runLedger(r.steps || [])}
     ${legend}
-    <div class="steps" id="steps-wrap">${(r.steps || []).length ? '' : '<p class="empty"><i data-lucide="inbox"></i><br>This recipe has no artifacts yet.</p>'}</div>`
+    <div class="steps" id="steps-wrap">${(r.steps || []).length ? '' : '<p class="empty"><i data-lucide="inbox"></i><br>This run has no artifacts yet.</p>'}</div>`
   const wrap = $('#steps-wrap')
   for (const s of (r.steps || [])) wrap.appendChild(renderStepCard(s))
   refreshIcons()
@@ -1753,7 +1932,6 @@ function renderStepCard (s) {
       <button class="btn tiny" data-copy-step="${esc(s.id)}"><i data-lucide="copy"></i> Copy</button>
       <button class="btn tiny" data-download-step="${esc(s.id)}"><i data-lucide="download"></i> Download</button>
       ${s.provenance && s.provenance.upstream_payload ? `<button class="btn tiny" data-view-json="${esc(s.id)}"><i data-lucide="braces"></i> View JSON</button>` : ''}
-      <button class="btn tiny" data-assign-step="${esc(s.id)}" title="Hand this to a colleague. Assigning is what makes an unfinished recipe visible to them."><i data-lucide="user-plus"></i> Assign</button>
       ${s.approved_by ? `<span class="sub" style="margin-left:auto"><i data-lucide="badge-check"></i> approved by ${esc(displayName(s.approved_by))} · ${relTime(s.approved_at)}</span>` : ''}
     </div>
     ${(s.assigned_to || []).length ? `<div class="meta" style="padding:0 0 4px">
@@ -1764,31 +1942,6 @@ function renderStepCard (s) {
   el._step = s
   renderStepBody(el.querySelector('[data-step-body]'), s)
   return el
-}
-/**
- * Hand an artifact to a colleague (D86). Assignment is the only way an unfinished recipe becomes
- * visible to someone else, so the prompt says so rather than leaving them to discover it.
- */
-async function assignStep (stepId) {
-  let names = state.assignableNames
-  if (!names) {
-    // list_users is admin-only, so fall back to the owners already visible in the loaded data.
-    try {
-      const users = await callTool('list_users')
-      names = users.map(u => u.id || u.owner).filter(Boolean)
-    } catch (e) {
-      names = [...new Set(state.recipesAll.map(r => r.owner).filter(Boolean))]
-    }
-    state.assignableNames = names
-  }
-  const who = prompt(`Assign this artifact to whom?\n\nThey will be able to see this recipe in their Work Log, including the parts that are not finished.\n\n${names.length ? 'Known logins: ' + names.join(', ') : 'Enter a login id or email.'}`)
-  if (!who) return
-  const note = prompt('Why are you handing this over? (optional)') || undefined
-  try {
-    const out = await callTool('assign_step', { step_id: stepId, assignee: who.trim(), ...(note ? { note } : {}) })
-    toast(out.already_assigned ? `${who.trim()} was already assigned` : `Assigned to ${who.trim()}`)
-    await refreshCurrent()
-  } catch (e) { banner(e.message) }
 }
 
 function inCookbookStep (s) { return canon(s.status) === 'approved' }
@@ -1881,8 +2034,10 @@ function renderTasks () {
         <div class="card-head"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b>${esc(r.title)}</b>${statusBadge(r)}</div>
         ${crumb(r)}
         <div class="meta"><span>${r.step_count || 0} artifact(s)</span>${r.expires_at ? expiryHtml(r.expires_at) : ''}${(r.models_used || []).map(m => modelChip(m)).join('')}</div>
+        ${journeyBar(r)}
         <div class="rowbtns">
           <button class="btn tiny" data-open-worklog="${esc(r.id)}"><i data-lucide="list-ordered"></i> Open Work Log</button>
+          ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Hero Agent</button>` : ''}
         </div>
       </div>`).join('')
 
@@ -1901,18 +2056,19 @@ function renderTasks () {
   const assigned = scoped(state.recipes).filter(isAssignedToMe)
   const empty = !inProgress.length && !tasks.length && !assigned.length
   $('#panel-tasks').innerHTML = `
-    <p class="panel-intro">Work in flight${state.project ? ` in <b>${esc(state.project)}</b>` : ''}. Bake a recipe here once at least one of its artifacts is approved.</p>
-    ${empty ? '<p class="empty"><i data-lucide="list-checks"></i><br>Nothing in flight. Start a recipe from your assistant.</p>' : ''}
+    <p class="panel-intro">Work in flight${state.project ? ` in <b>${esc(state.project)}</b>` : ''}.
+      Approve a run across to the Hero Agent once at least one of its artifacts is approved.</p>
+    ${empty ? '<p class="empty"><i data-lucide="list-checks"></i><br>Nothing in flight. Ask Claude to start an intake.</p>' : ''}
     ${assigned.length ? `<h3 class="head"><i data-lucide="user-check"></i> Assigned to you <span class="sub">(${assigned.length})</span></h3>
       <p class="help">A colleague handed you an artifact of these, which is why you can see work that is not yours.</p>
       <div class="cards section-gap">${assigned.map(r => `
         <div class="card">
           <div class="card-head"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b>${esc(r.title)}</b>${statusBadge(r)}</div>
-          <div class="meta"><span><i data-lucide="user"></i> ${esc(displayName(r.owner) || 'unknown')}</span><span>${r.step_count || 0} ingr.</span></div>
+          <div class="meta"><span><i data-lucide="user"></i> ${esc(displayName(r.owner) || 'unknown')}</span><span>${r.step_count || 0} artifact(s)</span></div>
           <div class="rowbtns"><button class="btn tiny" data-open-worklog="${esc(r.id)}"><i data-lucide="list-ordered"></i> Open</button></div>
         </div>`).join('')}</div>` : ''}
     ${inProgress.length ? `<h3 class="head section-gap"><i data-lucide="flask-conical"></i> In progress <span class="sub">(${inProgress.length})</span></h3>
-      <p class="help">Your recipes that are not finished yet.</p>
+      <p class="help">Your runs that are not finished yet.</p>
       <div class="cards section-gap">${recipeCards}</div>` : ''}
     ${tasks.length ? `<h3 class="head section-gap"><i data-lucide="send"></i> Handoff prompts <span class="sub">(${tasks.length})</span></h3>
       <p class="help">Briefs written for another tool or person to execute.</p>
@@ -1927,85 +2083,209 @@ function renderTasks () {
    ===================================================================== */
 /* =====================================================================
    Agents
-   One tab, always visible. Two questions it has to answer without the
-   reader hunting: what is waiting on a human, and what has each agent
-   actually produced.
 
-   The agent list comes from the registry at runtime - this function never
-   names an agent.
+   The estate, top down: every agent SYSTEM wired into Agent Manager, the
+   agents each one actually has, and what each agent has produced.
+
+   Nothing here is hardcoded. Systems come from the registry, agents come
+   from each system's own catalog, and faces are derived from agent ids -
+   so wiring a new harness in Settings makes it appear here, and through
+   here to Claude, without a code change.
    ===================================================================== */
+/* ---------------------------------------------------------------------------
+ * Live progress along the journey.
+ *
+ * The journey's LENGTH is not a constant here: it is however many agents the
+ * registry lists for the system. Hardcoding four would be wrong the day a
+ * fifth appears, and wrong today for anyone whose escalation agent is parked.
+ *
+ * The stage a run is on is read from its tags, which carry the agent that
+ * produced each artifact. That is a fact the run records about itself, so the
+ * bar cannot claim progress that did not happen - which is the whole reason
+ * this project exists.
+ * ------------------------------------------------------------------------- */
+function agentTint (id) {
+  if (String(id || '').toLowerCase() === 'hero') return 'var(--hero)'
+  const h = agentHash(id)
+  return `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
+}
+
+/** The agent an artifact came from. Tagged ['agent', <id>] when it came from one. */
+function stepAgent (s) {
+  const tags = (s && s.tags) || []
+  const at = tags.indexOf('agent')
+  if (at === -1) return null
+  const id = tags[at + 1]
+  return (!id || id === 'silent-failure') ? null : id
+}
+
+function journeyAgents () {
+  // Registry order, not an order this file decides. The registry is the source.
+  return (state.systemAgents || []).map(a => ({ id: a.id, label: a.label || a.id }))
+}
+
+/**
+ * @param {object} r catalog row
+ * @param {object[]} [steps] when the caller already has them, faults are shown too
+ */
+function runProgress (r, steps) {
+  const journey = journeyAgents()
+  if (!journey.length) return null
+  // r.agents is the server's rollup of which agents actually produced an
+  // artifact on this run, in the order they ran. Tags were the wrong source:
+  // the run itself carries none, so every bar read zero.
+  const ran = new Set(r.agents || [])
+  const reached = journey.map(a => ran.has(a.id))
+  // The stage in flight is the first one not yet reached, and only while the
+  // run is still open - a finished run has no "current" stage, it has an end.
+  const stage = reached.filter(Boolean).length
+  const settled = inCookbook(r) || recipeStage(r) !== 'draft'
+  // A stage that reported success while its tool call failed. Rolled up by the
+  // server too, so a list view shows it and not only the opened run.
+  const faulted = new Set(r.agent_faults || [])
+  for (const st of (steps || [])) {
+    const a = stepAgent(st)
+    if (a && (st.tags || []).includes('silent-failure')) faulted.add(a)
+  }
+  return {
+    journey, reached, stage, total: journey.length, faulted,
+    live: !settled && stage < journey.length,
+    current: !settled && stage < journey.length ? journey[stage] : null
+  }
+}
+
+/** The bar itself. Returns '' when there is no journey to draw, never a stub. */
+function journeyBar (r, steps) {
+  const p = runProgress(r, steps)
+  if (!p) return ''
+  const segs = p.journey.map((a, i) => {
+    const cls = p.faulted.has(a.id) ? 'fault' : p.reached[i] ? 'done' : (p.current && p.current.id === a.id ? 'now' : '')
+    return `<span class="jrn-seg ${cls}" style="--seg:${agentTint(a.id)}" title="${esc(a.label)}"></span>`
+  }).join('')
+  const cap = p.current
+    ? `<span class="live"><i data-lucide="loader"></i> ${esc(p.current.label)}</span>
+       <span>step <b>${p.stage + 1}</b> of ${p.total}</span>`
+    : `<span><b>${p.stage}</b> of ${p.total} ${p.stage === p.total ? 'complete' : 'stages recorded'}</span>`
+  const faults = p.faulted.size
+    ? `<span style="color:var(--reject)"><i data-lucide="triangle-alert"></i> ${p.faulted.size} faulted</span>` : ''
+  return `<div class="jrn"><div class="jrn-bar">${segs}</div><div class="jrn-cap">${cap}${faults}</div></div>`
+}
+
 function renderAgents () {
   const el = $('#panel-agents')
   if (!el) return
 
   const rows = scoped(state.recipes)
-  const known = (state.practices || []).map(p => ({ id: p.id, label: p.label || p.id }))
-  // An agent that has produced work but is not in the registry still gets a
-  // section - silently dropping its artifacts would be worse than an odd name.
-  const seen = new Set(known.map(a => a.id))
-  for (const r of rows) {
-    if (r.practice && !seen.has(r.practice)) { seen.add(r.practice); known.push({ id: r.practice, label: r.practice }) }
-  }
-
-  const pending = state.cxPending.slice()
+  const systems = state.agentSystems || []
+  const agents = state.systemAgents || []
+  const servers = state.mcpServers || []
+  const pending = state.cxPending || []
   const isHead = state.role === 'head-chef'
 
-  const proposals = pending.length
-    ? `<div class="card section-gap" style="border-left:3px solid var(--accent)">
-        <h3 class="head"><i data-lucide="sparkles"></i> \u{1F9B8} The Hero Agent proposes (${pending.length})</h3>
-        <p class="help">Read across every earlier run. The Hero Agent proposes only &mdash;
-          a named human decides what reaches the shared knowledge graph.</p>
-        ${pending.map(r => `
-          <div class="listrow">
-            <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
-            ${r.owner ? `<span class="sub">${esc(displayName(r.owner))}</span>` : ''}
-            ${isHead ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="check"></i> Promote</button>
-            <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>`
-            : '<span class="sub"><i data-lucide="lock"></i> needs a Hero Agent approver</span>'}
-          </div>`).join('')}
-      </div>`
-    : `<div class="quiet-note"><i data-lucide="check-circle-2"></i>
-        Nothing waiting on a human. The Hero Agent proposes once it has runs to read.</div>`
+  // Runs carry the agent that produced each artifact in its tags.
+  const runsFor = (agentId) => rows.filter(r => (r.agents || []).includes(agentId))
+  const artifactsFor = (agentId) => runsFor(agentId).reduce((n, r) => n + (r.step_count || 0), 0)
 
-  const sections = known.map(a => {
-    const mine = rows.filter(r => r.practice === a.id)
-        .sort((x, y) => (y.updated_at || y.updated || '').localeCompare(x.updated_at || x.updated || ''))
-    const artifacts = mine.reduce((n, r) => n + (r.step_count || 0), 0)
-    const open = mine.filter(r => !inCookbook(r)).length
-    const awake = mine.length > 0
-    return `<div class="card">
-      <div class="agent-card-head">
-        ${agentFace(a.id, awake)}
-        <div class="who">
-          <b>${agentMark(a.id)} ${esc(a.label)}</b>
-          <span class="sub">${mine.length} run(s) &middot; ${artifacts} artifact(s)${open ? ` &middot; ${open} open` : ''}</span>
+  /*
+   * The Hero Agent sits above the systems, in its own card, because it belongs
+   * to none of them: the four agents each do one stage of one run, and the hero
+   * is the only thing that reads ACROSS runs. Putting it in the grid with the
+   * rest would say it is a fifth stage, which is the one thing it is not.
+   */
+  const inCx = rows.filter(r => r.cx_approved === true).length
+  const hero = `<div class="hero-card">
+      <div class="hero-top">
+        ${agentFace('hero', rows.length > 0, 54)}
+        <div style="flex:1;min-width:0">
+          <div class="hero-role">The Hero Agent</div>
+          <b>Reads across every run, and proposes what should be learned</b>
+          <div class="sub">${rows.length} run(s) read &middot; ${inCx} in the Shared Knowledge Graph
+            &middot; ${pending.length} awaiting a person</div>
         </div>
       </div>
-      ${mine.length ? `<div>${mine.slice(0, 8).map(r => `
+      <p class="help" style="margin:10px 0 0">It proposes only. A named human always decides what
+        reaches the Shared Knowledge Graph &mdash; that gate is the point, not an obstacle.</p>
+      ${pending.length ? pending.map(r => `
         <div class="listrow">
-          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
-          <span class="sub">${r.step_count || 0} artifact(s)</span>
-          ${statusBadge(r)}
-        </div>`).join('')}${mine.length > 8 ? `<p class="help">and ${mine.length - 8} more.</p>` : ''}</div>`
-        : '<p class="help">No runs yet. This agent is registered but has not produced anything.</p>'}
+          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
+          ${isHead ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="check"></i> Promote</button>
+            <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>`
+            : '<span class="sub"><i data-lucide="lock"></i> needs an approver</span>'}
+        </div>`).join('')
+        : `<div class="quiet-note" style="margin-top:10px"><i data-lucide="check-circle-2"></i>
+            Nothing waiting on a human right now.</div>`}
     </div>`
-  }).join('')
+
+  const systemCard = (sys) => {
+    const mine = sys.id === 'agentic-harness' ? agents : []
+    const server = servers.find(x => x.practice === sys.practice && x.active)
+    const totalRuns = mine.reduce((n, a) => n + runsFor(a.id).length, 0)
+
+    return `<div class="card sys-card">
+      <div class="sys-head">
+        <div>
+          <b>${esc(sys.label || sys.id)}</b>
+          <div class="sub">${esc(sys.practice || 'no domain')} &middot;
+            ${sys.active ? `<span class="ok">connected</span>` : `<span class="off">not connected</span>`}
+            ${sys.base_url ? ` &middot; <span class="mono">${esc(sys.base_url)}</span>` : ''}</div>
+        </div>
+        <span class="sub">${mine.length} agent(s) &middot; ${totalRuns} run(s)</span>
+      </div>
+
+      ${server ? `<div class="sub" style="margin:-2px 0 10px">
+        Tools via <b>${esc(server.label)}</b>${server.auth_configured ? '' : ' &middot; no credential set'}</div>` : ''}
+
+      ${mine.length ? `<div class="agent-grid">${mine.map(a => {
+        const runs = runsFor(a.id)
+        const awake = runs.length > 0
+        // A run this agent has not yet reached, and that has not settled, is a
+        // run it is on now. That is read from the run's own tags, so the tile
+        // cannot claim work that is not recorded.
+        const onNow = rows.filter(r => { const p = runProgress(r); return p && p.current && p.current.id === a.id })
+        return `<div class="agent-tile${awake ? ' awake' : ''}${onNow.length ? ' current' : ''}" style="--tint:${agentTint(a.id)}">
+          ${agentFace(a.id, awake, 46)}
+          <div class="who">
+            <b>${esc(a.label || a.id)}</b>
+            <span class="sub">${awake ? `${runs.length} run(s) &middot; ${artifactsFor(a.id)} artifact(s)` : 'no runs yet'}</span>
+            ${onNow.length ? `<span class="sub" style="color:var(--accent-text);font-weight:600">
+              <i data-lucide="loader"></i> working on ${onNow.length}</span>` : ''}
+            ${a.owner ? `<span class="sub owner">${esc(a.owner)}</span>` : ''}
+          </div>
+        </div>`
+      }).join('')}</div>`
+      : `<p class="help">${sys.active
+          ? 'Connected, but this system lists no agents yet.'
+          : 'Not connected. Add its endpoint in Settings and its agents appear here.'}</p>`}
+    </div>`
+  }
 
   el.innerHTML = `
-    <p class="panel-intro">Every agent in the pipeline, and what each has produced.
-      The list comes from the registry, so a new agent appears here on its own.</p>
-    ${proposals}
-    <div class="cards">${sections}</div>`
+    <p class="panel-intro">Every agent system wired into Agent Manager, and the agents each one has.
+      Agents are read from the system&rsquo;s own catalog, so one added upstream appears here &mdash;
+      and through here to Claude &mdash; on its own.</p>
+    ${hero}
+    ${(() => {
+      const live = rows.filter(r => { const p = runProgress(r); return p && p.live })
+      if (!live.length) return ''
+      return `<div class="card section-gap">
+        <h3 class="head"><i data-lucide="activity"></i> In flight now <span class="sub">(${live.length})</span></h3>
+        <p class="help">Where each open run has actually got to, read from the artifacts it has
+          recorded &mdash; not from what a stage reported about itself.</p>
+        ${live.map(r => `<div style="padding:9px 0;border-top:1px solid var(--border)">
+          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}"
+            style="justify-content:flex-start;text-align:left;width:100%">${esc(r.title)}</button>
+          ${journeyBar(r)}
+        </div>`).join('')}
+      </div>`
+    })()}
+    ${systems.length ? systems.map(systemCard).join('') : '<p class="empty"><i data-lucide="plug"></i><br>No agent systems registered. Add one in Settings.</p>'}`
   refreshIcons()
 }
 
 function renderHeadChef () {
   const el = $('#panel-headchef')
   if (!el) return
-  if (state.role !== 'head-chef') {
-    el.innerHTML = '<p class="empty"><i data-lucide="lock"></i><br>The Hero Agent queue is only available to Hero Agents. Roles are configured in settings.head_chefs (set_head_chefs).</p>'
-    refreshIcons(); return
-  }
+  const canApprove = state.role === 'head-chef'
   const pending = state.cxPending.slice().sort((a, b) => (b.baked_at || b.updated || '').localeCompare(a.baked_at || a.updated || ''))
   // D84: work that is consented but NOT baked can never reach this queue, and a Hero Agent waiting
   // on it had no way to tell that from "nothing submitted". Show it, clearly separated, with whose
@@ -2014,27 +2294,32 @@ function renderHeadChef () {
     .filter(r => recipeStage(r) === 'ready')
     .sort((a, b) => (b.updated_at || b.updated || '').localeCompare(a.updated_at || a.updated || ''))
   el.innerHTML = `
-    <p class="panel-intro">Baked recipes awaiting admission to the <b>Company CX Graph</b>. Baking creates a candidate; only a Hero Agent admits one.</p>
+    <p class="panel-intro">Runs approved and handed over, waiting to be admitted to the
+      <b>Shared Knowledge Graph</b>. Approving a run makes it a candidate; an approver admits it.
+      ${canApprove ? 'You are an approver.'
+        : 'You are not an approver, so the decisions here are read-only for you &mdash; but your own runs are in this list, and you can see exactly where they are.'}</p>
     ${pending.length ? `<div class="cards">${pending.map(r => `
       <div class="card">
         <div class="card-head"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b>${esc(r.title)}</b>${statusBadge(r)}</div>
         ${crumb(r)}
-        <div class="meta">${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}<span>${r.step_count || 0} ingr.</span>${r.baked_at ? `<span>baked ${relTime(r.baked_at)}</span>` : ''}</div>
+        <div class="meta">${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}<span>${r.step_count || 0} artifact(s)</span>${r.baked_at ? `<span>baked ${relTime(r.baked_at)}</span>` : ''}</div>
         <div class="rowbtns">
           <button class="btn tiny" data-open-recipe="${esc(r.id)}"><i data-lucide="eye"></i> Review</button>
-          <button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="network"></i> Admit to CX graph</button>
-          <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>
+          ${canApprove ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="network"></i> Admit to the Shared Graph</button>
+          <button class="btn tiny" data-cx-reject="${esc(r.id)}"><i data-lucide="x"></i> Hold back</button>`
+          : '<span class="sub"><i data-lucide="lock"></i> waiting on an approver</span>'}
         </div>
       </div>`).join('')}</div>` : '<p class="empty"><i data-lucide="check-circle-2"></i><br>Queue clear. Nothing is waiting for admission.</p>'}
 
     ${notSubmitted.length ? `<div class="card section-gap" style="border-left:3px solid var(--ready)">
       <h3 class="head"><i data-lucide="clock"></i> Not submitted yet (${notSubmitted.length})</h3>
-      <p class="help">Approved but not baked, so they are not candidates yet and cannot be admitted. If you are waiting on one, its author needs to bake it.</p>
+      <p class="help">Approved but not handed over, so they are not candidates yet and cannot be
+        admitted. If you are waiting on one, its author still needs to approve it across.</p>
       ${notSubmitted.map(r => `
         <div class="listrow">
           <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
           ${statusBadge(r)}
-          <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'} · ${r.step_count || 0} ingr.</span>
+          <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'} · ${r.step_count || 0} artifact(s)</span>
         </div>`).join('')}
     </div>` : ''}`
   refreshIcons()
@@ -2053,22 +2338,22 @@ function renderCookbook () {
   const byProject = new Map()
   for (const r of rows) { const p = recProject(r) || '(no project)'; if (!byProject.has(p)) byProject.set(p, []); byProject.get(p).push(r) }
   let html = `<div class="toolbar">
-    <p class="sub" style="flex:1; min-width:220px">Certified recipes${state.project ? ` in <b>${esc(state.project)}</b>` : ''}. Each is its approved artifacts, in order.</p>
+    <p class="sub" style="flex:1; min-width:220px">Certified runs${state.project ? ` in <b>${esc(state.project)}</b>` : ''}. Each is its approved artifacts, in order.</p>
     <input class="field" id="cookbook-search" placeholder="Search recipes…" value="${esc(q)}" style="max-width:240px" oninput="cookbookSearch(this.value)"></div>`
   if (!rows.length) {
     const exp = scoped(state.recipes).filter(r => !inCookbook(r)).length
-    html += `<p class="empty"><i data-lucide="chef-hat"></i><br>${q ? 'No matching recipes.' : (exp ? `Nothing promoted yet. ${exp} experimental run(s) are in the Work Log.` : 'No recipes captured yet.')}</p>`
+    html += `<p class="empty"><i data-lucide="book-marked"></i><br>${q ? 'No matching runs.' : (exp ? `Nothing promoted yet. ${exp} experimental run(s) are in the Event Log.` : 'No runs captured yet.')}</p>`
   } else {
     for (const [project, plist] of [...byProject.entries()].sort()) {
       const byKind = new Map()
       for (const r of plist) { const k = r.type || 'recipe'; if (!byKind.has(k)) byKind.set(k, []); byKind.get(k).push(r) }
       html += `<h3 class="head section-gap"><i data-lucide="folder"></i> ${esc(project)} <span class="sub">(${plist.length})</span></h3>`
       for (const [kind, list] of [...byKind.entries()].sort()) {
-        html += `<div class="sub" style="margin:8px 0 6px"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i> ${esc(kind)}</div><div class="cards">` +
+        html += `<div class="sub" style="margin:8px 0 6px"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i> ${esc(typeLabel(kind))}</div><div class="cards">` +
           list.map(r => `<div class="card click" data-open-recipe="${esc(r.id)}">
             <div class="card-head"><b>${esc(r.title)}</b>${statusBadge(r)}</div>
             ${crumb(r)}
-            <div class="meta">${(r.models_used || []).map(m => modelChip(m)).join('')}${tokenChip(r.tokens_used)}<span>${r.step_count || 1} ingr.</span>${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}</div>
+            <div class="meta">${(r.models_used || []).map(m => modelChip(m)).join('')}${tokenChip(r.tokens_used)}<span>${r.step_count || 1} artifact(s)</span>${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}</div>
           </div>`).join('') + '</div>'
       }
     }
@@ -2113,6 +2398,11 @@ async function openDetail (id, view) {
       <button class="btn tiny" id="attach-diagram" data-id="${esc(id)}"><i data-lucide="paperclip"></i> Attach diagram/image</button>
       <button class="btn tiny" id="pdf-detail"><i data-lucide="file-down"></i> PDF</button>
     </div>
+    ${journeyBar(meta, steps)}
+    ${['draft', 'ready'].includes(recipeStage(meta)) && isMine(meta) ? `<div class="rowbtns" style="margin:10px 0">
+      <button class="btn primary" data-submit-run="${esc(id)}"><i data-lucide="send"></i> Approve &rarr; hand to the Hero Agent</button>
+    </div><p class="help">It proposes; a named person decides what reaches the Shared Knowledge Graph.</p>` : ''}
+    ${runLedger(steps)}
     <div id="detail-steps" class="steps"></div>
     ${meta.approved_by ? `<div class="card section-gap"><h3 class="head"><i data-lucide="badge-check"></i> Consent record</h3><div class="kv"><span class="k">Approved by</span><span class="v">${esc(meta.approved_by)}</span></div><div class="kv"><span class="k">At</span><span class="v">${fmtDate(meta.approved_at)}</span></div>${meta.approval_note ? `<div class="kv"><span class="k">Note</span><span class="v">${esc(meta.approval_note)}</span></div>` : ''}</div>` : ''}
     ${(() => {
@@ -2150,7 +2440,106 @@ function renderSettings () {
   const s = state.settings
   if (!s) { $('#panel-settings').innerHTML = '<p class="empty">Settings unavailable.</p>'; return }
   $('#panel-settings').innerHTML = `
-    <p class="panel-intro">Rename what things are called and set the retention window. Labels change; internal keys do not, so stored data is unaffected.</p>
+    <p class="panel-intro">Wire the agent estate, rename what things are called, and set the retention
+      window. <b>Agent systems</b> are the upstreams that execute agents; <b>MCP servers</b> are what
+      they reach through. Both are configuration, so adding either is a form here rather than a deploy.
+      Labels change; internal keys do not, so stored data is unaffected.</p>
+
+    <div class="card">
+      <h3 class="head"><i data-lucide="workflow"></i> Agent systems</h3>
+      <p class="help">The upstreams that actually execute agents &mdash; today Chauncey&rsquo;s Xfinity
+        Creative Intake harness. Agent names are never set here: they are read from each system&rsquo;s
+        own catalog at its <b>agent catalog path</b>, so the upstream stays the single source of truth
+        for what its agents are called, and a fifth agent added there appears here on its own.
+        <b>Check</b> asks a system for that catalog, which is how you verify it answers before
+        pointing an intake at it.</p>
+      <p class="help">If an agentic AEP or AEM harness is needed tomorrow, it is a row here &mdash;
+        not a deploy.</p>
+      ${(state.agentSystems || []).map(a => `
+        <div class="mcp-row" data-sys-row="${esc(a.id)}">
+          <div class="mcp-head">
+            <b>${esc(a.label || a.id)}</b>
+            <span class="chip mono">${esc(a.id)}</span>
+            ${a.active ? '<span class="badge house"><i data-lucide="check"></i>active</span>'
+              : '<span class="badge"><i data-lucide="pause"></i>inactive</span>'}
+            ${a.practice ? `<span class="chip">${esc(a.practice)}</span>` : ''}
+            <span class="grow"></span>
+            <button class="btn tiny" data-sys-check="${esc(a.id)}"><i data-lucide="stethoscope"></i> Check</button>
+          </div>
+          <div class="mcp-fields">
+            <label class="flabel">Name<input class="field" data-sys-field="label" value="${esc(a.label || '')}"></label>
+            <label class="flabel">Domain<input class="field" data-sys-field="practice" value="${esc(a.practice || '')}" placeholder="workfront | aep | aem"></label>
+            <label class="flabel" style="grid-column:1/-1">Base URL<input class="field mono" data-sys-field="base_url" value="${esc(a.base_url || '')}"></label>
+            <label class="flabel">Agent catalog path<input class="field mono" data-sys-field="agents_path" value="${esc(a.agents_path || '')}" placeholder="/api/tasks"></label>
+            <label class="flabel">Start-run path<input class="field mono" data-sys-field="start_path" value="${esc(a.start_path || '')}" placeholder="/api/runs"></label>
+            <label class="flabel">Read-run path<input class="field mono" data-sys-field="run_path" value="${esc(a.run_path || '')}" placeholder="/api/runs/{run_id}"></label>
+            <label class="flabel">Input key<input class="field mono" data-sys-field="input_key" value="${esc(a.input_key || '')}" placeholder="brief"></label>
+            <label class="flabel">Input envelope<input class="field mono" data-sys-field="input_envelope" value="${esc(a.input_envelope || '')}" placeholder="input"></label>
+            <label class="flabel">Authorization<input class="field mono" data-sys-field="auth" placeholder="\${HARNESS_TOKEN}"></label>
+            <label class="flabel" style="grid-column:1/-1">MCP endpoint it calls
+              <input class="field mono" data-sys-field="mcp_endpoint" value="${esc(a.mcp_endpoint || '')}"></label>
+            <label class="flabel" style="grid-column:1/-1">Backed by MCP server
+              <select class="field" data-sys-field="mcp_server_id">
+                <option value="">&mdash; not set &mdash;</option>
+                ${(state.mcpServers || []).map(m => `<option value="${esc(m.id)}"${m.id === a.mcp_server_id ? ' selected' : ''}>${esc(m.label || m.id)}</option>`).join('')}
+              </select></label>
+          </div>
+          <p class="help">The harness calls its own MCP server-side, so <b>MCP endpoint it calls</b> is
+            what we know it reaches, not something we can force from here. Changing it records what is
+            true; it does not reconfigure the upstream.</p>
+          <div class="rowbtns">
+            <label class="chip"><input type="checkbox" data-sys-field="active" ${a.active ? 'checked' : ''}> Active</label>
+            <button class="btn tiny sage" data-sys-save="${esc(a.id)}"><i data-lucide="save"></i> Save</button>
+            <span class="sub" data-sys-result></span>
+          </div>
+          ${(a.notes || []).length ? `<details><summary class="sub">What we know about this system</summary>
+            <p class="help">${(a.notes || []).map(n => esc(n)).join('<br>')}</p></details>` : ''}
+        </div>`).join('') || '<p class="empty"><i data-lucide="workflow"></i><br>No agent systems registered.</p>'}
+      <div class="rowbtns section-gap">
+        <button class="btn tiny" id="sys-add"><i data-lucide="plus"></i> Register another agent system</button>
+      </div>
+    </div>
+
+    <div class="card section-gap">
+      <h3 class="head"><i data-lucide="plug-zap"></i> MCP servers</h3>
+      <p class="help">Adobe ships one MCP per product &mdash; Workfront, AEM, AEP &mdash; and more will
+        arrive. Each is an entry here, never a branch in code, so pointing an agent at a new server is
+        configuration and not a deploy. <b>Check</b> asks a server what it actually exposes; an
+        unreachable server and a server with no tools are different problems and it says which.</p>
+      <p class="help"><b>Never paste a real token.</b> Put it in the environment and reference it as
+        <span class="mono">\${ENV_VAR}</span> &mdash; the value is resolved at call time and is never
+        stored or shown here.</p>
+      ${(state.mcpServers || []).length ? (state.mcpServers || []).map(m => `
+        <div class="mcp-row" data-mcp-row="${esc(m.id)}">
+          <div class="mcp-head">
+            <b>${esc(m.label || m.id)}</b>
+            <span class="chip mono">${esc(m.id)}</span>
+            ${m.active ? '<span class="badge house"><i data-lucide="check"></i>active</span>'
+              : '<span class="badge"><i data-lucide="pause"></i>inactive</span>'}
+            ${m.auth_configured ? '<span class="chip"><i data-lucide="key-round"></i>credential set</span>'
+              : (m.auth_source ? `<span class="chip" style="color:var(--reject)"><i data-lucide="key-round"></i>${esc(m.auth_source)} not set</span>` : '')}
+            <span class="grow"></span>
+            <button class="btn tiny" data-mcp-check="${esc(m.id)}"><i data-lucide="stethoscope"></i> Check</button>
+          </div>
+          <div class="mcp-fields">
+            <label class="flabel">Name<input class="field" data-mcp-field="label" value="${esc(m.label || '')}"></label>
+            <label class="flabel">Domain<input class="field" data-mcp-field="practice" value="${esc(m.practice || '')}" placeholder="workfront | aep | aem"></label>
+            <label class="flabel" style="grid-column:1/-1">Endpoint<input class="field mono" data-mcp-field="endpoint" value="${esc(m.endpoint || '')}"></label>
+            <label class="flabel">Instance<input class="field mono" data-mcp-field="instance" value="${esc(m.instance || '')}" placeholder="tenant, where one is needed"></label>
+            <label class="flabel">Authorization<input class="field mono" data-mcp-field="auth" placeholder="\${WORKFRONT_TOKEN}"></label>
+          </div>
+          <div class="rowbtns">
+            <label class="chip"><input type="checkbox" data-mcp-field="active" ${m.active ? 'checked' : ''}> Active</label>
+            <button class="btn tiny sage" data-mcp-save="${esc(m.id)}"><i data-lucide="save"></i> Save</button>
+            <span class="sub" data-mcp-result></span>
+          </div>
+          ${(m.notes || []).length ? `<p class="help">${esc((m.notes || []).join(' '))}</p>` : ''}
+        </div>`).join('')
+        : '<p class="empty"><i data-lucide="plug"></i><br>No MCP servers registered.</p>'}
+      <div class="rowbtns section-gap">
+        <button class="btn tiny" id="mcp-add"><i data-lucide="plus"></i> Register another server</button>
+      </div>
+    </div>
     <div class="card">
       <h3 class="head"><i data-lucide="timer"></i> Retention</h3>
       <label class="flabel" for="set-retention">Days an experimental step lives before the daily purge removes it</label>
@@ -2160,12 +2549,12 @@ function renderSettings () {
     <div class="card section-gap">
       <h3 class="head"><i data-lucide="layers"></i> Segmentation labels</h3>
       <p class="help">How work is organized (e.g. Project → Epic → Story). Rename to fit your org's vocabulary.</p>
-      ${s.segmentation_levels.map(l => `<label class="flabel" for="seg-${esc(l.key)}">${esc(l.key)} <span class="sub">(default: ${esc(l.default_label)})</span></label><input class="field" id="seg-${esc(l.key)}" data-seg="${esc(l.key)}" value="${esc(l.label)}" style="max-width:320px">`).join('')}
+      ${(s.segmentation_levels || []).map(l => `<label class="flabel" for="seg-${esc(l.key)}">${esc(l.key)} <span class="sub">(default: ${esc(l.default_label)})</span></label><input class="field" id="seg-${esc(l.key)}" data-seg="${esc(l.key)}" value="${esc(l.label)}" style="max-width:320px">`).join('')}
     </div>
     <div class="card section-gap">
       <h3 class="head"><i data-lucide="tags"></i> Kind labels</h3>
       <p class="help">Display names for the resource kinds the connector accepts.</p>
-      ${s.kinds.map(k => `<label class="flabel" for="kind-${esc(k.type)}">${esc(k.type)} <span class="sub">(${esc(k.approval)})</span></label><input class="field" id="kind-${esc(k.type)}" data-kind="${esc(k.type)}" value="${esc(k.label)}" style="max-width:320px">`).join('')}
+      ${(s.kinds || []).map(k => `<label class="flabel" for="kind-${esc(k.type)}">${esc(k.type)} <span class="sub">(${esc(k.approval)})</span></label><input class="field" id="kind-${esc(k.type)}" data-kind="${esc(k.type)}" value="${esc(k.label)}" style="max-width:320px">`).join('')}
     </div>
     <div class="card section-gap">
       <h3 class="head"><i data-lucide="crown"></i> Hero Agents (CX-graph gatekeepers)</h3>
@@ -2298,7 +2687,7 @@ than creating a near-duplicate.
 
 My domain is ${user.practice || 'not set, so ask an admin'}. New runs inherit it.`
 
-  return `AGENT MANAGER
+  return `CX AGENT MANAGER
 Setup for ${user.display_name || user.id}
 
 Login id     ${user.id}
@@ -2555,7 +2944,7 @@ function renderConnections () {
       <div class="kv"><span class="k">Host</span><span class="v">${esc(i.seams?.host?.adapter || 'not set')}</span></div>
       <div class="kv"><span class="k">Dashboard auth</span><span class="v">${esc(i.dashboardAuth || 'not set')}</span></div>
     </div>
-    <div class="card section-gap"><h3 class="head"><i data-lucide="wrench"></i> Tools available via proxy</h3><div class="rowbtns">${state.tools.map(t => `<span class="chip">${esc(t.name)}</span>`).join('')}</div></div>` : '<p class="empty">Connection info unavailable.</p>'}`
+    <div class="card section-gap"><h3 class="head"><i data-lucide="wrench"></i> Tools Agent Manager exposes</h3><div class="rowbtns">${state.tools.map(t => `<span class="chip">${esc(t.name)}</span>`).join('')}</div></div>` : '<p class="empty">Connection info unavailable.</p>'}`
   refreshIcons()
 }
 
@@ -2576,6 +2965,28 @@ function themeColor (name, fallback) {
   const v = getComputedStyle(document.body).getPropertyValue(`--${name}`).trim()
   return v || fallback
 }
+/**
+ * A face as an image, for a graph node.
+ *
+ * The node is drawn on a canvas, so it cannot inherit CSS custom properties -
+ * var(--pk-blue) inside a data: URI resolves to nothing and the face comes out
+ * black. Resolve every token to a literal against the live theme first. Cached
+ * per theme, because this runs once per artifact node and a graph has many.
+ */
+const faceUriCache = new Map()
+function agentFaceUri (id, awake = true) {
+  const theme = document.documentElement.getAttribute('data-theme') || 'light'
+  const key = `${theme}:${id}:${awake}`
+  const hit = faceUriCache.get(key)
+  if (hit) return hit
+  const svg = agentFace(id, awake, 44)
+    .replace(/var\(--([a-z0-9-]+)\)/gi, (_, name) => themeColor(name, '#8A8A8A'))
+    .replace(/\sclass="[^"]*"/g, '')
+  const uri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+  faceUriCache.set(key, uri)
+  return uri
+}
+
 /** The graph palette for the current theme, read once per render. */
 function graphPalette () {
   return {
@@ -2609,16 +3020,27 @@ function mountForceGraph (container, nodes, edges, { onClick } = {}) {
     interaction: { hover: true, dragNodes: true, zoomView: true, dragView: true, tooltipDelay: 120 }
   })
   const allIds = nodesDS.getIds()
-  net.on('hoverNode', p => {
+  /* A throw inside a hover handler is invisible: it does not reach the mount's
+     try/catch, so the graph just stops responding with nothing on screen. */
+  const guard = (fn) => (...a) => { try { fn(...a) } catch (e) { console.error('graph hover:', e) } }
+  net.on('hoverNode', guard(p => {
     const keep = new Set([p.node, ...net.getConnectedNodes(p.node)])
     nodesDS.update(allIds.map(id => ({ id, opacity: keep.has(id) ? 1 : 0.15 })))
-    edgesDS.update(edgesDS.getIds().map(id => { const e = edgesDS.get(id); return { id, color: { ...(e.color || {}), opacity: (keep.has(e.from) && keep.has(e.to)) ? 1 : 0.08 } } }))
-  })
-  net.on('blurNode', () => {
+    // DataSet.get() returns null for an id it no longer holds, and reading
+    // .color off that null took the whole graph down on hover.
+    edgesDS.update(edgesDS.getIds().map(id => {
+      const e = edgesDS.get(id); if (!e) return null
+      return { id, color: { ...(e.color || {}), opacity: (keep.has(e.from) && keep.has(e.to)) ? 1 : 0.08 } }
+    }).filter(Boolean))
+  }))
+  net.on('blurNode', guard(() => {
     nodesDS.update(allIds.map(id => ({ id, opacity: 1 })))
-    edgesDS.update(edgesDS.getIds().map(id => { const e = edgesDS.get(id); return { id, color: { ...(e.color || {}), opacity: 1 } } }))
-  })
-  if (onClick) net.on('click', p => { if (p.nodes[0]) onClick(p.nodes[0]) })
+    edgesDS.update(edgesDS.getIds().map(id => {
+      const e = edgesDS.get(id); if (!e) return null
+      return { id, color: { ...(e.color || {}), opacity: 1 } }
+    }).filter(Boolean))
+  }))
+  if (onClick) net.on('click', guard(p => { if (p.nodes[0]) onClick(p.nodes[0]) }))
   return net
 }
 
@@ -2657,7 +3079,9 @@ async function buildGraph () {
     `<span><span class="swatch" style="background:var(--ready)"></span>ready to approve</span>` +
     `<span><span class="swatch" style="background:var(--baked)"></span>with the Hero Agent</span>` +
     `<span><span class="swatch" style="background:var(--house)"></span>in the Shared Knowledge Graph</span>` +
-    `<span><span class="swatch" style="background:var(--ingredient)"></span>artifact</span>` +
+    `<span>${agentFace('intake', true, 18)} an agent&rsquo;s artifact</span>` +
+    `<span><span class="swatch" style="background:var(--ingredient)"></span>written by a person</span>` +
+    `<span><span class="swatch ring" style="background:var(--reject)"></span>reported success, failed</span>` +
     `<span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
   container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="loader"></i><br>Loading artifacts &amp; lineage…</div>'; refreshIcons()
 
@@ -2717,13 +3141,41 @@ async function buildGraph () {
       title: `${r.title}\n${STAGES[stage].label}${isMine(r) ? ' · yours' : (r.owner ? ' · ' + r.owner : '')}${steered ? ' · steered' : ''}\n${STAGES[stage].hint}`
     })
     for (const s of artifacts) {
-      nodes.push({ id: s.id, group: 'artifact', recipe: r.id, label: s.kind, shape: 'dot', size: 7, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor } })
-      edges.push({ from: r.id, to: s.id, rel: 'composition', color: { color: pal.edge } })
+      /*
+       * An artifact node used to be labelled with its KIND - doc, message,
+       * decision - which is the least interesting true thing about it. What a
+       * reader wants from this graph is which agent produced it, so an agent's
+       * artifacts are drawn as that agent, with its own face and its own
+       * feather. A person can then read a run's shape without reading a word.
+       *
+       * Artifacts with no agent behind them - the brief the marketer wrote, the
+       * time ledger, a note somebody added - keep the plain dot and their kind
+       * label. They are not agent work, and dressing them as agent work would
+       * be the same overclaiming this project exists to catch.
+       */
+      const who = stepAgent(s)
+      const meta = who ? (state.systemAgents || []).find(a => a.id === who) : null
+      const faulted = (s.tags || []).includes('silent-failure')
+      const rejectHue = themeColor('reject', '#A34E35')
+      nodes.push(who
+        ? {
+            id: s.id, group: 'artifact', recipe: r.id, agent: who,
+            label: (meta && meta.label) || who,
+            shape: 'image', image: agentFaceUri(who, true), size: 16,
+            font: { size: 11, color: textColor },
+            shapeProperties: { useBorderWithImage: true },
+            borderWidth: faulted ? 3 : 0,
+            color: { border: faulted ? rejectHue : 'rgba(0,0,0,0)' },
+            title: `${(meta && meta.label) || who}\n${s.kind}` +
+              (faulted ? '\nreported success, but its tool call failed' : '')
+          }
+        : { id: s.id, group: 'artifact', recipe: r.id, label: s.kind, shape: 'dot', size: 7, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor }, title: `${s.kind}\nnot produced by an agent` })
+      edges.push({ from: r.id, to: s.id, rel: 'composition', color: { color: faulted ? rejectHue : pal.edge } })
     }
     const seg = subKey ? segVal(r, subKey) : null
     if (seg) { const hid = `seg:${seg}`; if (!segHub[hid]) { segHub[hid] = 1; nodes.push({ id: hid, group: 'hub', label: String(seg), shape: 'box', color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 12, color: textColor } }) } edges.push({ from: r.id, to: hid, rel: 'shared-segment', dashes: true, color: { color: pal.edgeFaint } }) }
     for (const tag of (r.tags || []).slice(0, 4)) { const hid = `tag:${tag}`; if (!tagHub[hid]) { tagHub[hid] = 1; nodes.push({ id: hid, group: 'hub', label: `#${tag}`, shape: 'text', font: { size: 11, color: pal.ingredient } }) } edges.push({ from: r.id, to: hid, rel: 'shared-tag', dashes: true, color: { color: pal.edgeFaint } }) }
-    const khid = `kind:${r.type}`; if (!kindHub[khid]) { kindHub[khid] = 1; nodes.push({ id: khid, group: 'hub', label: r.type, shape: 'diamond', size: 10, color: { background: pal.stages.draft.bg, border: pal.stages.draft.border }, font: { size: 11, color: textColor } }) }
+    const khid = `kind:${r.type}`; if (!kindHub[khid]) { kindHub[khid] = 1; nodes.push({ id: khid, group: 'hub', label: typeLabel(r.type), shape: 'diamond', size: 10, color: { background: pal.stages.draft.bg, border: pal.stages.draft.border }, font: { size: 11, color: textColor } }) }
     edges.push({ from: r.id, to: khid, rel: 'shared-kind', dashes: true, color: { color: pal.edgeFaint } })
   }
   for (const h of handoffs) {
@@ -2737,7 +3189,14 @@ async function buildGraph () {
     mountForceGraph(container, nodes, edges, {
       onClick: id => { const n = nodes.find(x => x.id === id); if (!n) return; if (n.group === 'recipe') openDetail(id); else if (n.group === 'artifact') openDetail(n.recipe) }
     })
-  } catch (e) { container.innerHTML = `<div class="empty">Graph failed: ${esc(e.message)}</div>` }
+  } catch (e) {
+    // "cannot read properties of null" on its own is unactionable. Say which
+    // line threw, so the next report points at the cause instead of the symptom.
+    const at = String(e.stack || '').split(String.fromCharCode(10))[1] || ''
+    container.innerHTML = `<div class="empty"><i data-lucide="triangle-alert"></i><br>Graph failed: ${esc(e.message)}` +
+      (at ? `<br><span class="sub mono">${esc(at.trim())}</span>` : '') + `</div>`
+    refreshIcons()
+  }
   refreshIcons()
 }
 
@@ -2752,10 +3211,13 @@ async function buildCx (rebuild) {
   try { g = rebuild ? (await callTool('rebuild_cx_graph', {}), await callTool('get_cx_graph', {})) : await callTool('get_cx_graph', {}) }
   catch (e) { container.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`; return }
   state.cxGraph = g
-  legend.innerHTML = `<span><span class="swatch" style="background:var(--house)"></span>recipe</span><span><span class="swatch" style="background:var(--ingredient)"></span>artifact</span><span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
+  legend.innerHTML = `<span><span class="swatch" style="background:var(--house)"></span>run</span>` +
+    `<span>${agentFace('intake', true, 18)} an agent&rsquo;s artifact</span>` +
+    `<span><span class="swatch" style="background:var(--ingredient)"></span>written by a person</span>` +
+    `<span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
   sub.innerHTML = g.built === false || !g.generated_at
     ? 'Shared, approved knowledge across every owner. Nothing admitted yet: bake a recipe, then have a Hero Agent admit it.'
-    : `Cross-owner, <b>approved-only</b>. ${g.recipe_count} recipe(s) · ${g.node_count} node(s) · ${g.edge_count} edge(s) · ${g.owners.length} owner(s). Generated ${relTime(g.generated_at)}. Drag a node; hover to trace its connections.`
+    : `Cross-owner, <b>approved-only</b>. ${g.recipe_count} run(s) · ${g.node_count} node(s) · ${g.edge_count} edge(s) · ${g.owners.length} owner(s). Generated ${relTime(g.generated_at)}. Drag a node; hover to trace its connections.`
   // D84: the CX graph's filters come from the GRAPH'S OWN CONTENTS - people, domains and projects
   // that are actually in it. They previously sat next to the global project picker, which lists
   // every project including ones with nothing admitted, so the panel showed two "All projects"
@@ -2785,7 +3247,8 @@ function renderCxNetwork () {
   const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#1F1E1C'
   const pal = graphPalette()
   const steeredByRecipe = {}
-  for (const n of g.nodes) if (n.node === 'artifact' && n.kind === 'steering' && n.signal === 'correct') steeredByRecipe[n.recipe] = true
+  const isArtifact = (n) => n.node === 'artifact' || n.node === 'ingredient'
+  for (const n of g.nodes) if (isArtifact(n) && n.kind === 'steering' && n.signal === 'correct') steeredByRecipe[n.recipe] = true
 
   const CAP = 150
   let recipeSrc = g.nodes.filter(n => n.node === 'recipe' &&
@@ -2802,7 +3265,20 @@ function renderCxNetwork () {
     const steered = steeredByRecipe[n.id]
     nodes.push({ id: n.id, group: 'recipe', label: (n.label || '').slice(0, 26), shape: 'hexagon', size: 20, color: { background: pal.stages.incx.bg, border: steered ? pal.steered : pal.stages.incx.border }, borderWidth: steered ? 5 : 3, font: { size: 13, color: textColor }, title: `${n.label}\n${n.owner || 'owner not recorded'}${steered ? '\nsteered' : ''}` })
   }
-  for (const n of g.nodes) if (n.node === 'artifact' && recipeVisible.has(n.recipe)) nodes.push({ id: n.id, group: 'artifact', recipe: n.recipe, label: n.kind, shape: 'dot', size: 8, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor } })
+  // Same rule as the personal graph: an agent's artifact is drawn as that
+  // agent; anything a person wrote keeps its kind.
+  for (const n of g.nodes) {
+    if (!isArtifact(n) || !recipeVisible.has(n.recipe)) continue
+    const who = stepAgent(n)
+    const meta = who ? (state.systemAgents || []).find(a => a.id === who) : null
+    nodes.push(who
+      ? { id: n.id, group: 'artifact', recipe: n.recipe, agent: who,
+          label: (meta && meta.label) || who,
+          shape: 'image', image: agentFaceUri(who, true), size: 16,
+          font: { size: 11, color: textColor },
+          title: `${(meta && meta.label) || who}\n${n.kind}` }
+      : { id: n.id, group: 'artifact', recipe: n.recipe, label: n.kind, shape: 'dot', size: 8, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor } })
+  }
   for (const n of g.nodes) if (n.node === 'handoff') nodes.push({ id: n.id, group: 'handoff', label: (n.label || '').slice(0, 22), shape: 'triangle', size: 12, color: { background: pal.stages.awaiting.bg, border: pal.stages.awaiting.border }, font: { size: 11, color: textColor } })
 
   const ids = new Set(nodes.map(n => n.id))
@@ -2818,7 +3294,14 @@ function renderCxNetwork () {
     mountForceGraph(container, finalNodes, edges, {
       onClick: id => { const n = finalNodes.find(x => x.id === id); if (!n) return; if (n.group === 'recipe') openDetail(id); else if (n.group === 'artifact') openDetail(n.recipe) }
     })
-  } catch (e) { container.innerHTML = `<div class="empty">Graph failed: ${esc(e.message)}</div>` }
+  } catch (e) {
+    // "cannot read properties of null" on its own is unactionable. Say which
+    // line threw, so the next report points at the cause instead of the symptom.
+    const at = String(e.stack || '').split(String.fromCharCode(10))[1] || ''
+    container.innerHTML = `<div class="empty"><i data-lucide="triangle-alert"></i><br>Graph failed: ${esc(e.message)}` +
+      (at ? `<br><span class="sub mono">${esc(at.trim())}</span>` : '') + `</div>`
+    refreshIcons()
+  }
 }
 $('#worklog-stage').addEventListener('change', renderWorklogList)
 $('#cx-refresh').addEventListener('click', () => buildCx(true))
@@ -2904,7 +3387,7 @@ async function exportPdf (node, title) {
    Actions (event delegation)
    ===================================================================== */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-open-recipe],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-view-json],[data-copy-json],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-recipe],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-assign-step],[data-unassign-step]')
+  const t = e.target.closest('[data-open-recipe],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-view-json],[data-copy-json],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-recipe],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-unassign-step]')
   if (!t) return
   try {
     if (t.dataset.openRecipe) { openDetail(t.dataset.openRecipe) }
@@ -2933,7 +3416,6 @@ document.addEventListener('click', async (e) => {
     // bake, renamed to what it now means: hand the run to the Hero Agent.
     else if (t.dataset.submitRun) { openConsent('bake', t.dataset.submitRun) }
     // D86: assignment is the only route by which unfinished work becomes visible to a colleague.
-    else if (t.dataset.assignStep) { await assignStep(t.dataset.assignStep) }
     else if (t.dataset.unassignStep) { await callTool('unassign_step', { step_id: t.dataset.unassignStep, assignee: t.dataset.unassignWho }); toast('Assignment removed'); await refreshCurrent() }
     else if (t.dataset.cxApprove) { await callTool('headchef_approve', { recipe_id: t.dataset.cxApprove }); toast('Admitted to the Company CX Graph'); await reloadLight() }
     else if (t.dataset.cxReject) { await callTool('headchef_reject', { recipe_id: t.dataset.cxReject }); toast('Held back from the CX Graph'); await reloadLight() }
@@ -2974,7 +3456,13 @@ function toggleJson (btn) {
       <button class="btn tiny" data-copy-json="${esc(safeId)}"><i data-lucide="copy"></i> Copy</button>
     </div>
     <pre class="raw" id="json-${esc(safeId)}">${esc(JSON.stringify(s.provenance.upstream_payload, null, 2))}</pre>`
-  btn.closest('.rowbtns').after(panel)
+  /* The button lives in .step-foot. The old anchor was .rowbtns, which is not
+     an ancestor of it anywhere - in the drawer that element is a SIBLING of the
+     step list, so closest() returned null and the click threw before the panel
+     was ever inserted. Anchor to the row the button is actually in. */
+  const anchor = btn.closest('.step-foot') || btn.closest('.rowbtns') || btn.parentElement
+  if (!anchor) return
+  anchor.after(panel)
   btn.innerHTML = '<i data-lucide="chevron-up"></i> Hide JSON'
   refreshIcons()
 }
@@ -3226,6 +3714,125 @@ document.addEventListener('keydown', e => {
 function syncPaletteSel () { document.querySelectorAll('.palette-item').forEach((el, i) => el.classList.toggle('sel', i === paletteSel)) }
 $('#drawer-scrim').addEventListener('click', closeDrawer)
 document.addEventListener('click', e => { const s = e.target.closest('#save-settings'); if (s) saveSettings() })
+
+/* Agent systems, from Settings. Same shape as the MCP handler below: Check is
+   offered separately from Save because a registered system that has never
+   answered is the state that wasted the most time on this project. */
+document.addEventListener('click', async (e) => {
+  const check = e.target.closest('[data-sys-check]')
+  const save = e.target.closest('[data-sys-save]')
+  const add = e.target.closest('#sys-add')
+  if (!check && !save && !add) return
+
+  if (add) {
+    const id = prompt('A stable id for the new agent system, e.g. aep-agents')
+    if (!id || !id.trim()) return
+    try {
+      await callTool('set_agent_system', { id: id.trim(), label: id.trim(), active: false })
+      toast('Agent system registered'); await reloadLight()
+    } catch (err) { banner(`Could not register it: ${err.message}`) }
+    return
+  }
+
+  const row = (check || save).closest('.mcp-row')
+  const out = row ? row.querySelector('[data-sys-result]') : null
+  const id = (check || save).dataset.sysCheck || (check || save).dataset.sysSave
+
+  if (check) {
+    if (out) { out.textContent = 'asking…'; out.style.color = '' }
+    try {
+      const r = await callTool('check_agent_system', { id })
+      if (out) {
+        out.style.color = 'var(--house)'
+        out.textContent = `answers · ${r.agent_count} agent(s)` +
+          (r.agents && r.agents.length ? ` · ${r.agents.map(a => a.label || a.id).join(', ')}` : '')
+      }
+    } catch (err) {
+      if (out) { out.style.color = 'var(--reject)'; out.textContent = err.message }
+    }
+    return
+  }
+
+  const args = { id }
+  for (const f of row.querySelectorAll('[data-sys-field]')) {
+    const key = f.dataset.sysField
+    if (f.type === 'checkbox') { args[key] = f.checked; continue }
+    // An untouched Authorization box must not blank a credential already set.
+    if (key === 'auth' && !f.value.trim()) continue
+    args[key] = f.value.trim()
+  }
+  if (out) { out.textContent = 'saving…'; out.style.color = '' }
+  try {
+    await callTool('set_agent_system', args)
+    if (out) { out.style.color = 'var(--house)'; out.textContent = 'saved' }
+    await reloadLight()
+  } catch (err) {
+    if (out) { out.style.color = 'var(--reject)'; out.textContent = err.message }
+  }
+})
+
+/* MCP servers, from Settings.
+   Registering a server is configuration, so it happens here rather than in a
+   deploy. Check is offered separately from Save on purpose: a saved server that
+   has never answered is the state that wasted the most time on this project. */
+document.addEventListener('click', async (e) => {
+  const check = e.target.closest('[data-mcp-check]')
+  const save = e.target.closest('[data-mcp-save]')
+  const add = e.target.closest('#mcp-add')
+  if (!check && !save && !add) return
+
+  if (add) {
+    const id = prompt('A stable id for the new server, e.g. workfront-adobe')
+    if (!id || !id.trim()) return
+    try {
+      await callTool('set_mcp_server', { id: id.trim(), label: id.trim(), active: false })
+      toast('Server registered'); await reloadLight()
+    } catch (err) { banner(`Could not register it: ${err.message}`) }
+    return
+  }
+
+  const row = (check || save).closest('.mcp-row')
+  const out = row ? row.querySelector('[data-mcp-result]') : null
+  const id = (check || save).dataset.mcpCheck || (check || save).dataset.mcpSave
+
+  if (check) {
+    if (out) { out.textContent = 'asking…'; out.style.color = '' }
+    try {
+      const r = await callTool('check_mcp_server', { id })
+      if (out) {
+        out.style.color = 'var(--house)'
+        out.textContent = `answers · ${r.tool_count} tool(s)` +
+          (r.tools && r.tools.length ? ` · e.g. ${r.tools.slice(0, 3).join(', ')}` : '')
+      }
+    } catch (err) {
+      // Said as a failure, never as an empty list. An unreachable server and a
+      // server with no tools are different problems.
+      if (out) { out.style.color = 'var(--reject)'; out.textContent = err.message }
+    }
+    return
+  }
+
+  const args = { id }
+  for (const f of row.querySelectorAll('[data-mcp-field]')) {
+    const key = f.dataset.mcpField
+    if (f.type === 'checkbox') { args[key] = f.checked; continue }
+    // An untouched Authorization box must not blank a credential that is
+    // already set - it is rendered empty precisely because we never show one.
+    if (key === 'auth' && !f.value.trim()) continue
+    args[key] = f.value.trim()
+  }
+  if (out) { out.textContent = 'saving…'; out.style.color = '' }
+  try {
+    const r = await callTool('set_mcp_server', args)
+    if (out) {
+      out.style.color = r.ready ? 'var(--house)' : 'var(--exp)'
+      out.textContent = r.ready ? 'saved · ready' : `saved · ${r.blocked_because || 'not ready'}`
+    }
+    await reloadLight()
+  } catch (err) {
+    if (out) { out.style.color = 'var(--reject)'; out.textContent = err.message }
+  }
+})
 // Team/Roles admin panel (D66)
 document.addEventListener('click', e => {
   const saveBtn = e.target.closest('[data-save-roles]')

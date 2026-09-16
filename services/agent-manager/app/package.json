@@ -1,7 +1,7 @@
 {
   "name": "tap-mcp-connector",
   "version": "1.0.0",
-  "description": "Tap Portability Layer - Company MCP Connector (shared resource loop)",
+  "description": "CX Agent Manager - cross-run memory, review and knowledge graph over the Workfront agent pipeline",
   "main": "actions/mcp-server/index.js",
   "scripts": {
     "test": "jest",

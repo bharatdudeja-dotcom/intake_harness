@@ -1,17 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agent Manager">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CX Agent Manager">
+  <title>CX Agent Manager</title>
   <!--
-    PLACEHOLDER BRAND MARK.
+    Six feathers, fanned from one point, in the six Comcast peacock hexes read
+    off the mark the client supplied.
 
-    Drop the real Comcast asset in as assets/brand-mark.svg (or .png and change
-    the two <link>/<img> references) and everything picks it up: browser tab,
-    sidebar, and the PDF export.
+    Deliberately NOT a redraw of the peacock itself: the bird is a registered
+    trademark, and a homemade version of a client's logo is worse than none -
+    it looks like the real thing until somebody notices it is not. The licensed
+    file belongs at this path when brand supply it, and everything picks it up:
+    browser tab, sidebar, and the PDF export.
 
-    This is deliberately NOT an imitation of the Comcast logo. Using a
-    made-up version of a client's mark in something a client will see is worse
-    than using none - it looks like the real thing until someone notices it is
-    not. So this is a neutral stand-in until the licensed file is dropped in.
+    What IS taken from the mark is the palette and the count, and those matter:
+    the same six colours carry the agent cast throughout the app, one feather
+    per agent assigned by hash, so the icon and the agents read as one family
+    rather than as two palettes that happen to sit next to each other.
   -->
-  <rect width="64" height="64" rx="15" fill="#14135E"/>
-  <circle cx="32" cy="24.5" r="6.5" fill="#fff"/>
-  <path d="M15 47c0-9.4 7.6-17 17-17s17 7.6 17 17" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <g transform="translate(32 46)">
+    <g>
+      <path d="M0 0 L-25.5 -8.6 A27 27 0 0 1 -19.1 -19.1 Z" fill="#FCB711"/>
+      <path d="M0 0 L-19.1 -19.1 A27 27 0 0 1 -8.6 -25.5 Z" fill="#F37021"/>
+      <path d="M0 0 L-8.6 -25.5 A27 27 0 0 1 0 -27 Z" fill="#CC004C"/>
+      <path d="M0 0 L0 -27 A27 27 0 0 1 8.6 -25.5 Z" fill="#6460AA"/>
+      <path d="M0 0 L8.6 -25.5 A27 27 0 0 1 19.1 -19.1 Z" fill="#0089D0"/>
+      <path d="M0 0 L19.1 -19.1 A27 27 0 0 1 25.5 -8.6 Z" fill="#0DB14B"/>
+    </g>
+    <!-- The gaps are part of the mark, not an artefact: each feather has to stay
+         its own shape at 16px, which is the size this is actually seen at. -->
+    <g stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round">
+      <line x1="0" y1="0" x2="-25.5" y2="-8.6"/>
+      <line x1="0" y1="0" x2="-19.1" y2="-19.1"/>
+      <line x1="0" y1="0" x2="-8.6" y2="-25.5"/>
+      <line x1="0" y1="0" x2="0" y2="-27"/>
+      <line x1="0" y1="0" x2="8.6" y2="-25.5"/>
+      <line x1="0" y1="0" x2="19.1" y2="-19.1"/>
+      <line x1="0" y1="0" x2="25.5" y2="-8.6"/>
+    </g>
+  </g>
 </svg>

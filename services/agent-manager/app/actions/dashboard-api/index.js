@@ -78,6 +78,12 @@ const ALLOWED_TOOLS = new Set([
     'get_recipe',
     'list_recipes',
     'list_steps',
+    // The agent estate: which systems are wired in, what agents each one has,
+    // and which MCP servers back them. set_mcp_server is a WRITE, and it is
+    // allowed through because registering a server is Settings work - the tool
+    // itself refuses anyone who is not an admin, which is the right gate for it.
+    'list_agent_systems', 'list_system_agents', 'list_mcp_servers', 'check_mcp_server',
+    'set_mcp_server', 'set_agent_system', 'check_agent_system',
     'list_projects',
     'get_settings',
     // CONSENT / LIFECYCLE WRITES: per-step approval, discard, and recipe/project bake.
@@ -309,7 +315,7 @@ function buildInfo (params) {
     const config = loadAuthConfig(params)
     return {
         connector: {
-            name: 'tap-mcp-connector',
+            name: 'cx-agent-manager',
             mcpServerUrl: config.resourceUrl || null,
             prmUrl: config.prmUrl || null
         },
@@ -465,7 +471,7 @@ async function main (params) {
             const supplied = incomingPasscode(params)
             if (!passcodeMatches(supplied, gateConfig.dashboardPasscode)) {
                 logger.warn('Blocked: missing/incorrect dashboard passcode')
-                return rpcError(401, -32001, 'This cookbook is locked. Enter the access code to continue.', rpc.id, cors)
+                return rpcError(401, -32001, 'CX Agent Manager is locked. Enter the access code to continue.', rpc.id, cors)
             }
         }
 
@@ -504,7 +510,7 @@ async function main (params) {
         // service key) instead of their own.
         if (requireIdentity(params) && !userToken && !login && !userKey) {
             logger.warn('Identity required but neither a Bearer token nor a user access key was presented')
-            return rpcError(401, -32002, 'Sign in with your Cookbook login to open your own cookbook. Your private work is only visible to you; approved recipes and the CX graph are shared with everyone.', rpc.id, cors)
+            return rpcError(401, -32002, 'Sign in to open your own view. Your runs are private to you; approved runs and the Shared Knowledge Graph are visible to everyone.', rpc.id, cors)
         }
 
         const mode = userToken ? 'per-user-token' : (login ? 'user-login' : (userKey ? 'per-user-key' : 'shared-service-key'))

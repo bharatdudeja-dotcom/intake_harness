@@ -51,7 +51,7 @@ let logger = null
  */
 function createMcpServer (context = {}) {
     const server = new McpServer({
-    name: 'tap-mcp-connector',
+    name: 'cx-agent-manager',
         version: '1.0.0'
     }, {
         capabilities: {
@@ -434,7 +434,7 @@ function handleHealthCheck () {
         },
         body: JSON.stringify({
             status: 'healthy',
-            server: 'tap-mcp-connector',
+            server: 'cx-agent-manager',
             version: '1.0.0',
             description: 'Adobe I/O Runtime MCP Server using official TypeScript SDK MCP v1.24.x',
             timestamp: new Date().toISOString(),

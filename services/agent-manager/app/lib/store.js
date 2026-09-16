@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Resource store for the Company MCP Connector's shared resource loop
+ * Resource store for CX Agent Manager's run record
  * (save_resource / list_resources / search_resources / get_resource).
  *
  * Increment 1 persists each resource at resources/<id>.json and maintains a
@@ -104,6 +104,10 @@ function toMetadata (resource) {
     // Increment 11/12 (D45/D47/D48): step-model recipe-level projections + cross-tool linkage
     recipe_id: recipeId, baked, baked_at: bakedAt, baked_by: bakedBy,
     models_used: modelsUsed, step_count: stepCount, expires_at: expiresAt,
+    // Which agents touched the run, and which of them reported success while failing.
+    // Rolled up by projectRecipe; projected here so every list view can draw the
+    // journey without loading each recipe's steps.
+    agents, agent_faults: agentFaults,
     // Increment 18 (D64): Head Chef CX-graph gate - a baked recipe is only a CANDIDATE for the
     // Company CX Graph; cx_approved flips true when a Head Chef admits it. Projected into the
     // catalog so list_cx_pending and the CX compiler can read it without loading every full doc.
@@ -122,6 +126,7 @@ function toMetadata (resource) {
     tokens_used: tokensUsed, tokens_last: tokensLast,
     recipe_id: recipeId, baked, baked_at: bakedAt, baked_by: bakedBy,
     models_used: modelsUsed, step_count: stepCount, expires_at: expiresAt,
+    agents, agent_faults: agentFaults,
     cx_approved: cxApproved, cx_approved_by: cxApprovedBy, cx_approved_at: cxApprovedAt,
     practice,
     assigned_to: assignedTo

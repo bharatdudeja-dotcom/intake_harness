@@ -215,89 +215,95 @@ const WRITE_TOOLS = new Set([
     'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_recipe', 'assign_step', 'unassign_step', 'set_user_display_name',
     // Starts a run upstream AND writes the captured run here.
     'start_intake',
-    // Changes which MCP servers agents can reach.
-    'set_mcp_server'
+    // Changes which MCP servers agents can reach, and which upstreams execute them.
+    'set_mcp_server', 'set_agent_system'
 ])
 
-/** Guides any connected AI on reuse-first + capture behavior (MCP `initialize` instructions). */
-const SERVER_INSTRUCTIONS = `This is the company MCP connector - a shared, cross-AI resource store.
+/**
+ * What a connected AI is told this server is for (MCP `initialize` instructions).
+ *
+ * THIS IS THE FORK'S MOST IMPORTANT DIVERGENCE FROM THE COOKBOOK, and the one
+ * that was missed the longest.
+ *
+ * Agent Manager is a fork of the company cookbook, and it inherited the
+ * cookbook's instructions unchanged. Those instructions tell any client that
+ * connects: "whenever you produce an artifact - a diagram, an architecture doc,
+ * some code - capture it here." That is correct for a cookbook. It is wrong
+ * here, and it is not a cosmetic wrongness: a connected Claude Desktop read
+ * them and started uploading architecture diagrams from an unrelated
+ * conversation into Agent Manager, because that is exactly what it had been
+ * asked to do. Replacing the client's own system prompt did not help, and could
+ * not have - these instructions are served by the server, over MCP, and they
+ * arrive after the system prompt and describe the tools being offered.
+ *
+ * Agent Manager records what the AGENT PIPELINE did. Its runs come from
+ * start_intake, not from an assistant deciding its own output is worth keeping.
+ * So these instructions say what the tools are for, and say plainly what NOT to
+ * send - because a tool called append_step on a server that used to be a
+ * cookbook will otherwise be used like a cookbook.
+ */
+const SERVER_INSTRUCTIONS = `This is CX Agent Manager: the record of what Comcast's Workfront
+creative-intake AGENTS did, across runs, and the gateway to the agent systems themselves.
 
-Before starting new work, call search_resources or list_resources to check for relevant
-prior decisions, architecture, playbooks, configuration, or code the company has already
-captured - reuse before you rebuild.
+IT IS NOT A PLACE TO FILE YOUR OWN WORK. Do not capture diagrams, architecture
+documents, code, notes or summaries you produced in conversation here. That belongs in
+the company cookbook, which is a different server. If you are about to call append_step or
+save_resource to store something YOU made rather than something an AGENT produced, stop:
+you have the wrong server. This one has runs in it, not artifacts you wrote.
 
-Whenever you produce an artifact matching one of the company's resource-policy types (call
-get_resource_policy for the full list, currently: ${POLICY_TYPE_IDS.join(', ')}), save it with
-save_resource using the correct "type". It is validated against the policy and routed to the
-right store automatically. Some types require human approval before becoming visible to
-others (status: "pending") - that is expected behavior, not an error; a human calls
-approve_resource to promote it to "active".
+WHAT IT IS FOR
 
-Everything you capture is EXPERIMENTAL by default and lives in the Test Kitchen until a
-human certifies it - that is expected, not an error. Only certified/approved recipes enter
-the shared cookbook. Do not expect your saves to be immediately reusable by others.
+1. Seeing the agent estate. call list_agent_systems for the pipelines wired in, and
+   list_system_agents for the agents inside one. The list is read from each system's own
+   catalog at call time, so an agent added upstream appears here without a deploy. Never
+   hardcode an agent name; ask.
 
-Organize work by project. At the start of a new, unrelated conversation, call start_project
-with a short descriptive name (and file this session's recipes under it) - do not pile
-unrelated work into one shared project. The configured segmentation levels are:
-${SEGMENT_LEVEL_KEYS.join(' -> ')} (call get_segmentation_config for the labels). project is
-required on every recipe; set it via start_project / set_work_context, or pass it on
-save_resource. Auto-fill the other levels from the conversation. Use the project/epic/story
-filters on list_resources and search_resources to find prior work in a project.
+2. Running an intake. start_intake({brief}) sends a marketer's brief to the pipeline and
+   records the whole run: the brief verbatim, one artifact per agent stage, and a time
+   ledger. get_intake reads one back. The run is created BY the pipeline running - you do
+   not assemble it yourself, and you should not append to it to "complete" it.
 
-If you are refining or correcting earlier work, DO NOT create a new recipe: search_resources
-(or find_similar) for the existing one and call save_resource again with its same id - it is
-updated in place (a new version), not duplicated. Creating near-duplicates is the wrong move.
+3. Reading across runs. list_recipes / get_recipe / search_resources answer "has this
+   failed before", which no single run can. That is the whole point of the layer: one run
+   looks fine, ten runs show the same tool failing every time.
 
-ONE RECIPE PER WORKING THREAD, MANY INGREDIENTS. This is the rule people get wrong most
-often. If one task produces a diagram AND an architecture doc AND some code, that is ONE
-recipe with three ingredients - NOT three recipes. Call start_recipe once, then append_step
-for each artifact. Splitting one piece of work across several recipes makes each look
-half-finished, forces each to be curated and baked separately, and means a human reviewing
-your work sees fragments instead of the thing you actually built. Only call save_resource
-per-artifact when the artifacts are genuinely unrelated pieces of work.
+4. Managing MCP servers. list_mcp_servers, set_mcp_server and check_mcp_server register and
+   verify the Adobe MCP endpoints (Workfront, AEP, AEM) that agents reach through. Adding a
+   server is configuration, never code.
 
-ALWAYS report cost and provenance on every capture: model (which model produced it, free
-text), tokens_used (the tokens that capture consumed), and source (which client you are,
-e.g. "desktop-ai", "ide-agent"). These are how the company sees what its AI work costs and
-where knowledge comes from. An omitted tokens_used is NOT recorded as zero - it is recorded
-as "not reported", it is excluded from every total, and it shows in the dashboard as missing
-telemetry. If your host exposes usage at all, pass it; if you can only estimate, estimate.
+WHAT TO DO ABOUT A FAULTED RUN
 
-When you generate a prompt intended for another agent or coding tool, save it as a
-"handoff-prompt" with target_agent and the current work item, so it appears as an active
-task - it can then be retrieved and executed outside this chat, marked in_progress/done
-via set_task_status, and linked (link_recipes) to the recipes the work produced.
+A stage that returns "completed" while the tool it called failed is the known failure in
+this pipeline, and it is why nothing downstream ever escalates. When you read a run, say so
+plainly - "reported completed, actually faulted" - and do not summarise it as a success
+because its status field says so. Repeating the status is repeating the lie.
 
-For a working session with more than one output worth keeping, prefer the ordered Step
-model over repeated save_resource calls: call start_recipe once per working thread, then
-append_step for each output as you produce it, tagging its source (which client produced
-it), model (which model produced it, free text), and kind (message/code/diagram/image/
-decision/doc/handoff/config/steering). Steps are appended in order and never reordered.
-When you produce a diagram, append it as its own kind:"diagram" step with the mermaid/svg
-source in content (not only prose) - that is what renders as a picture, not a code block.
-If you authored an SVG diagram, capture the exact <svg> source verbatim as format:"svg" -
-do not reconstruct it as mermaid; the dashboard renders captured SVGs inside a scope that
-supplies your var(--surface-*)/var(--text-*)/var(--border*)/var(--font-*) references.
-If you separately have a rendered image's base64 (e.g. an architecture screenshot), append
-it as its own kind:"image" step with asset {data, mime_type}; keep both when you have them.
-Embedding a \`\`\`mermaid block inside a doc/message step's markdown also renders as a
-diagram, but a dedicated kind:"diagram" step is the reliable, always-captured path. Capture
-how a human steered the work as a
-kind:"steering" step with a signal (affirm/reject/correct) - corrections especially are
-worth keeping. Mark the steps worth keeping with approve_step/approve_steps once reviewed;
-only approved steps join the cookbook, in their original order, as a followable how-to -
-unapproved steps expire automatically. Finalize a finished recipe with bake_recipe
-(optionally approve_all). To refine a step, do not append a duplicate - this model does not
-yet support in-place step edits, so treat a correction as a new step and approve the
-right one.
+CAPTURE THAT IS WELCOME HERE
 
-A task can span tools: keep all of one task's outputs (chat-app brainstorming, the
-coding agent's work) in ONE recipe. When you hand off to another agent, save the
-handoff-prompt with recipe_id set to that task's recipe; the agent that picks it up calls
-get_active_recipe(project) (or reads the recipe_id) and append_steps its work to the same
-thread. save_resource remains available as a single-step shortcut for one-shot artifacts
-(it always targets that recipe's first step).`
+Only things about a run that already exists:
+  - append_step with kind:"steering" and a signal (affirm/reject/correct) to record how a
+    human steered or corrected a run. Corrections are the most valuable thing in here.
+  - approve_step / approve_steps to mark the parts of a run worth keeping, then bake_recipe
+    to hand the run to the Hero Agent, which reads it against every earlier run and
+    PROPOSES what should be learned. A named human always decides; the Hero Agent never
+    admits anything to the Shared Knowledge Graph by itself.
+
+ALWAYS report provenance on anything you do write: model, tokens_used, and source (which
+client you are, e.g. "desktop-ai", "ide-agent"). An omitted tokens_used is recorded as "not
+reported", never as zero, and shows in the dashboard as missing telemetry.
+
+HANDING WORK TO ANOTHER TOOL
+
+When you write a prompt meant for another agent or coding tool, save it as a
+"handoff-prompt" with target_agent set, and recipe_id set to the run it belongs to. It then
+appears in the Live Queue as an open task, can be picked up outside this chat, and is marked
+in_progress/done with set_task_status. That is a pointer to work, not an artifact you made,
+which is why it belongs here and a diagram does not.
+
+Work is organised by programme. Call start_project at the beginning of an unrelated piece of
+work, or set_work_context to move into an existing one, so runs do not pile into one shared
+programme. The configured segmentation levels are ${SEGMENT_LEVEL_KEYS.join(' -> ')} (call
+get_segmentation_config for the labels).`
 
 /**
  * Resolve the contributing author from the caller's IMS identity, if present.
@@ -389,6 +395,36 @@ function projectRecipe (resource, steps, now) {
         for (const a of (s.assigned_to || [])) if (a) assignees.add(a)
     }
     resource.assigned_to = assignees.size ? [...assignees] : undefined
+    /*
+     * Which agents touched this run, rolled up from its artifacts.
+     *
+     * The catalog is what every list view reads, and it carried no trace of the
+     * agents at all - so "which runs has the review agent worked on" and "what
+     * stage is this run on" were unanswerable without loading every recipe and
+     * its steps. A rollup, exactly like models_used: derived, never authored.
+     *
+     * The artifact tags an agent step as ['agent', <id>] and adds
+     * 'silent-failure' when the stage reported success while its tool call
+     * failed. Both are kept, because a run where every stage "completed" and
+     * two of them faulted is not the same run as one that actually worked, and
+     * a progress bar that cannot tell them apart repeats the original lie.
+     */
+    const agentsSeen = []
+    const faulted = new Set()
+    for (const s of steps) {
+        if (s.status === 'discarded') continue
+        const tags = s.tags || []
+        const at = tags.indexOf('agent')
+        if (at === -1) continue
+        const agentId = tags[at + 1]
+        if (!agentId || agentId === 'silent-failure') continue
+        if (!agentsSeen.includes(agentId)) agentsSeen.push(agentId)
+        if (tags.includes('silent-failure')) faulted.add(agentId)
+    }
+    // Order is the order they ran, which is the order the artifacts were
+    // appended - not alphabetical, and not the registry's order.
+    resource.agents = agentsSeen.length ? agentsSeen : undefined
+    resource.agent_faults = faulted.size ? [...faulted] : undefined
     if (now) { resource.updated = now; resource.updated_at = now }
 }
 
@@ -476,7 +512,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'save_resource',
-        `Contribute a recipe to the company cookbook. Validated against the resource policy (call get_resource_policy for all kinds); routed to that kind's storage automatically. Everything is saved EXPERIMENTAL and stays in the Test Kitchen until a human certifies it - only then does it enter the shared cookbook (handoff-prompt is exempt - it uses task_status, not certification). project is required (start a project with start_project or set_work_context); other segment levels (${SEGMENT_LEVEL_KEYS.join(', ')}) are auto-filled. To refine earlier work, pass the existing recipe's id to UPDATE it in place (new version) - do not create a duplicate. Current kinds: ${POLICY_TYPE_IDS.join(', ')}.`,
+        `Record a run. Validated against the resource policy (call get_resource_policy for all kinds); routed to that kind's storage automatically. Everything is saved EXPERIMENTAL and stays experimental until a human certifies it - only then does it enter the shared cookbook (handoff-prompt is exempt - it uses task_status, not certification). project is required (start a project with start_project or set_work_context); other segment levels (${SEGMENT_LEVEL_KEYS.join(', ')}) are auto-filled. To refine earlier work, pass the existing recipe's id to UPDATE it in place (new version) - do not create a duplicate. Current kinds: ${POLICY_TYPE_IDS.join(', ')}.`,
         {
             type: z.enum(POLICY_TYPE_IDS).describe('Resource kind id - see get_resource_policy for the full list'),
             title: z.string().min(1).describe('Short, descriptive title for the recipe'),
@@ -527,7 +563,7 @@ function registerTools (server, context = {}) {
             const resolvedTask = task !== undefined ? task : workCtx.task
 
             if (type !== HANDOFF_TYPE && !resolvedProject) {
-                return errorResult('project is required: start one with start_project (or pass "project", or set it via set_work_context). The cookbook is scoped by project so unrelated work stays separate.')
+                return errorResult('project is required: start one with start_project (or pass "project", or set it via set_work_context). Work is scoped by programme so unrelated work stays separate.')
             }
             // Project records are the source of truth (D49): the first save into a project
             // auto-creates its record so the dashboard lists it, no phantom-from-segments.
@@ -871,7 +907,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'approve_resource',
-        'Certify an experimental recipe as a human consent, promoting it to "approved" so it enters the shared cookbook. Records who approved it and when. (Alias: certify.)',
+        'Certify an experimental recipe as a human consent, promoting it to "approved" so it enters Playbooks. Records who approved it and when. (Alias: certify.)',
         {
             id: z.string().min(1).describe('The recipe id to approve')
         },
@@ -880,7 +916,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'certify',
-        'Certify (approve) an experimental recipe - a human consent that promotes it into the shared cookbook, recording approved_by, approved_at, and an optional note. Same effect as approve_resource, with a note.',
+        'Certify (approve) an experimental recipe - a human consent that promotes it into Playbooks, recording approved_by, approved_at, and an optional note. Same effect as approve_resource, with a note.',
         {
             id: z.string().min(1).describe('The recipe id to certify'),
             note: z.string().optional().describe('Optional consent note (why it is being certified)')
@@ -982,7 +1018,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'list_resources',
-        'Discover recipes in the cookbook. Returns metadata only (no full content) - use get_resource to read one. Filters are project-scoped by intent: pass a project to see just that project\'s work. Status filter accepts experimental/approved (pending/active still work as aliases).',
+        'Discover runs in Playbooks. Returns metadata only (no full content) - use get_resource to read one. Filters are project-scoped by intent: pass a project to see just that project\'s work. Status filter accepts experimental/approved (pending/active still work as aliases).',
         {
             project: z.string().optional().describe('Filter by project'),
             type: z.enum(POLICY_TYPE_IDS).optional().describe('Filter by recipe kind'),
@@ -1100,7 +1136,7 @@ function registerTools (server, context = {}) {
         'list_agent_systems',
         'List the upstream agent systems registered with Agent Manager - one per executing system, each bound to a domain and an adapter. Use this to see what can run a brief. Agent names are NOT listed here; call list_system_agents, which reads them from the upstream itself.',
         {},
-        async () => jsonResult(agentSystems.list())
+        async () => jsonResult(agentSystems.list(settings.agentSystems()))
     )
 
     server.tool(
@@ -1110,7 +1146,7 @@ function registerTools (server, context = {}) {
             system_id: z.string().optional().describe('Which system. Omit when only one is active.')
         },
         async ({ system_id: systemId }) => {
-            const { system, error } = agentSystems.resolve(systemId)
+            const { system, error } = agentSystems.resolve(systemId, undefined, settings.agentSystems())
             if (error) return errorResult(error)
             try {
                 return jsonResult({ system: system.id, agents: await agentSystems.discoverAgents(system) })
@@ -1131,7 +1167,7 @@ function registerTools (server, context = {}) {
             wait_ms: z.number().int().min(0).max(120000).optional().describe('How long to wait for the pipeline before returning what it has so far. Default 25000.')
         },
         async ({ brief, title, project, system_id: systemId, wait_ms: waitMs }) => {
-            const { system, error } = agentSystems.resolve(systemId)
+            const { system, error } = agentSystems.resolve(systemId, undefined, settings.agentSystems())
             if (error) return errorResult(error)
 
             const now = new Date().toISOString()
@@ -1275,7 +1311,7 @@ function registerTools (server, context = {}) {
             if (!resource) return errorResult(`No run found with id '${runId}'`)
             const ref = resource.upstream
             if (!ref || !ref.run_id) return errorResult(`Run '${runId}' has no upstream reference`)
-            const { system, error } = agentSystems.resolve(ref.system_id)
+            const { system, error } = agentSystems.resolve(ref.system_id, undefined, settings.agentSystems())
             if (error) return errorResult(error)
 
             let envelope
@@ -1355,6 +1391,69 @@ function registerTools (server, context = {}) {
                 ready: state.ready,
                 blocked_because: state.reason
             })
+        }
+    )
+
+    server.tool(
+        'set_agent_system',
+        'ADMIN: add or update an agent system - the upstream that actually executes agents, e.g. Chauncey\'s Xfinity Creative Intake harness. Use this to wire a second harness (an agentic AEP one, say) without a deploy. Only the fields you pass are changed. Agent names are never set here: they are read from the system\'s own catalog at agents_path, so the upstream stays the single source of truth for what its agents are called.',
+        {
+            id: z.string().min(1).describe('Stable key, e.g. agentic-harness'),
+            label: z.string().optional().describe('What people see'),
+            practice: z.string().optional().describe('Domain it belongs to: workfront | aep | aem'),
+            base_url: z.string().optional().describe('Where the harness answers'),
+            auth: z.string().optional().describe('Authorization header value, or ${ENV_VAR} to read it from the environment'),
+            mcp_endpoint: z.string().optional().describe('Which MCP estate the harness itself calls, where that is knowable'),
+            mcp_server_id: z.string().optional().describe('Which registered MCP server backs it (see list_mcp_servers)'),
+            agents_path: z.string().optional().describe('Path to its own agent catalog, e.g. /api/tasks'),
+            start_path: z.string().optional().describe('Path that starts a run, e.g. /api/runs'),
+            run_path: z.string().optional().describe('Path that reads a run, e.g. /api/runs/{run_id}'),
+            input_key: z.string().optional().describe('The field the brief goes in, e.g. brief'),
+            input_envelope: z.string().optional().describe('Wrapper object around the input, e.g. input. Omit for top level.'),
+            active: z.boolean().optional().describe('Off leaves it registered but unused')
+        },
+        async (args) => {
+            if (!callerHasRole(context, 'admin')) {
+                return errorResult('Only an admin may change agent systems.')
+            }
+            const overrides = settings.agentSystems()
+            const existing = overrides.find(x => x.id === args.id) || { id: args.id }
+            const mergedEntry = { ...existing }
+            for (const [k, v] of Object.entries(args)) if (v !== undefined) mergedEntry[k] = v
+
+            const next = overrides.filter(x => x.id !== args.id).concat([mergedEntry])
+            const current = await store.getSettingsOverride()
+            const stored = await store.saveSettingsOverride({ ...current, agent_systems: next })
+            settings._setCache(stored)
+
+            return jsonResult({ saved: agentSystems.list(next).find(x => x.id === args.id) })
+        }
+    )
+
+    server.tool(
+        'check_agent_system',
+        'Ask an agent system for its own agent catalog. Use it to verify a harness actually answers before pointing an intake at it, and to see what its agents are really called rather than guessing. Reported as a failure when it does not answer - an unreachable harness and a harness with no agents are different problems.',
+        {
+            id: z.string().min(1).describe('The system id, from list_agent_systems')
+        },
+        async ({ id }) => {
+            const overrides = settings.agentSystems()
+            const sys = agentSystems.get(id, overrides)
+            if (!sys) return errorResult(`No agent system registered with id '${id}'`)
+            try {
+                const agents = await agentSystems.discoverAgents(sys)
+                return jsonResult({
+                    id,
+                    base_url: sys.base_url,
+                    agents_path: sys.agents_path,
+                    agent_count: agents.length,
+                    agents: agents.map(a => ({ id: a.id, label: a.label, owner: a.owner || null })),
+                    mcp_endpoint: sys.mcp_endpoint || null,
+                    mcp_server_id: sys.mcp_server_id || null
+                })
+            } catch (e) {
+                return errorResult(`${id} did not answer: ${e.message}`)
+            }
         }
     )
 
@@ -1516,7 +1615,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'approve_step',
-        'Certify a single Step as a human consent, promoting it to "approved" - it joins its recipe\'s cookbook view (in order) and is kept forever. Records approved_by/at and an optional note.',
+        'Certify a single Step as a human consent, promoting it to "approved" - it joins its recipe\'s Playbooks view (in order) and is kept forever. Records approved_by/at and an optional note.',
         {
             step_id: z.string().min(1).describe('The step id, as returned by append_step/get_recipe/list_steps'),
             note: z.string().optional().describe('Optional consent note')
@@ -1605,6 +1704,9 @@ function registerTools (server, context = {}) {
                 step_count: resource.step_count,
                 tokens_used: resource.tokens_used,
                 models_used: resource.models_used || [],
+                // The journey this run actually took, and where it lied about it.
+                agents: resource.agents || [],
+                agent_faults: resource.agent_faults || [],
                 assigned_to: resource.assigned_to || [],
                 steps: hydrated
             })

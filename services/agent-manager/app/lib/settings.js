@@ -203,6 +203,21 @@ function mcpServers () {
     return Array.isArray(override) ? override : []
 }
 
+/**
+ * Agent-system overrides.
+ *
+ * config/agent-systems.json said it was "editable from Settings" and it was
+ * not: there was no override list and no setter, so wiring a second harness -
+ * an agentic AEP one, say - meant editing a file inside the image and
+ * redeploying. Same shape as mcpServers: the file is the seed, this is what an
+ * admin changed, merged by id.
+ * @returns {object[]}
+ */
+function agentSystems () {
+    const override = cache && cache.agent_systems
+    return Array.isArray(override) ? override : []
+}
+
 /** @returns {string[]} the valid practice ids */
 function practiceIds () {
     return practices().map(p => p.id)
@@ -276,6 +291,7 @@ module.exports = {
     practices,
     practiceIds,
     mcpServers,
+    agentSystems,
     userPracticesMap,
     practicesForOwner,
     defaultPracticeFor,

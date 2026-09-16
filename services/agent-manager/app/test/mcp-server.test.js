@@ -80,7 +80,7 @@ describe('MCP Server - Company Connector', () => {
 
             const body = JSON.parse(result.body)
             expect(body.status).toBe('healthy')
-            expect(body.server).toBe('tap-mcp-connector')
+            expect(body.server).toBe('cx-agent-manager')
         })
 
         // D78 regression: GET MUST also be auth-gated. An MCP client probes this endpoint with an
@@ -241,7 +241,7 @@ describe('MCP Server - Company Connector', () => {
             })
 
             expect(result.statusCode).toBe(200)
-            expect(body.result.serverInfo.name).toBe('tap-mcp-connector')
+            expect(body.result.serverInfo.name).toBe('cx-agent-manager')
         })
 
         test('tools/list should show every control-plane tool', async () => {
@@ -290,7 +290,11 @@ describe('MCP Server - Company Connector', () => {
             expect(toolNames).toContain('list_mcp_servers')
             expect(toolNames).toContain('set_mcp_server')
             expect(toolNames).toContain('check_mcp_server')
-            expect(toolNames).toHaveLength(67)
+            // An agent system is configuration too: wiring a second harness must
+            // not be a deploy, so it gets the same setter/checker pair.
+            expect(toolNames).toContain('set_agent_system')
+            expect(toolNames).toContain('check_agent_system')
+            expect(toolNames).toHaveLength(69)
         })
 
     })

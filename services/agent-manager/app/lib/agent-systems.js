@@ -39,9 +39,51 @@ function registry () {
 /** Test seam, and used after a registry edit. */
 function reset () { cache = null }
 
+/**
+ * The shape of an entry, for the Settings form and for validation.
+ *
+ * Every field here is something an upstream can legitimately differ on, which
+ * is the point: a second harness is a row in this form, never a branch in code.
+ * The paths and keys are how we read ITS catalog and ITS run envelope, so a
+ * system that calls its agents something else, under a different route, is
+ * configuration rather than an adapter rewrite.
+ */
+const FIELDS = [
+    { key: 'id', label: 'ID', required: true, hint: 'Stable key, e.g. agentic-harness' },
+    { key: 'label', label: 'Name', required: true, hint: 'What people see' },
+    { key: 'practice', label: 'Domain', hint: 'workfront | aep | aem' },
+    { key: 'base_url', label: 'Base URL', required: true, hint: 'Where the harness answers' },
+    { key: 'auth', label: 'Authorization header', secret: true, hint: 'Blank when the host has no auth. An ${ENV_VAR} value is read from the environment.' },
+    { key: 'mcp_endpoint', label: 'MCP endpoint it calls', hint: 'Which MCP estate the harness itself reaches' },
+    { key: 'mcp_server_id', label: 'Backed by MCP server', hint: 'Which registered MCP server it should use' },
+    { key: 'agents_path', label: 'Agent catalog path', hint: 'Where its own agent list lives, e.g. /api/tasks' },
+    { key: 'start_path', label: 'Start-run path', hint: 'e.g. /api/runs' },
+    { key: 'run_path', label: 'Read-run path', hint: 'e.g. /api/runs/{run_id}' },
+    { key: 'input_key', label: 'Input key', hint: 'The field the brief goes in, e.g. brief' },
+    { key: 'input_envelope', label: 'Input envelope', hint: 'Wrapper around the input, e.g. input. Blank for top level.' },
+    { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' }
+]
+
+/**
+ * The seed file merged with whatever an admin changed in Settings, by id.
+ *
+ * config/agent-systems.json claimed to be "editable from Settings" and was
+ * not: there was no override list and no setter, so wiring a second harness
+ * meant editing a file inside the image and redeploying.
+ * @param {object[]} [overrides] from settings.agentSystems()
+ */
+function merged (overrides) {
+    const byId = new Map(registry().systems.map(s => [s.id, { ...s }]))
+    for (const o of Array.isArray(overrides) ? overrides : []) {
+        if (!o || !o.id) continue
+        byId.set(o.id, { ...(byId.get(o.id) || {}), ...o })
+    }
+    return [...byId.values()]
+}
+
 /** @returns {object[]} every registered system, active or not */
-function list () {
-    return registry().systems.map(s => ({
+function list (overrides) {
+    return merged(overrides).map(s => ({
         id: s.id,
         label: s.label,
         practice: s.practice || null,
@@ -49,13 +91,21 @@ function list () {
         active: !!s.active,
         base_url: s.base_url || null,
         mcp_endpoint: s.mcp_endpoint || null,
+        mcp_server_id: s.mcp_server_id || null,
+        // Enough for a Settings form to round-trip an entry without a second call.
+        agents_path: s.agents_path || null,
+        start_path: s.start_path || null,
+        run_path: s.run_path || null,
+        input_key: s.input_key || null,
+        input_envelope: s.input_envelope || null,
+        auth_configured: !!s.auth,
         notes: s.notes || []
     }))
 }
 
 /** @param {string} id @returns {object|null} the raw entry, with its endpoint config */
-function get (id) {
-    return registry().systems.find(s => s.id === id) || null
+function get (id, overrides) {
+    return merged(overrides).find(s => s.id === id) || null
 }
 
 /**
@@ -65,9 +115,9 @@ function get (id) {
  * @param {string} [practice]
  * @returns {{system: object|null, error: string|null}}
  */
-function resolve (id, practice) {
+function resolve (id, practice, overrides) {
     if (id) {
-        const found = get(id)
+        const found = get(id, overrides)
         if (!found) return { system: null, error: `Unknown agent system '${id}'. Known: ${list().map(s => s.id).join(', ')}` }
         if (!found.active) return { system: null, error: `Agent system '${id}' is registered but not active.` }
         return { system: found, error: null }
@@ -239,6 +289,8 @@ function loopCount (steps) {
 }
 
 module.exports = {
+    FIELDS,
+    merged,
     registry, reset, list, get, resolve,
     discoverAgents, startRun, getRun, waitForRun,
     toSteps, loopCount, findEmbeddedError

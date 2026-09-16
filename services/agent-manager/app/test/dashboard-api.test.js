@@ -530,7 +530,7 @@ describe('dashboard-api - each user opens THEIR OWN cookbook (D79)', () => {
 
         expect(result.statusCode).toBe(401)
         expect(global.fetch).not.toHaveBeenCalled()
-        expect(JSON.parse(result.body).error.message).toMatch(/sign in with your cookbook login/i)
+        expect(JSON.parse(result.body).error.message).toMatch(/sign in to open your own view/i)
     })
 
     test('a caller with no identity is refused, NOT quietly given the shared service view', async () => {
@@ -539,7 +539,7 @@ describe('dashboard-api - each user opens THEIR OWN cookbook (D79)', () => {
         expect(result.statusCode).toBe(401)
         expect(global.fetch).not.toHaveBeenCalled()
         // The refusal must explain the privacy model, not just say "denied".
-        expect(JSON.parse(result.body).error.message).toMatch(/only visible to you|shared with everyone/i)
+        expect(JSON.parse(result.body).error.message).toMatch(/private to you|visible to everyone/i)
     })
 
     test('the user\'s OWN key is forwarded upstream as x-api-key, so the MCP server resolves them', async () => {
