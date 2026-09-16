@@ -84,6 +84,7 @@ const ALLOWED_TOOLS = new Set([
     // itself refuses anyone who is not an admin, which is the right gate for it.
     'list_agent_systems', 'list_system_agents', 'list_mcp_servers', 'check_mcp_server',
     'set_mcp_server', 'set_agent_system', 'check_agent_system',
+    'list_gateway_tools',
     'list_projects',
     'get_settings',
     // CONSENT / LIFECYCLE WRITES: per-step approval, discard, and recipe/project bake.

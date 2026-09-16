@@ -24,6 +24,7 @@ const { Core } = require('@adobe/aio-sdk')
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js')
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js')
 const { registerTools, registerResources, registerPrompts, SERVER_INSTRUCTIONS } = require('./tools.js')
+const mcpGateway = require('../../lib/mcp-gateway')
 const { resolveRequestAuth, loadAuthConfig } = require('../../lib/auth')
 const { buildWwwAuthenticateHeader } = require('../../lib/auth/prm')
 const settings = require('../../lib/settings')
@@ -49,7 +50,58 @@ let logger = null
  * Create MCP server instance with all capabilities
  * Following the exact pattern from SDK examples
  */
-function createMcpServer (context = {}) {
+/**
+ * Re-expose the tools of every gateway-enabled MCP server.
+ *
+ * Nothing here names a tool or a server: the list comes from the registry and
+ * from each upstream's own tools/list. Name collisions are impossible because
+ * every proxied tool is prefixed with the server it came from, which also means
+ * a vendor shipping a tool called `approve_step` can never shadow ours.
+ */
+async function registerGatewayTools (server) {
+    let catalog
+    try {
+        catalog = await mcpGateway.catalog(settings.mcpServers())
+    } catch (e) {
+        // A broken registry must not take the whole server down. The native
+        // tools are what most callers need.
+        logger?.warn(`Gateway discovery failed entirely: ${e.message}`)
+        return
+    }
+
+    for (const s of catalog.servers) {
+        if (s.error) logger?.warn(`Gateway: ${s.id} did not answer (${s.error}) - contributing no tools`)
+        else logger?.info(`Gateway: ${s.id} contributed ${s.tool_count} tool(s)`)
+    }
+
+    for (const t of catalog.tools) {
+        try {
+            server.registerTool(
+                t.name,
+                { description: t.description, inputSchema: t.inputSchema },
+                async (args) => {
+                    const result = await mcpGateway.callProxied(t.name, args, settings.mcpServers())
+                    return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }] }
+                }
+            )
+        } catch (e) {
+            logger?.warn(`Gateway: could not register ${t.name}: ${e.message}`)
+        }
+    }
+}
+
+/**
+ * Build the server.
+ *
+ * Async because the gateway's tools are DISCOVERED, not declared: whatever the
+ * registered MCP servers expose right now is what a connected client sees on
+ * its next tools/list. That is the point of the layer - swapping one team's
+ * agent for another's is a Settings change, and Claude picks up the new
+ * capability with no deploy. Discovery is cached (lib/mcp-gateway.js), so only
+ * the first request in a minute pays for it, and an upstream that does not
+ * answer contributes no tools rather than failing the request.
+ */
+async function createMcpServer (context = {}) {
     const server = new McpServer({
     name: 'cx-agent-manager',
         version: '1.0.0'
@@ -67,6 +119,7 @@ function createMcpServer (context = {}) {
     registerTools(server, context)
     registerResources(server, context)
     registerPrompts(server, context)
+    await registerGatewayTools(server)
 
     if (logger) {
         logger.info('MCP Server created with tools, resources, prompts, and logging capabilities')
@@ -479,7 +532,7 @@ async function handleMcpRequest (params) {
     // Tool context carries the caller's identity: userInfo (per-user OIDC) drives
     // owner/approved_by; its absence (the x-api-key path) resolves to the service
     // principal in tools.js (D40/D42).
-    const server = createMcpServer({ userInfo: params.AUTH_USER_INFO, authMode: params.AUTH_MODE })
+    const server = await createMcpServer({ userInfo: params.AUTH_USER_INFO, authMode: params.AUTH_MODE })
     const body = parseRequestBody(params)
 
     try {

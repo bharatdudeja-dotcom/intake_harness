@@ -68,6 +68,7 @@ const cxGraph = require('../../lib/cx-graph')
 const agentSystems = require('../../lib/agent-systems')
 const narrate = require('../../lib/narrate')
 const mcpServers = require('../../lib/mcp-servers')
+const mcpGateway = require('../../lib/mcp-gateway')
 const approvalConfig = require('../../config/approval.json')
 
 const TASK_STATUSES = ['open', 'in_progress', 'done']
@@ -1368,7 +1369,8 @@ function registerTools (server, context = {}) {
             endpoint: z.string().optional().describe('Base URL of the MCP server'),
             auth: z.string().optional().describe('Authorization header value, or ${ENV_VAR} to read it from the environment. Blank when the server owns auth.'),
             instance: z.string().optional().describe('Tenant, where the server needs one (Workfront)'),
-            active: z.boolean().optional().describe('Off leaves it registered but unused')
+            active: z.boolean().optional().describe('Off leaves it registered but unused'),
+            gateway: z.boolean().optional().describe('Re-expose the tools of this server through Agent Manager, so a connected client (Claude) can call them directly. Names are prefixed with the server id, so an upstream tool can never shadow a native one.')
         },
         async (args) => {
             if (!callerHasRole(context, 'admin')) {
@@ -1390,6 +1392,20 @@ function registerTools (server, context = {}) {
                 saved: mcpServers.listSafe(next).find(s => s.id === args.id),
                 ready: state.ready,
                 blocked_because: state.reason
+            })
+        }
+    )
+
+    server.tool(
+        'list_gateway_tools',
+        'What Agent Manager is re-exposing on behalf of other MCP servers. These are the tools a connected client sees IN ADDITION to the native ones, named <server-id>__<tool>. Turn a server on with set_mcp_server({id, gateway: true}). A server that did not answer contributes no tools and says so here rather than silently vanishing.',
+        {},
+        async () => {
+            const catalog = await mcpGateway.catalog(settings.mcpServers())
+            return jsonResult({
+                servers: catalog.servers,
+                tool_count: catalog.tools.length,
+                tools: catalog.tools.map(t => ({ name: t.name, from: t._server, upstream_name: t._tool, description: t.description }))
             })
         }
     )

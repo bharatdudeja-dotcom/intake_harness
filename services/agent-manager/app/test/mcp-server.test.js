@@ -294,7 +294,10 @@ describe('MCP Server - Company Connector', () => {
             // not be a deploy, so it gets the same setter/checker pair.
             expect(toolNames).toContain('set_agent_system')
             expect(toolNames).toContain('check_agent_system')
-            expect(toolNames).toHaveLength(69)
+                        // The gateway's own tools are DISCOVERED and are not in this count:
+            // no server has gateway:true in the seed, so nothing is proxied here.
+            expect(toolNames).toContain('list_gateway_tools')
+            expect(toolNames).toHaveLength(70)
         })
 
     })

@@ -26,7 +26,8 @@ const FIELDS = [
     { key: 'endpoint', label: 'Endpoint URL', required: true, hint: 'Base URL of the MCP server' },
     { key: 'auth', label: 'Authorization header', secret: true, hint: 'Leave blank when the server owns auth. ${ENV_VAR} is read from the environment.' },
     { key: 'instance', label: 'Instance', hint: 'Tenant, where the server needs one (Workfront)' },
-    { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' }
+    { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' },
+    { key: 'gateway', label: 'Expose its tools to Claude', type: 'boolean', hint: 'Re-exposes this server\'s own tools through Agent Manager, namespaced by server id' }
 ]
 
 let seedCache = null
@@ -78,6 +79,11 @@ function listSafe (overrides) {
         endpoint: s.endpoint || '',
         instance: s.instance || null,
         active: !!s.active,
+        // Whether this server's own tools are re-exposed through Agent Manager's
+        // tools/list. Off by default: discovery is a network call, and putting one
+        // in the path of every tools/list buys latency for a feature most servers
+        // do not want.
+        gateway: !!s.gateway,
         // Enough to know whether it will work, without printing the token.
         auth_configured: !!resolveSecret(s.auth),
         auth_source: typeof s.auth === 'string' && s.auth.startsWith('${') ? s.auth : (s.auth ? 'inline' : null),

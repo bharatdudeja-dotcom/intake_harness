@@ -2506,6 +2506,12 @@ function renderSettings () {
         arrive. Each is an entry here, never a branch in code, so pointing an agent at a new server is
         configuration and not a deploy. <b>Check</b> asks a server what it actually exposes; an
         unreachable server and a server with no tools are different problems and it says which.</p>
+      <p class="help"><b>Expose its tools to Claude</b> is the gateway: connect an agent here once, and
+        whatever it offers is re-exposed through Agent Manager to whatever is connected to Agent Manager.
+        Swapping one team&rsquo;s agent for another&rsquo;s is then this checkbox, and Claude sees the new
+        capability on its next tool list &mdash; no deploy. Names are prefixed with the server id, so two
+        upstreams can both ship a <span class="mono">search</span> without shadowing each other or anything
+        native.</p>
       <p class="help"><b>Never paste a real token.</b> Put it in the environment and reference it as
         <span class="mono">\${ENV_VAR}</span> &mdash; the value is resolved at call time and is never
         stored or shown here.</p>
@@ -2530,6 +2536,7 @@ function renderSettings () {
           </div>
           <div class="rowbtns">
             <label class="chip"><input type="checkbox" data-mcp-field="active" ${m.active ? 'checked' : ''}> Active</label>
+            <label class="chip" title="Re-exposes this server's own tools through Agent Manager, so Claude can call them directly. Names are prefixed with the server id, so an upstream tool can never shadow a native one."><input type="checkbox" data-mcp-field="gateway" ${m.gateway ? 'checked' : ''}> Expose its tools to Claude</label>
             <button class="btn tiny sage" data-mcp-save="${esc(m.id)}"><i data-lucide="save"></i> Save</button>
             <span class="sub" data-mcp-result></span>
           </div>
