@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "../status-badge";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
+
+/** The shape intake's "needs_input" output puts under `questions` (see src/app/api/agents/intake/route.ts). */
+type PendingQuestion = {
+  key: string;
+  label: string;
+  ask: string | null;
+  options: string[] | null;
+  optionsPartial: boolean;
+};
 
 /**
  * The "see runs from the database" page. Lists every row in `runs`
@@ -19,6 +28,8 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(true);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [resuming, setResuming] = useState(false);
 
   const loadDetail = useCallback(async (runId: string) => {
     setSelectedRunId(runId);
@@ -28,7 +39,44 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       return;
     }
     setDetail(await res.json());
+    setAnswers({});
   }, []);
+
+  // The most recent task_run still waiting on a human, if the run is
+  // currently paused — there's at most one, since the pipeline stops at the
+  // first non-"completed" step.
+  const pendingTaskRun = useMemo(() => {
+    if (!detail || detail.run.status !== "needs_input") return null;
+    const paused = detail.taskRuns.filter((tr) => tr.status === "needs_input");
+    return paused[paused.length - 1] ?? null;
+  }, [detail]);
+
+  const pendingQuestions = useMemo(() => {
+    const output = pendingTaskRun?.output as { questions?: PendingQuestion[] } | null | undefined;
+    return output?.questions ?? [];
+  }, [pendingTaskRun]);
+
+  async function submitAnswers() {
+    if (!selectedRunId) return;
+    setResuming(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${selectedRunId}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Failed to resume run (HTTP ${res.status}).`);
+        return;
+      }
+      await loadDetail(selectedRunId);
+      await refresh();
+    } finally {
+      setResuming(false);
+    }
+  }
 
   // Fetch-on-mount via the fetch's own callback, not by calling a
   // setState-holding function directly in the effect body, so a stale
@@ -145,6 +193,58 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                 <span className="font-mono text-xs text-zinc-500">run_id: {detail.run.run_id}</span>
                 <StatusBadge status={detail.run.status} />
               </div>
+
+              {pendingTaskRun && (
+                <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+                  <p className="text-sm text-amber-900 dark:text-amber-300">
+                    {pendingTaskRun.message ?? "This run is waiting on more information."}
+                  </p>
+                  {pendingQuestions.length > 0 ? (
+                    pendingQuestions.map((q) => (
+                      <label key={q.key} className="flex flex-col gap-1 text-xs text-amber-900 dark:text-amber-300">
+                        {q.ask ?? q.label}
+                        {q.options && q.options.length > 0 ? (
+                          <select
+                            className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-black dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                            value={answers[q.key] ?? ""}
+                            onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+                          >
+                            <option value="" disabled>
+                              Select {q.label.toLowerCase()}…
+                            </option>
+                            {q.options.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-black dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                            value={answers[q.key] ?? ""}
+                            onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+                            placeholder={q.label}
+                          />
+                        )}
+                      </label>
+                    ))
+                  ) : (
+                    <p className="text-xs text-amber-800 dark:text-amber-400">
+                      No structured questions were recorded for this pause — check the output below for what&apos;s
+                      missing.
+                    </p>
+                  )}
+                  <button
+                    onClick={submitAnswers}
+                    disabled={resuming || pendingQuestions.length === 0}
+                    className="self-start rounded-full bg-amber-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {resuming ? "Submitting…" : "Submit and resume"}
+                  </button>
+                </div>
+              )}
+
               <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                 {JSON.stringify(detail.run.input, null, 2)}
               </pre>

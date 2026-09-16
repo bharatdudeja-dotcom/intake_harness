@@ -32,10 +32,56 @@ export async function runPipeline(initialInput: unknown, baseUrl: string): Promi
     [JSON.stringify(initialInput)],
   );
 
-  let currentInput: unknown = initialInput;
-  const priorOutputs: Partial<Record<AgentName, unknown>> = {};
+  return advancePipeline(run, 0, initialInput, {}, baseUrl);
+}
 
-  for (let stepIndex = 0; stepIndex < PIPELINE.length; stepIndex++) {
+/**
+ * Answers a paused run's "needs_input" step and continues from there — the
+ * "a human resolves it and the run is resumed" half of the needs_input
+ * contract (see types.ts), which runPipeline alone never implemented: it
+ * only ever starts a fresh run at step 0. Re-enters at the exact step that
+ * paused (`run.current_step`), rebuilding `priorOutputs` from every already-
+ * completed task_run so a resumed run sees the same context a same-request
+ * run would have.
+ */
+export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "needs_input") {
+    throw new Error(`Run ${runId} is "${run.status}", not "needs_input" — nothing to resume.`);
+  }
+
+  const completedTaskRuns = await query<TaskRunRow>(
+    `SELECT * FROM task_runs WHERE run_id = $1 AND status = 'completed' ORDER BY step_index`,
+    [runId],
+  );
+  const priorOutputs: Partial<Record<AgentName, unknown>> = {};
+  for (const taskRun of completedTaskRuns) {
+    priorOutputs[taskRun.task_id] = taskRun.output;
+  }
+
+  const [running] = await query<RunRow>(
+    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    [runId],
+  );
+
+  return advancePipeline(running, running.current_step, resumedInput, priorOutputs, baseUrl);
+}
+
+/** Shared step loop for both a fresh run (step 0) and a resumed one (the step that paused). */
+async function advancePipeline(
+  run: RunRow,
+  startStepIndex: number,
+  initialCurrentInput: unknown,
+  initialPriorOutputs: Partial<Record<AgentName, unknown>>,
+  baseUrl: string,
+): Promise<RunRow> {
+  let currentInput: unknown = initialCurrentInput;
+  const priorOutputs: Partial<Record<AgentName, unknown>> = { ...initialPriorOutputs };
+
+  for (let stepIndex = startStepIndex; stepIndex < PIPELINE.length; stepIndex++) {
     const agent = PIPELINE[stepIndex];
     const startedAt = new Date();
 
