@@ -25,7 +25,7 @@ entry, **leave it** — they are different servers and you want both.
       "args": [
         "-y", "mcp-remote",
         "http://localhost:3000/mcp",
-        "--header", "x-cookbook-login:bharat:agentmanager-demo-2026"
+        "--header", "x-cookbook-login:admin:Tapadmin@123"
       ]
     }
   }
@@ -169,7 +169,33 @@ wrong the container now refuses to start and says exactly this.
 The harness runs separately on `:3100` with its own Postgres. Agent Manager
 reaches it at `host.docker.internal:3100`, set in **Settings → Agent systems**.
 
-Dashboard login: `bharat` / `agentmanager-demo-2026`.
+### The shared login
+
+```
+id        admin
+password  Tapadmin@123
+roles     chef + head-chef + admin
+```
+
+The same credential works on the dashboard and in the `x-cookbook-login` header
+(`id:password`, one colon, no spaces).
+
+**It is written down here on purpose, and that has a limit.** A shared password
+in a repository is a reasonable trade for a container on a laptop or a box
+behind a VPN, where the thing it protects is a demo. It stops being reasonable
+the moment this has a public URL: anyone with read access to the repo can then
+sign in as an admin, and admin can change MCP servers, roles and settings.
+
+So before this is exposed to anything beyond the team:
+
+1. `change_my_password` on the `admin` account, and take the new one out of this
+   file.
+2. Give each person their own login with `create_user`. Runs are private per
+   user, so a shared account also means everybody sees one shared view - which
+   defeats a feature, not just a security control.
+
+Your own first account comes from `BOOTSTRAP_ADMINS`, which is why that
+variable is on the `docker run` above.
 
 ---
 
@@ -258,6 +284,8 @@ Also: the AEP sandbox is `taplondonptrsd` — Tap's, not Comcast's. Assessing
 Comcast's attributes there is not a meaningful check, and the agent surfaces the
 sandbox name so you can see that rather than assume otherwise.
 
-**Credentials still need rotating.** `walter.white / meadow-pepper-5310` (the
-old cookbook login, in plaintext in `~/.claude.json`) and Chauncey's RDS string.
-Both need a human.
+**Two credentials still need rotating, and neither is in this file.** An old
+cookbook login that was pasted into chat and still sits in plaintext in
+`~/.claude.json`, and Chauncey's RDS connection string. Both were exposed in
+conversation, both need a human to rotate them, and I have deliberately not
+written either one down here - see `docs/DECISIONS.md` for the exposure log.

@@ -36,17 +36,102 @@ cd intake_harness/services/agent-manager
 
 docker build -t agent-manager:latest ./app
 
+# A key the harness will use to reach Agent Manager's gateway. Keep it.
+SERVICE_KEY="$(openssl rand -hex 24)"
+
 docker run -d --name agent-manager --restart unless-stopped \
   -p 3100:8080 \
   -e STORAGE_DRIVER=fs \
   -e DASHBOARD_REQUIRE_IDENTITY=true \
   -e BOOTSTRAP_ADMINS=bharat.dudeja@tapcxm.com \
   -e INTERNAL_TOKEN="$(openssl rand -hex 24)" \
+  -e SERVICE_API_KEY="$SERVICE_KEY" \
   -v agent-manager-data:/data \
   agent-manager:latest
 
 curl -s localhost:3100/healthz
+echo "harness should use SERVICE_API_KEY=$SERVICE_KEY"
 ```
+
+Do **not** pass `STORAGE_ROOT`. The image sets it to `/data`, and overriding it
+from a shell that rewrites POSIX paths (Git Bash on Windows, notably) produces a
+container that starts, answers `/healthz` with 200, and returns 500 to every
+real request with a path nobody recognises. The container now refuses to start
+in that state and says so, but the simplest fix is not to pass it.
+
+### Then, once: create the shared login
+
+```bash
+curl -s -X POST localhost:3100/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "x-api-key: $SERVICE_KEY" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_user",
+       "arguments":{"id":"admin","password":"Tapadmin@123","display_name":"Tap Admin",
+       "roles":["chef","head-chef","admin"]}}}'
+```
+
+`admin` / `Tapadmin@123`. **Change it before this has a public URL** - see the
+note in `CLAUDE-DESKTOP-SETUP.md`. Runs are private per user, so a shared
+account also means one shared view, which costs a feature as well as a control.
+
+---
+
+## Pointing the harness at the gateway
+
+This is the part that makes the agents use Agent Manager rather than an MCP
+estate directly, so which real server backs a tool becomes a Settings change
+instead of a redeploy of the harness.
+
+In the harness's own environment (`.env.local`, or however the service is
+configured on the box):
+
+```bash
+# The agents reach their tools THROUGH Agent Manager.
+MCP_GATEWAY_URL=http://localhost:3100/mcp
+MCP_GATEWAY_HEADER=x-api-key
+MCP_GATEWAY_TOKEN=<the SERVICE_KEY printed above>
+
+# Which registered server serves which tool family. The estate is not one
+# server: knowledge search is on the Adobe Experience Cloud one, Workfront
+# objects are on Workfront's connector. A single prefix sent every Workfront
+# call to the wrong server, where it failed while the run still read completed.
+MCP_GATEWAY_ROUTES=adobe-aec:adobe_,search_adobe,knowledge_;workfront-adobe:workflow_,comment-stream_,approvals_,planning_,insights_
+
+# Adobe's official Workfront connector, not the in-house estate - every
+# /mcp/workfront/* route on that one returns 404.
+WORKFRONT_MCP_FLAVOUR=adobe-official
+
+# Where intake issues land. Resolved by NAME, so rebuilding the queue does not
+# silently point this at a project that still exists and is no longer the one
+# in use.
+WORKFRONT_INTAKE_QUEUE=CSC - Intake Queue
+
+# Still read by the legacy path, and the code throws without it.
+MCP_ENDPOINT_URL=https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp
+```
+
+Then, in Agent Manager at `http://<host>:3100`:
+
+1. **Settings → Agent systems → Xfinity Creative Intake** — set the base URL to
+   wherever the harness answers on the box (`http://localhost:3000` if it is on
+   the same host). **Check** asks it for its own agent list; four agents come
+   back if it is wired.
+2. **Settings → MCP servers → Workfront MCP (Adobe official) → Authenticate** -
+   opens Adobe's login. The token is stored server-side and is never sent to the
+   browser. Turn on **on** and **to Claude**.
+3. Same for **Adobe Experience Cloud MCP** (no sign-in needed).
+
+`MCP_CONNECT_REDIRECT_URI` only needs setting if the box sits behind a proxy or
+a domain - otherwise the callback is derived from the Host header the browser
+actually used, which is what makes 3100-behind-8080 work without configuration.
+
+### One thing to check before the OAuth round trip
+
+Adobe redirects back to `<whatever the browser used>/mcp-connect/callback`. On a
+public host that is `http://34.203.238.63:3100/mcp-connect/callback`, so **3100
+has to be reachable from the browser doing the sign-in**, not just from the box.
+If the security group only allows the office IP, sign in from the office.
 
 Then `http://34.203.238.63:3100/`.
 
