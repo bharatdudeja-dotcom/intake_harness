@@ -1,4 +1,5 @@
 import type { AgentName } from "./types";
+import { allWorkfrontToolNames } from "@/lib/workfront-tools";
 
 /**
  * The pipeline order AND the least-privilege boundary for every agent.
@@ -55,12 +56,7 @@ export const PIPELINE: AgentDefinition[] = [
     // intake shouldn't be able to modify or remove existing records.
     allowedTools: [
       "search_adobe_knowledge",
-      "wf_core_project_list",
-      "wf_core_project_get",
-      "wf_core_project_create",
-      "wf_core_issue_list",
-      "wf_core_issue_get",
-      "wf_core_issue_create",
+      ...allWorkfrontToolNames(),
     ],
     contextAccess: [], // first in the pipeline — nothing prior to see
   },
@@ -75,12 +71,7 @@ export const PIPELINE: AgentDefinition[] = [
     // reason and the redraft explanation most likely live.
     allowedTools: [
       "search_adobe_knowledge",
-      "wf_core_project_get",
-      "wf_core_project_update",
-      "wf_core_issue_get",
-      "wf_core_issue_update",
-      "wf_comments_list",
-      "wf_comments_create",
+      ...allWorkfrontToolNames(),
     ],
     // Empty today: this stub doesn't read priorOutputs at all, and its
     // `input` already IS intake's output. Widen this only when a real

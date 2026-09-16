@@ -22,6 +22,7 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
+import { workfrontToolset } from "@/lib/workfront-tools";
 
 /** Workfront object codes. OPTASK is an issue/request, PROJ a project. */
 export const INTAKE_OBJECT = "OPTASK";
@@ -29,8 +30,14 @@ export const INTAKE_OBJECT = "OPTASK";
 /** "CSC Intake - Issue", from the tenant's forms list. */
 export const INTAKE_FORM_ID = "69cad7690002898fbf9d684642dc25bc";
 
-export const CREATE_TOOL = "wf_core_issue_create";
-export const CUSTOM_FIELDS_TOOL = "wf_core_issue_set_custom_fields";
+/**
+ * Kept as exports because other modules and tests import them, but they are no
+ * longer constants: which tool creates an issue depends on which Workfront MCP
+ * we are pointed at, and the in-house one this used to name is not deployed.
+ * See lib/workfront-tools.ts.
+ */
+export const CREATE_TOOL = workfrontToolset().create;
+export const CUSTOM_FIELDS_TOOL = workfrontToolset().update;
 
 export type CreateOutcome =
   | { created: true; objCode: string; objId: string; customFieldsSet: boolean }
@@ -72,10 +79,13 @@ export async function createIntakeRequest(args: {
 
   let created: { ID?: string; id?: string } | null = null;
   try {
+    const set = workfrontToolset();
     const result = await callMcpTool<{ data?: { ID?: string }; ID?: string }>(
       "intake",
-      CREATE_TOOL,
-      { fields },
+      set.create,
+      // The argument shape differs by flavour: Adobe's connector takes an
+      // objCode alongside the fields because one tool covers every object type.
+      set.createArgs(INTAKE_OBJECT, fields),
     );
     created = (result && (result as { data?: { ID?: string } }).data) || (result as { ID?: string });
   } catch (err) {
@@ -101,7 +111,8 @@ export async function createIntakeRequest(args: {
   let customFieldsSet = false;
   if (Object.keys(customFields).length) {
     try {
-      await callMcpTool("intake", CUSTOM_FIELDS_TOOL, { obj_id: objId, values: customFields });
+      const set = workfrontToolset();
+      await callMcpTool("intake", set.update, set.customFieldArgs(INTAKE_OBJECT, objId, customFields));
       customFieldsSet = true;
     } catch {
       customFieldsSet = false;
