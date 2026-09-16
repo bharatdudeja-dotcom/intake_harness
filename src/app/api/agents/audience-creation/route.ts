@@ -44,8 +44,20 @@ export interface AudienceCreationInput {
 export interface AudienceCreationOutput {
   /** B5: which build path this request takes. */
   buildPath: "aep_rule_builder" | "fac";
-  /** B4: attributes needed for this audience exist in AEP today. */
-  attributesAvailable: boolean;
+  /**
+   * B4: do the attributes this audience needs exist in AEP today?
+   *
+   * THREE states, not two. This was a boolean, and when the probe could not
+   * reach field-level data it was set to `true` - chosen so an inconclusive
+   * check could not open a GTO attribute request. The result was an artifact
+   * reading `attributesAvailable: true` directly above a status message saying
+   * availability "could not be determined", which is a contradiction a reader
+   * has to resolve for themselves, and most will read the boolean.
+   *
+   * "undetermined" behaves like true for gating - it opens nothing - and reads
+   * like what it is.
+   */
+  attributesAvailable: boolean | "undetermined";
   /** B4: set when attributesAvailable is false and a GTO request is open. */
   openAttributeRequest: {
     status: "not_opened" | "open" | "resolved";
@@ -148,7 +160,9 @@ export async function POST(req: NextRequest) {
   const missing = probe.conclusive
     ? Object.entries(probe.found).filter(([, ok]) => !ok).map(([k]) => k)
     : [];
-  const attributesAvailable = probe.conclusive ? missing.length === 0 : true;
+  const attributesAvailable: boolean | "undetermined" = probe.conclusive
+    ? missing.length === 0
+    : "undetermined";
 
   const path = decideBuildPath(fields, probe);
   const gap = identityGap(fields);
@@ -162,7 +176,10 @@ export async function POST(req: NextRequest) {
   const existing = await findExistingSegment(terms);
   const estimate = await estimateCount(existing.id);
 
-  const attrState = attributeRequestState(body.priorOutputs || {}, attributesAvailable, missing);
+  // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
+  // opening the 2.7a branch because we failed to look is the quarter-long tail
+  // started by our own blind spot.
+  const attrState = attributeRequestState(body.priorOutputs || {}, attributesAvailable !== false, missing);
 
   const statusMessage = [
     path.buildPath === "fac"

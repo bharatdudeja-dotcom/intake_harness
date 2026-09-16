@@ -66,7 +66,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     key: "campaign_name",
     label: "Campaign name",
     required: true,
-    aliases: ["campaign", "name of campaign", "initiative"],
+    aliases: ["campaign", "name of campaign", "initiative", "Name of the Campaign"],
     ask: "What should this campaign be called? A short name is enough - it becomes the Workfront request title.",
   },
   {
@@ -75,7 +75,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     required: true,
     options: ["Growth/Upsell", "Retention", "Acquisition"],
     optionsPartial: true,
-    aliases: ["objective", "goal", "business goal"],
+    aliases: ["objective", "goal", "business goal", "Objective of the campaign"],
     ask: "Is this Growth/Upsell, Retention, or Acquisition? It decides which base we build from.",
   },
   {
@@ -109,7 +109,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     key: "launch_date",
     label: "Launch date",
     required: true,
-    aliases: ["in market", "go live", "live date", "launch"],
+    aliases: ["in market", "go live", "live date", "launch", "Requested_Launch_Date", "Requested Launch Date"],
     // The nightly segmentation job at 21:45 (B6) means a date is not a
     // formality - every rework cycle after it costs a full day.
     ask: "What is the in-market date? The segmentation job runs once a night, so the date sets how many rework cycles we can absorb.",
@@ -149,7 +149,9 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "channels",
     label: "Channels",
-    options: ["Email", "SMS", "Direct Mail", "Paid Media", "In-app"],
+    // Outbound call appeared in two consecutive real briefs and was captured
+    // as nothing, because the list did not have it.
+    options: ["Email", "SMS", "Direct Mail", "Paid Media", "In-app", "Outbound Call", "Push"],
     optionsPartial: true,
     aliases: ["channel", "how are we reaching them"],
     ask: "Which channels - email, SMS, direct mail, paid media, in-app?",
@@ -159,6 +161,47 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     label: "Offer",
     aliases: ["incentive", "promo", "promotion", "discount"],
     ask: "What is the offer or incentive?",
+  },
+  {
+    // "Northeast", "in the Northeast". It was in every brief we tested and in
+    // none of the structured output, which meant the audience definition was
+    // missing the geography it was supposed to be built on.
+    key: "region",
+    label: "Region / market",
+    options: ["Northeast", "Southeast", "Midwest", "West", "Southwest", "National"],
+    optionsPartial: true,
+    aliases: ["market", "geography", "geo", "footprint", "territory"],
+    ask: "Which region or market - Northeast, Southeast, Midwest, West?",
+  },
+  {
+    // "who do not have a mobile line with us yet" is the exclusion that defines
+    // the audience. Carrying it only in free text means the person building the
+    // segment has to re-read the brief to find the most important clause in it.
+    key: "exclusion",
+    label: "Exclusion",
+    aliases: ["exclude", "without", "who do not have", "not already"],
+    ask: "Who should be excluded - for example, customers who already have the product?",
+  },
+  {
+    /*
+     * The audience, in one sentence, because that is what the form asks for.
+     *
+     * Read off the live tenant (taplondonptrsd, 16 Sep 2026), the intake form
+     * has FOUR meaningful fields, not the fourteen modelled above:
+     *
+     *   DE:Name of the Campaign      DE:Objective of the campaign
+     *   DE:Audience_to_be_Targeted   DE:Requested_Launch_Date
+     *
+     * There is no Line of Business field, no Region field, no Channels field.
+     * So the fields we extract that the form has nowhere to put are COMPOSED
+     * into this one, rather than dropped or written to names that do not exist.
+     * The richer breakdown still travels in the run record, where the audience
+     * builder can read it - it just is not pretended into Workfront.
+     */
+    key: "audience_description",
+    label: "Audience to be targeted",
+    aliases: ["Audience_to_be_Targeted", "audience to be targeted", "target audience"],
+    ask: "Who is the audience, in a sentence?",
   },
 ] as const;
 

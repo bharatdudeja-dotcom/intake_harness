@@ -47,6 +47,24 @@
 
 export type WorkfrontFlavour = "adobe-official" | "inhouse";
 
+/**
+ * Workfront objCode -> the objectType string Adobe's connector wants.
+ *
+ * The API speaks objCodes (OPTASK, PROJ); this MCP speaks lowercase words. Both
+ * are "the object type" and they are not the same string.
+ */
+const OBJECT_TYPES: Record<string, string> = {
+  OPTASK: "issue",
+  PROJ: "project",
+  TASK: "task",
+  TMPL: "template",
+  TMPT: "templateTask",
+  USER: "user",
+  TEAMOB: "team",
+  ROLE: "role",
+  HOUR: "hour",
+};
+
 export interface WorkfrontToolset {
   flavour: WorkfrontFlavour;
   /** Create one object. */
@@ -62,12 +80,13 @@ export interface WorkfrontToolset {
   listComments: string;
   createComment: string;
   /** Build the arguments for a create, for this flavour. */
-  createArgs: (objCode: string, fields: Record<string, unknown>) => Record<string, unknown>;
+  createArgs: (objCode: string, fields: Record<string, unknown>, intent?: string) => Record<string, unknown>;
   /** Build the arguments for setting custom-form values on an existing object. */
   customFieldArgs: (
     objCode: string,
     objId: string,
     values: Record<string, unknown>,
+    intent?: string,
   ) => Record<string, unknown>;
 }
 
@@ -78,20 +97,57 @@ export interface WorkfrontToolset {
  * tool per object type - so `workflow_create_any_object` covers what
  * wf_core_project_create and wf_core_issue_create did separately.
  */
+/*
+ * WHAT THE TENANT ACTUALLY EXPOSES, read 16 Sep 2026 from taplondonptrsd:
+ *
+ *   49 of the 94 documented tools. Every WRITE is absent -
+ *   workflow_create_any_object, workflow_update_any_object,
+ *   comment-stream_create_comment. Present: the whole insights_* family,
+ *   comment-stream_query_comments, approvals_* reads, planning_* reads.
+ *
+ * That is the documented default and not a fault: write actions are off until a
+ * Workfront admin turns them on in System Preferences. The names below are
+ * still the correct ones to call - they are what appear the moment writes are
+ * enabled - so they stay, and the reads point at tools that exist today.
+ */
 const ADOBE_OFFICIAL: WorkfrontToolset = {
   flavour: "adobe-official",
   create: "workflow_create_any_object",
   update: "workflow_update_any_object",
-  search: "workflow_search_any_object",
+  // Reads that are live on the tenant right now.
+  search: "insights_find_workfront_data",
   getOne: "insights_summarize_object",
-  resolveFields: "workflow_resolve_field_names_any_object",
+  resolveFields: "insights_search_fields",
   listComments: "comment-stream_query_comments",
   createComment: "comment-stream_create_comment",
-  createArgs: (objCode, fields) => ({ objCode, fields }),
-  // Workfront treats custom-form values as ordinary parameters on the object,
-  // so setting them is an update rather than a distinct call. That is why this
-  // flavour needs no separate custom-fields tool.
-  customFieldArgs: (objCode, objId, values) => ({ objCode, objID: objId, fields: values }),
+  /*
+   * ARGUMENT NAMES READ FROM THE LIVE SCHEMA, not inferred.
+   *
+   * These were `{ objCode, fields }` and `{ objCode, objID, fields }`, guessed
+   * from Workfront's REST conventions. Every one of those names is wrong, and
+   * the tool's own description is unusually blunt about it: "Parameter name is
+   * exactly \"data\" (not \"updates\", \"payload\", \"fields\"...)" and
+   * "exactly \"id\" (not \"objectID\", \"ID\", or \"objectId\")".
+   *
+   * objectType is also a lowercase word - "issue", "project" - not a Workfront
+   * objCode like OPTASK. Sending OPTASK would have been rejected, and had the
+   * writes been enabled a week earlier we would have spent that week reading
+   * validation errors.
+   */
+  createArgs: (objCode, fields, intent) => ({
+    objectType: OBJECT_TYPES[objCode] || String(objCode).toLowerCase(),
+    data: fields,
+    // "Optional but strongly encouraged. First, the user's request in their own
+    // original words." So the marketer's brief travels into Workfront's own
+    // record of why this was created, which is the provenance we want anyway.
+    ...(intent ? { intent } : {}),
+  }),
+  customFieldArgs: (objCode, objId, values, intent) => ({
+    objectType: OBJECT_TYPES[objCode] || String(objCode).toLowerCase(),
+    id: objId,
+    data: values,
+    ...(intent ? { intent } : {}),
+  }),
 };
 
 /** The in-house estate. Kept so the flavour can be switched back, not because it works. */
@@ -106,6 +162,7 @@ const INHOUSE: WorkfrontToolset = {
   createComment: "wf_comments_create",
   createArgs: (_objCode, fields) => ({ fields }),
   customFieldArgs: (_objCode, objId, values) => ({ obj_id: objId, values }),
+  // The in-house estate has no intent parameter; it is dropped rather than sent.
 };
 
 /**
@@ -123,6 +180,9 @@ export function workfrontToolset(): WorkfrontToolset {
 /** Every tool name a flavour can reach, for the pipeline allowlists. */
 export function workfrontToolNames(set: WorkfrontToolset): string[] {
   return [
+    // Resolving the intake queue by name is part of creating an intake, so the
+    // lookup has to be allowlisted alongside the write itself.
+    "insights_find_id_by_name",
     set.create,
     set.update,
     set.search,

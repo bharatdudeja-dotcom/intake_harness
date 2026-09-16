@@ -45,13 +45,45 @@ export type ParsedIntake = {
 
 const lower = (s: string) => String(s || "").toLowerCase();
 
+/**
+ * Is this option NEGATED where it appears?
+ *
+ * "outbound call and email, explicitly no direct mail" listed Direct Mail as a
+ * channel. Three briefs in a row did this, because matching an option name
+ * anywhere in the text cannot tell "use Direct Mail" from "no Direct Mail" -
+ * and the second is a clearer instruction than the first.
+ *
+ * Getting this wrong is not cosmetic: a channel the marketer explicitly ruled
+ * out, written into a Workfront brief as a channel to use, is the kind of error
+ * that reaches a customer.
+ *
+ * Looks only at the words immediately before the match. A negation further away
+ * than that is usually about something else.
+ */
+function isNegated(text: string, option: string): boolean {
+  const needle = option.replace(/\s*\(.*?\)\s*/g, " ").trim();
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "no X", "not X", "without X", "excluding X", "no need for X", "rather than X"
+  const before = new RegExp(
+    `\\b(?:no|not|never|without|excluding|exclude|omit|skip|rather than|instead of|other than)\\b` +
+    `(?:\\s+\\w+){0,3}?\\s+${escaped}`,
+    "i",
+  );
+  if (before.test(text)) return true;
+  // "X is out", "X: no", "X - not needed"
+  const after = new RegExp(`${escaped}\\s*(?:is|are)?\\s*(?:out|excluded|not needed|off the table)\\b`, "i");
+  return after.test(text);
+}
+
 /** Longest option first, so "TV/Streaming" beats "TV". */
 function matchOption(text: string, options: readonly string[]): string | null {
   const hay = lower(text);
   const sorted = [...options].sort((a, b) => b.length - a.length);
   for (const opt of sorted) {
     const needle = lower(opt).replace(/\s*\(.*?\)\s*/g, "").trim();
-    if (needle && hay.includes(needle)) return opt;
+    // A ruled-out option is not a chosen one.
+    if (needle && hay.includes(needle) && !isNegated(text, opt)) return opt;
   }
   return null;
 }
@@ -74,9 +106,19 @@ const CUES: Array<{ key: string; value: string; from: Provenance; cues: RegExp }
   // a fact about the client, and it is how their briefs are actually written.
   { key: "line_of_business", value: "Residential (RES)", from: "inferred", cues: /\bresidential\b|\bres\b|\bhome\b|\bxfinity\b|\bresi\b/i },
   { key: "line_of_business", value: "Business (SMB)", from: "inferred", cues: /\bsmb|small business|business customers\b/i },
-  // "just need the audience built", "audience only", "not the campaign run".
-  { key: "request_type", value: "Audience Build-Only", from: "inferred", cues: /\baudience (build|built|only)\b|\bjust (the|need the) audience\b|\bnot the campaign\b|\bbuild-?only\b/i },
-  { key: "request_type", value: "Audience + Campaign Execution", from: "inferred", cues: /\b(and|plus) (run|execute|send) (it|the campaign)\b|\bend[- ]to[- ]end\b/i },
+  /*
+   * EXECUTION FIRST. Order matters here, because the first matching cue wins.
+   *
+   * "audience built and the campaign executed" contains "audience built", so
+   * with build-only tested first it came back as Audience Build-Only - the
+   * opposite of what was asked, and a request for half the work.
+   *
+   * Asking for execution always implies the audience, so the execution cue can
+   * safely be the stronger signal; the reverse is not true.
+   */
+  { key: "request_type", value: "Audience + Campaign Execution", from: "inferred", cues: /\b(and|plus|then)\b[^.]{0,30}\b(run|execute|executed|send|launch|activate)\b|\bend[- ]to[- ]end\b|\baudience \+ campaign\b|\bcampaign execut\w+\b/i },
+  // Build-only, and only when nothing above claimed execution.
+  { key: "request_type", value: "Audience Build-Only", from: "inferred", cues: /\baudience (build|built|only)\b|\bjust (the|need the) audience\b|\bnot the campaign\b|\bbuild-?only\b|\baudience only\b/i },
   { key: "campaign_duration", value: "Evergreen (ongoing)", from: "inferred", cues: /\bevergreen|ongoing|always[- ]on\b/i },
   { key: "cadence", value: "Recurring Campaign", from: "inferred", cues: /\brecurring|repeat(ing)?|every (month|quarter|week)\b/i },
   { key: "activation_pattern", value: "Near-real time trigger", from: "inferred", cues: /\breal[- ]?time|triggered?\b/i },
@@ -236,6 +278,28 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   // 2. Enum fields whose own options appear verbatim in the brief.
   for (const spec of CAMPAIGN_BRIEF_FIELDS) {
     if (seen.has(spec.key) || !spec.options?.length) continue;
+
+    /*
+     * Some fields are genuinely multi-valued. "email and SMS" is two channels,
+     * and keeping only the first silently halved the activation plan - the
+     * brief said two and the structured output said one.
+     */
+    if (spec.key === "channels") {
+      const all = spec.options.filter(
+        (opt) =>
+          new RegExp(`\\b${opt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(brief) &&
+          // "explicitly no direct mail" must not add Direct Mail.
+          !isNegated(brief, opt),
+      );
+      if (all.length) {
+        push({
+          key: spec.key, label: spec.label, value: all.join(", "), from: "stated",
+          evidence: all.join(" and "),
+        });
+        continue;
+      }
+    }
+
     const hit = matchOption(brief, spec.options);
     if (hit) {
       push({
@@ -268,6 +332,42 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   if (!seen.has("campaign_name")) {
     const n = findCampaignName(brief);
     if (n) push(n);
+  }
+
+  // 6. The offer. "$350 prepaid card", "600 dollar prepaid card".
+  if (!seen.has("offer")) {
+    const o = brief.match(
+      /(?:\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)\s*([a-z][a-z \-]{2,30}?)?(?=[.,]|\s+(?:on it|incentive|offer)|$)/i,
+    );
+    if (o) {
+      push({
+        key: "offer",
+        label: "Offer",
+        value: o[0].trim().replace(/\s+/g, " "),
+        from: "stated",
+        evidence: o[0].trim(),
+      });
+    }
+  }
+
+  // 7. The exclusion - usually the single most important clause in the brief,
+  //    and previously left in free text only.
+  if (!seen.has("exclusion")) {
+    const x = brief.match(
+      /\b(?:who|that)\s+(?:do not|don't|dont|does not|doesn't)\s+(?:yet\s+)?have\s+([^.,]{3,60})|\bwithout\s+(?:a\s+)?([^.,]{3,60})|\bexclud(?:e|ing)\s+([^.,]{3,60})/i,
+    );
+    if (x) {
+      const what = (x[1] || x[2] || x[3] || "").trim().replace(/\s+with us\s*(yet)?$/i, "");
+      if (what) {
+        push({
+          key: "exclusion",
+          label: "Exclusion",
+          value: `Customers without ${what}`,
+          from: "derived",
+          evidence: x[0].trim(),
+        });
+      }
+    }
   }
 
   const fields: Record<string, string> = {};
