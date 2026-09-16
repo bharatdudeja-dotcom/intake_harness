@@ -61,6 +61,28 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_run ON task_runs(run_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, started_at);
 
+-- Two-tier human curation, added on top of the CREATE TABLE above via ALTER
+-- so this stays safe to re-run against an already-populated `runs` table
+-- (CREATE TABLE IF NOT EXISTS is a no-op on an existing table's columns).
+--
+-- Tier 1, "approved": a named admin marks a completed run worth keeping as
+-- an example. Tier 2, "promoted": that same run is additionally admitted
+-- into the cross-run Shared Graph (see GET /api/graph). Both always carry
+-- who and when — an approval or promotion with no admin behind it isn't a
+-- record of anything. Promotion requires prior approval, enforced in
+-- src/app/api/runs/[runId]/promote/route.ts rather than a CHECK constraint,
+-- to keep this file plain ALTERs.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approval_note TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted_by TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_runs_promoted ON runs(promoted) WHERE promoted;
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

@@ -55,6 +55,16 @@ export interface RunRow {
   input: unknown;
   created_at: string;
   updated_at: string;
+  /** Two-tier human curation — see src/app/api/runs/[runId]/{approve,promote}/route.ts. */
+  tags: string[];
+  approved: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
+  approval_note: string | null;
+  /** Admitted into the cross-run Shared Graph (GET /api/graph). Requires `approved` first. */
+  promoted: boolean;
+  promoted_by: string | null;
+  promoted_at: string | null;
 }
 
 /** One row in `tasks` — the static catalog of task/agent types (seeded from registry.ts). */
