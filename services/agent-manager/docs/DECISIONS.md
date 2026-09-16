@@ -5,7 +5,7 @@ Short entries. Decided, why, rejected.
 ## D0 · Agent Manager is a FORK of the cookbook, not a new build
 **Decided.** Agent Manager starts from the Company Cookbook Connector source at
 `TAP-CXM/TAP-Cookbook@98617f6`, path `tap-portability-layer/connector/`, copied
-into `app/`. See `docs/COOKBOOK-FORK.md`.
+into `app/`. See `docs/LINEAGE.md`.
 **Why.** This was Bharat's instruction from the start. Both kickoff briefs said
 "do not import from, or modify, the cookbook codebase — this is a new build that
 reuses its concepts", which was wrong and produced a greenfield Python app that
@@ -27,7 +27,7 @@ broken it gets written down here and raised with Bharat, not fixed by us.
 **Decided.** Node.js on Adobe I/O Runtime. The Python 3.12 scaffold is gone.
 **Why.** Python was chosen because Chauncey's repo is Python. We never import his
 code — we call his MCP over the wire — so his language was never relevant to
-ours. The fork's language is the cookbook's language.
+ours. Where a name is only a label, it is ours to choose; where it is a stored value, it is not.
 
 ## D1 · Rename the visible layer; stage the plumbing
 **Decided.** Every string a person sees is renamed (Project→Programme,
@@ -86,10 +86,10 @@ list shared on 15 September settles it.
 1. **`MCP_ENDPOINT_URL`** — the McpEndpointUrl SAM output from
    `chaunceyplum/mcp`. Ask Chauncey. Blocks every Workfront call.
 2. **Workfront tenant access** — `taplondonptrsd.my.workfront.com` still 401.
-3. **A new App Builder namespace** for this fork. Until then it cannot deploy
+3. **A new App Builder namespace** for CX Agent Manager. Until then it cannot deploy
    without overwriting the original connector — the single most important thing
    to get right before any deploy.
-4. **Retention window and access control.** The fork inherits the cookbook's
+4. **Retention window and access control.** CX Agent Manager keeps the cookbook engine's
    retention. There is no per-marketer access restriction: anyone with dashboard
    access sees every marketer's runs. Both need an answer before real Comcast
    data lands in a Tap-controlled environment.
@@ -125,11 +125,11 @@ history, no aggregates. `task_runs.metadata` is per-step JSONB that dies with
 its run. **We are adding, not duplicating.** Chauncey said the same himself:
 Agent 4 needs *"somewhere persistent to accumulate classifications across runs."*
 
-## D14 · No Postgres. The fork inherits the cookbook's store.
+## D14 · No Postgres. CX Agent Manager keeps the cookbook engine's store.
 **Decided** (Bharat, 16 Sep, correcting the v2 brief). The v2 brief specified
 Cloud SQL Postgres; it was written before we knew the cookbook persists to
 object storage through `lib/store.js`. Bolting a relational database alongside
-is exactly the re-architecting the fork exists to avoid.
+is exactly the re-architecting CX Agent Manager exists to avoid.
 **On filtering.** Queue filters by marketer, agent, status and date read fine
 from object storage at the volumes expected for months.
 **Trigger condition, written down now so it is deliberate rather than

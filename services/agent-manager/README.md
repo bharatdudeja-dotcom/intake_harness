@@ -1,13 +1,21 @@
-# Agent Manager
+# CX Agent Manager
 
-A fork of the TAP Company Cookbook, rebranded and extended for Comcast/Xfinity
-Workfront creative intake.
+Cross-run memory, review and a knowledge graph over Comcast/Xfinity's Workfront
+creative-intake agents — plus an MCP gateway that re-exposes those agents' own
+tools to whatever is connected to it.
 
-Same engine, same knowledge graph, new meaning. A client should be able to open
-this and see their agentic pipeline running — which agent touched which run, and
-exactly where a human stepped in and decided.
+A client should be able to open this and see their agentic pipeline running:
+which agent touched which run, where it reported success while actually
+failing, and exactly where a human stepped in and decided.
 
-| Cookbook | Agent Manager |
+It began from the TAP Company Cookbook's storage and graph engine and has since
+diverged into its own product — its own domain model, its own MCP surface, its
+own instructions to connected clients. That lineage still shows in some internal
+names (a run is stored with `type: "recipe"`, because renaming a stored value
+would orphan every record written before the rename), so this table is the
+translation between what is stored and what things are called.
+
+| Stored as | Called |
 |---|---|
 | Project | Programme |
 | Recipe | Run — one Workfront intake |
@@ -25,9 +33,9 @@ Ask "who decided this was true" and the answer is always a person.
 ## Layout
 
 ```
-app/     the fork. Node on Adobe I/O Runtime, forked from
+app/     the service. Node, host-neutral, originally built on
          TAP-CXM/TAP-Cookbook@98617f6 (tap-portability-layer/connector)
-docs/    COOKBOOK-FORK.md  what was forked, how it works, what was renamed
+docs/    LINEAGE.md        where the engine came from, and what is ours
          DECISIONS.md      decided, why, rejected — and what is still open
 ```
 
@@ -42,7 +50,7 @@ npm test
 
 **It has not been deployed yet, and the UI has not been rendered** — that needs
 an Adobe I/O namespace we do not have. See *Not yet verified* in
-`docs/COOKBOOK-FORK.md` for the honest state.
+`docs/LINEAGE.md` for the honest state.
 
 ## The original is read-only
 

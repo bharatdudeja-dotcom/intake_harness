@@ -223,10 +223,10 @@ const WRITE_TOOLS = new Set([
 /**
  * What a connected AI is told this server is for (MCP `initialize` instructions).
  *
- * THIS IS THE FORK'S MOST IMPORTANT DIVERGENCE FROM THE COOKBOOK, and the one
- * that was missed the longest.
+ * THE SINGLE MOST IMPORTANT THING IN THIS FILE, and the one that was wrong the
+ * longest.
  *
- * Agent Manager is a fork of the company cookbook, and it inherited the
+ * This service was built on the company cookbook's engine, and it inherited the
  * cookbook's instructions unchanged. Those instructions tell any client that
  * connects: "whenever you produce an artifact - a diagram, an architecture doc,
  * some code - capture it here." That is correct for a cookbook. It is wrong

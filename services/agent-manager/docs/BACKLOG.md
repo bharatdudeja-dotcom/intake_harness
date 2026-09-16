@@ -13,7 +13,7 @@ mirror only; every change lands in the PR.
 
 | # | Item | Where |
 |---|---|---|
-| D1 | Fork the cookbook rather than build fresh | `app/`, `docs/COOKBOOK-FORK.md` |
+| D1 | Fork the cookbook rather than build fresh | `app/`, `docs/LINEAGE.md` |
 | D2 | Rename everything a person sees — Programme, Run, Event, Marketer, Hero Agent, Agent, Live Queue, Playbooks, Shared Knowledge Graph | SPA |
 | D3 | Drop the Cook-off | SPA |
 | D4 | **Hero Agent** is the only name. No "mentor" anywhere | SPA, docs |
@@ -80,11 +80,11 @@ Visible in the screenshots and still wrong.
 - [ ] Comcast/Xfinity colours in the header, without the band that read badly
 
 ### 7 · Two defects that must not survive
-- [ ] Every ingested run shows `unattributed@tapcxm.com`. The fork's `owner`
+- [ ] Every ingested run shows `unattributed@tapcxm.com`. CX Agent Manager's `owner`
       resolution fixes it; not yet wired
 - [ ] **Runs reach `submitted` carrying a silent intake error.** The Python
       build derived stage state from evidence rather than the upstream status
-      field — that logic has to be ported or the fork inherits the bug it exists
+      field — that logic has to be ported or CX Agent Manager inherits the bug it exists
       to expose
 - [ ] Port the rest: Chauncey adapter, stage mapping, loop count, reconciliation,
       queue filters

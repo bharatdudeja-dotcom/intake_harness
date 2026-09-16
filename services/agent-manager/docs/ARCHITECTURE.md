@@ -25,7 +25,7 @@ flowchart TB
     CD["Claude Desktop / Claude Code<br/><i>marketer and team</i>"]
     BR["Browser<br/><i>dashboard SPA</i>"]
 
-    subgraph AM["AGENT MANAGER · app/ · fork of tap-mcp-connector @ 98617f6"]
+    subgraph AM["CX AGENT MANAGER · app/"]
         OA["oauth-bridge + well-known<br/><i>OIDC · PKCE · JWKS · PRM</i>"]
         MCPS["actions/mcp-server<br/><i>~70 tools</i>"]
         API["actions/dashboard-api"]
@@ -66,7 +66,7 @@ flowchart TB
 
 ## 3. What each part actually is
 
-**Agent Manager** is `app/`, a fork of the Company Cookbook Connector
+**Agent Manager** is `app/`, built on the Company Cookbook engine
 (`TAP-CXM/TAP-Cookbook` at `tap-portability-layer/connector/`, commit
 `98617f6`, branch `feature/demo-hardening-and-setup-docs`). Node >= 18.19 on
 Adobe I/O Runtime, runtime `nodejs:20`. The package is still named

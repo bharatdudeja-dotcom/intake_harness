@@ -141,7 +141,7 @@ both, so the choice is a label swap, not a rebuild.
 
 ## 4. The gap list
 
-What the brain needs that **neither Chauncey's system nor the current fork**
+What the brain needs that **neither Chauncey's system nor CX Agent Manager**
 provides today.
 
 ### Confirmed: Chauncey's database holds nothing cross-run
@@ -169,7 +169,7 @@ version only lives inside that one run's `task_runs` row."*
 | 3 | **Evidence pack.** Counts at each stage, audience definition, identity model, and what was ruled out. | B7, B8 | The step model holds it; the composition does not exist. |
 | 4 | **Failure classification that accumulates and counts recurrence.** | B9 | Built in the Python app, **not yet ported.** |
 | 5 | **Visible status during a hand-off**, so a quarter-long wait is not silence. | B4 | Not built. Needs a blocked state with a named owner. |
-| 6 | **A marketer identity.** Every ingested run reads `unattributed@tapcxm.com`. | B1, B3 | **Defect.** The fork's `owner` resolution fixes it; not yet wired. |
+| 6 | **A marketer identity.** Every ingested run reads `unattributed@tapcxm.com`. | B1, B3 | **Defect.** CX Agent Manager's `owner` resolution fixes it; not yet wired. |
 | 7 | **A status that tells the truth.** Runs reach `submitted` carrying a silent intake error. | B9 | **Defect, and the more serious one.** See below. |
 | 8 | **Cross-domain hub.** One shape for Workfront, AEM and Campaign agent systems. | — | Designed, not built. |
 
@@ -187,7 +187,7 @@ arrives.
 The Python build handled this correctly and it is the part most worth porting:
 the stage badge derives from **evidence** — walking the payload for an embedded
 error, and checking reconciliation verdicts — never from the upstream status
-field. That logic must survive into the fork, or the fork inherits the bug it
+field. That logic must survive into CX Agent Manager, or CX Agent Manager inherits the bug it
 exists to expose.
 
 It is also the honest demo. A per-run view says every run succeeded. Only

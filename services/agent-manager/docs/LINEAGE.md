@@ -1,14 +1,22 @@
-# COOKBOOK-FORK.md
+# LINEAGE.md
 
-Agent Manager is a **fork of the Company Cookbook Connector**, rebranded and
-extended for the Comcast/Xfinity Workfront intake use case.
+**CX Agent Manager is its own product.** This document exists because it did not
+start as one: its storage layer, step model and graph renderer came from the TAP
+Company Cookbook Connector, and knowing that explains several names that would
+otherwise look arbitrary.
+
+What it is now is not a rebranded cookbook. The domain model is different, the
+MCP surface is different, the instructions served to connected clients are
+different, and the things it does that matter most — reading across runs to
+catch an agent reporting success while failing, and gatewaying agent tools
+through to Claude — have no counterpart upstream.
 
 **The original is read-only to us.** No commits, no migrations, no config edits,
 no republishing against `TAP-CXM/TAP-Cookbook` or its deployed connector. If
 something upstream looks broken it goes in `DECISIONS.md` and to Bharat — we do
 not fix it here.
 
-## What was forked
+## What the engine came with
 
 | | |
 |---|---|
@@ -152,7 +160,7 @@ AND past `expires_at`**. Approved content is never touched. A recipe left with
 no approved steps goes too. Shared by the `purge_expired` tool and a daily cron
 (`0 3 * * *`); the CX graph recompiles daily at `0 4 * * *`. Idempotent.
 
-## Deployment-specific things a fork must change
+## Deployment-specific things any new deployment must change
 
 1. **Its own App Builder namespace and package name.** `app.config.yaml`'s
    package key `tap-mcp-connector` sets the deploy URL segment — must change, or
@@ -204,7 +212,7 @@ migrate it.
 
 ## Not yet verified
 
-Honest list, because the fork has not been deployed:
+Honest list, because CX Agent Manager has not been deployed:
 
 - **The UI has not been rendered.** Running it needs the `aio` CLI and Adobe I/O
   credentials, neither available here. Verification so far is `node --check` on
