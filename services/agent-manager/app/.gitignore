@@ -1,0 +1,40 @@
+
+# package directories
+node_modules
+
+.env*
+!.env.example
+.aio
+console.json
+
+# Adobe I/O SDK temp credential caches (@adobe/aio-lib-files STS creds - contain real
+# accessKeyId/secretAccessKey/sessionToken, never commit)
+.aws.tmp.creds.json
+.aws*.tmp.creds.json
+
+# Test output
+junit.xml
+
+# IDE & Temp
+.cache
+.idea
+.nyc_output
+.vscode
+coverage
+
+# Parcel
+.parcel-cache
+
+# OSX
+.DS_Store
+
+# yeoman
+.yo-repository
+
+# this template's e2e test directory
+temp-template-test
+# Local demo/validation entity keys (D79) - never commit
+keys.local.json
+.keys.env.tmp
+demo-logins.local.md
+demo-people.local.json

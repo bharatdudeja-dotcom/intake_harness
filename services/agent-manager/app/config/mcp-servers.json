@@ -1,0 +1,92 @@
+{
+  "_comment": [
+    "MCP servers Agent Manager can reach. Editable from Settings and from Claude",
+    "(set_mcp_server), so this file is a seed rather than a hardcoded list.",
+    "",
+    "One entry per server. Adobe ships these per product - Workfront, AEM, AEP -",
+    "and more will arrive. Adding one is an entry here, never a code change.",
+    "",
+    "Fields:",
+    "  id        stable key, referenced by agents and by agent systems",
+    "  label     what a person sees",
+    "  practice  the domain it belongs to (workfront | aep | aem), or null",
+    "  endpoint  base URL. Routes below it are resolved from the tool-name prefix",
+    "  auth      an Authorization header value, or null when the server owns auth",
+    "  active    false leaves it registered but unused",
+    "",
+    "SECRETS: put a real token in the environment, not here. A value of the form",
+    "${ENV_VAR} is resolved from the environment at call time, so this file stays",
+    "safe to commit."
+  ],
+  "servers": [
+    {
+      "id": "adobe-aec",
+      "label": "Adobe Experience Cloud MCP",
+      "practice": "aep",
+      "endpoint": "https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp",
+      "auth": null,
+      "active": true,
+      "verified": "2026-09-16",
+      "notes": [
+        "238 tools. AEP, CJA, AJO, Target, Web SDK, plus AWS/Databricks/Snowflake.",
+        "Knowledge tool is `search_adobe_knowledge`. `search_knowledge_base` does NOT exist -",
+        "asking for it is why every grounding call has failed while reporting completed.",
+        "Agent 3's tools are all live here: adobe_create_segment_estimate,",
+        "adobe_get_segment_estimate, adobe_list_schemas, adobe_get_schema, adobe_list_segments."
+      ]
+    },
+    {
+      "id": "workfront-inhouse",
+      "label": "Workfront MCP (in-house)",
+      "practice": "workfront",
+      "endpoint": "https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp/workfront",
+      "auth": null,
+      "active": false,
+      "verified": "2026-09-16",
+      "notes": [
+        "NOT DEPLOYED. /mcp/workfront/core, /comments, /search, /metadata and every",
+        "/mcp/fusion/* route return HTTP 404 at this gateway - re-verified 16 Sep 2026.",
+        "template.yaml in chaunceyplum/mcp declares all of them, so the deployed stack",
+        "is behind the repo or they live behind another API.",
+        "",
+        "Use workfront-adobe instead. The harness picks its tool names from",
+        "WORKFRONT_MCP_FLAVOUR; set it to 'inhouse' only once these answer."
+      ]
+    },
+    {
+      "id": "workfront-adobe",
+      "label": "Workfront MCP (Adobe official)",
+      "practice": "workfront",
+      "endpoint": "https://mcp.workfront.adobe.com/mcp/v1/workfront",
+      "auth": null,
+      "instance": "taplondonptrsd.my.workfront.com",
+      "active": false,
+      "notes": [
+        "Adobe's own connector, and the one the agents should use: every in-house",
+        "Workfront route (/mcp/workfront/*) returns HTTP 404 at the deployed gateway,",
+        "verified 16 Sep 2026. Nothing the agents asked of Workfront has ever arrived.",
+        "",
+        "Sign in with Authenticate in Settings - it advertises RFC 9728 discovery,",
+        "PKCE S256, refresh tokens and dynamic client registration, so no token needs",
+        "minting in the Developer Console. The token is stored server-side and is never",
+        "sent to the dashboard.",
+        "",
+        "Needs the wf-url header to pick the tenant (instance, below).",
+        "WRITE TOOLS ARE OFF BY DEFAULT on a tenant - 44 of its 94 tools are writes, and",
+        "a Workfront admin has to enable them in System Preferences before a create or",
+        "update will work. Reads work as soon as you are signed in."
+      ]
+    },
+    {
+      "id": "aem-adobe",
+      "label": "AEM MCP",
+      "practice": "aem",
+      "endpoint": "",
+      "auth": null,
+      "active": false,
+      "notes": [
+        "Declared so the domain has a home. No endpoint yet."
+      ]
+    }
+  ]
+}

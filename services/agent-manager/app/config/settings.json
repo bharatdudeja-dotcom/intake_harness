@@ -1,0 +1,22 @@
+{
+    "retention_days": 30,
+    "head_chefs": [
+        "service-account"
+    ],
+    "user_roles": {},
+    "practices": [
+        {
+            "id": "workfront",
+            "label": "Workfront"
+        },
+        {
+            "id": "aep",
+            "label": "AEP / Real-Time CDP"
+        },
+        {
+            "id": "aem",
+            "label": "AEM"
+        }
+    ],
+    "user_practices": {}
+}

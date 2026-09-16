@@ -1,0 +1,44 @@
+# Local Agent Manager, no cloud account required.
+#
+#   docker compose up --build   ->  http://localhost:8080
+#
+# Storage is a mounted volume, which behaves like the blob store the app
+# expects. Swap STORAGE_DRIVER to s3 or gcs and the same image runs against a
+# real bucket with no code change.
+
+services:
+  agent-manager:
+    build:
+      context: ./app
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "info"
+      STORAGE_DRIVER: "fs"
+      STORAGE_ROOT: "/data"
+      # Guards /internal/purge and /internal/cx-refresh. Change it.
+      INTERNAL_TOKEN: "local-dev-only"
+      # Leave blank locally: the dashboard then runs without demanding a login.
+      DASHBOARD_REQUIRE_IDENTITY: "false"
+    volumes:
+      - agent-manager-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # Uncomment to develop against the S3 driver without an AWS account.
+  # minio:
+  #   image: minio/minio
+  #   command: server /data --console-address ":9001"
+  #   ports: ["9000:9000", "9001:9001"]
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   volumes: [minio-data:/data]
+
+volumes:
+  agent-manager-data:
+  # minio-data:
