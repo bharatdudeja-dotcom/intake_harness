@@ -18,7 +18,12 @@ export const metadata: Metadata = {
   description: "3-agent audience-creation pipeline orchestrator",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+/*
+ * LayoutProps is a global Next generates only with typedRoutes enabled, which
+ * this project does not have - so the name did not exist and the build could
+ * not typecheck. Spelled out instead, which is what the generated type is.
+ */
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"

@@ -130,25 +130,66 @@ function getGatewayUrl(): string | null {
 }
 
 /**
- * The gateway namespaces every tool it re-exposes by the server it came from -
- * `adobe-aec__search_adobe_knowledge` - so that two upstreams shipping a tool
- * with the same name cannot shadow each other, and so nothing upstream can
- * shadow one of the gateway's own tools.
+ * Which gateway-registered server a tool lives on.
  *
- * MCP_GATEWAY_PREFIX is which registered server this harness should be talking
- * to. It is the ONLY thing this app needs to know about the estate: what that
- * name actually points at - the endpoint, the credential, whether it is
- * Workfront in-house or Adobe's official connector - is configuration in the
- * gateway. Changing which MCP the agents reach stops being a redeploy here.
+ * The gateway namespaces every tool it re-exposes by its source server -
+ * `adobe-aec__search_adobe_knowledge` - so two upstreams shipping the same tool
+ * name cannot shadow each other, and nothing upstream can shadow one of the
+ * gateway's own tools.
  *
- * Unset, names are sent through untouched, so a gateway that resolves bare
- * names needs no prefix.
+ * THIS WAS A SINGLE GLOBAL PREFIX AND THAT WAS WRONG. One prefix assumes the
+ * whole estate is one server. It is not: knowledge search is on the Adobe
+ * Experience Cloud server and Workfront objects are on the Workfront connector,
+ * so prefixing everything with `adobe-aec` produced
+ * `adobe-aec__workflow_create_any_object`, which does not exist - and Agent 1's
+ * Workfront create failed on it while the run still read as completed.
+ *
+ * MCP_GATEWAY_ROUTES maps server id to the tool-name prefixes it serves:
+ *
+ *   adobe-aec:adobe_,search_;workfront-adobe:workflow_,comment-stream_,approvals_
+ *
+ * MCP_GATEWAY_PREFIX remains the fallback for anything unmatched. Both unset,
+ * names go through untouched - which is right for a gateway that resolves bare
+ * names itself.
+ *
+ * Note what is NOT here: any endpoint, credential, or decision about which real
+ * MCP backs a server id. That is the gateway's business, which is the point of
+ * pointing at one.
  */
+function gatewayRoutes(): Array<{ server: string; prefixes: string[] }> {
+  const raw = String(process.env.MCP_GATEWAY_ROUTES || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(";")
+    .map((group) => group.trim())
+    .filter(Boolean)
+    .map((group) => {
+      const [server, list] = group.split(":");
+      return {
+        server: (server || "").trim(),
+        prefixes: String(list || "")
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      };
+    })
+    .filter((r) => r.server && r.prefixes.length);
+}
+
 function applyGatewayPrefix(toolName: string): string {
-  const prefix = process.env.MCP_GATEWAY_PREFIX;
-  if (!getGatewayUrl() || !prefix || !prefix.trim()) return toolName;
+  if (!getGatewayUrl()) return toolName;
   if (toolName.includes("__")) return toolName; // already namespaced
-  return `${prefix.trim()}__${toolName}`;
+
+  // Longest prefix wins, so a specific rule beats a general one.
+  const matches = gatewayRoutes()
+    .flatMap((r) => r.prefixes.map((prefix) => ({ server: r.server, prefix })))
+    .filter((m) => toolName.startsWith(m.prefix))
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+
+  if (matches.length) return `${matches[0].server}__${toolName}`;
+
+  const fallback = String(process.env.MCP_GATEWAY_PREFIX || "").trim();
+  return fallback ? `${fallback}__${toolName}` : toolName;
 }
 
 function getApiBase(): string {
@@ -171,13 +212,24 @@ function getEndpointForTool(toolName: string): string {
   return `${getApiBase()}${resolveMcpPath(toolName)}`;
 }
 
-/** Headers for an MCP call. A gateway may require a bearer token; a bare estate does not. */
+/**
+ * Headers for an MCP call. A bare estate needs none; a gateway usually does.
+ *
+ * MCP_GATEWAY_HEADER names the header, because gateways genuinely differ:
+ * Authorization/Bearer is the common case, but a service-to-service key is
+ * often its own header - CX Agent Manager takes `x-api-key`. Defaulting to
+ * Authorization and offering no way to change it meant the only credential the
+ * gateway accepted could not be sent, and every call came back 401.
+ */
 function mcpHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = process.env.MCP_GATEWAY_TOKEN;
-  if (getGatewayUrl() && token && token.trim()) {
-    headers.Authorization = token.startsWith("Bearer ") ? token : `Bearer ${token}`;
-  }
+  if (!getGatewayUrl() || !token || !token.trim()) return headers;
+
+  const name = (process.env.MCP_GATEWAY_HEADER || "Authorization").trim();
+  headers[name] = name.toLowerCase() === "authorization" && !token.startsWith("Bearer ")
+    ? `Bearer ${token}`
+    : token;
   return headers;
 }
 

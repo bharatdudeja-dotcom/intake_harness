@@ -97,6 +97,40 @@ function findLaunchDate(brief: string): ExtractedField | null {
 }
 
 /**
+ * The campaign name, from the opening of the brief.
+ *
+ * Almost every brief opens by naming the campaign - "Fall Switch and Save.
+ * Growth/Upsell for..." - and without this, campaign_name was required,
+ * unextractable, and therefore asked for on every single brief. An agent whose
+ * first question is "what is this campaign called?" when the marketer named it
+ * in the first four words is the B1 loop, just politer.
+ *
+ * DERIVED, never stated. The opening sentence is a strong signal and not a
+ * fact, so it is marked derived and the marketer confirms it - which is cheaper
+ * than asking, and honest about where the value came from. Anything that reads
+ * like a sentence rather than a title is left alone.
+ */
+function findCampaignName(brief: string): ExtractedField | null {
+  const first = String(brief || "").split(/[.!?\n]/)[0]?.trim();
+  if (!first) return null;
+
+  const words = first.split(/\s+/);
+  // A title, not a sentence: short, and not starting with a verb phrase that
+  // means the marketer has launched straight into the request.
+  if (words.length < 2 || words.length > 9) return null;
+  if (/^(we|i|this|the team|please|can|could|need|want|looking|there)\b/i.test(first)) return null;
+  if (/[:;,]$/.test(first)) return null;
+
+  return {
+    key: "campaign_name",
+    label: "Campaign name",
+    value: first,
+    from: "derived",
+    evidence: first,
+  };
+}
+
+/**
  * Read a brief.
  * @param brief the marketer's own words
  * @param known anything already structured (a rework loop carries this)
@@ -136,7 +170,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     if (seen.has(cue.key)) continue;
     const m = brief.match(cue.cues);
     if (m) {
-      const spec = CAMPAIGN_BRIEF_FIELDS.find((f) => f.key === cue.key);
+      const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === cue.key);
       push({
         key: cue.key, label: spec?.label ?? cue.key, value: cue.value,
         from: cue.from, evidence: m[0],
@@ -150,10 +184,16 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     if (d) push(d);
   }
 
+  // 5. The campaign name, from the opening line.
+  if (!seen.has("campaign_name")) {
+    const n = findCampaignName(brief);
+    if (n) push(n);
+  }
+
   const fields: Record<string, string> = {};
   for (const f of extracted) fields[f.key] = f.value;
 
-  const missing = requiredFields().filter((f) => !fields[f.key]);
+  const missing = requiredFields().filter((f: FieldSpec) => !fields[f.key]);
   const inferred = extracted.filter((f) => f.from !== "stated");
 
   return { fields, extracted, missing, inferred };
