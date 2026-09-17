@@ -73,7 +73,7 @@ describe('role guards through the tool path (D66)', () => {
     })
 
     test('a non-head-chef per-user caller is REFUSED headchef_approve', async () => {
-        const res = await callAsUser('alice@example.com', 'headchef_approve', { recipe_id: 'whatever' })
+        const res = await callAsUser('alice@example.com', 'headchef_approve', { job_id: 'whatever' })
         expect(res.result.isError).toBe(true)
         expect(res.result.content[0].text).toMatch(/Head Chef/i)
     })

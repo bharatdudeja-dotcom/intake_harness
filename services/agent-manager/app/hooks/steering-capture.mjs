@@ -19,7 +19,7 @@ governing permissions and limitations under the License.
  * UI). This hook closes that gap DETERMINISTICALLY for the one client that exposes a hook
  * API: it is wired to PreToolUse / PostToolUse / Notification, fires on every such event,
  * and POSTs it to the connector as an ordered `append_step(kind:"steering")` on the active
- * recipe - so no steering decision is dropped on the coding-agent side.
+ * job - so no steering decision is dropped on the coding-agent side.
  *
  *   permission allow / approve  -> signal "affirm"  (green in the Work Log)
  *   permission deny / block     -> signal "reject"  (red)
@@ -29,8 +29,8 @@ governing permissions and limitations under the License.
  *   1. Env vars, if set:
  *      TAP_MCP_URL   - the mcp-server endpoint
  *      TAP_API_KEY   - x-api-key for the headless-agent auth path
- *      TAP_RECIPE_ID - the task-thread recipe to append to (skips get_active_recipe)
- *      TAP_PROJECT   - project to resolve the active recipe for
+ *      TAP_JOB_ID - the task-thread job to append to (skips get_active_job)
+ *      TAP_PROJECT   - project to resolve the active job for
  *      TAP_SOURCE    - free-text source label for the step
  *      TAP_MODEL     - free-text model label for the step (optional)
  *   2. ~/.tap-cookbook/config.json (written by `npx @tap/cookbook-connect`), for any of the
@@ -64,7 +64,7 @@ function readFileConfig () {
 /**
  * Resolves hook config from env first, falling back to the installed config file, then
  * deriving a project from the cwd folder name as a last resort (D62).
- * @returns {{url: ?string, apiKey: ?string, recipeId: ?string, project: ?string, source: string, model: ?string}}
+ * @returns {{url: ?string, apiKey: ?string, jobId: ?string, project: ?string, source: string, model: ?string}}
  */
 function resolveConfig () {
     const fileConfig = readFileConfig()
@@ -72,7 +72,7 @@ function resolveConfig () {
     return {
         url: process.env.TAP_MCP_URL || fileConfig.mcpUrl || null,
         apiKey: process.env.TAP_API_KEY || fileConfig.apiKey || null,
-        recipeId: process.env.TAP_RECIPE_ID || null,
+        jobId: process.env.TAP_JOB_ID || null,
         project,
         source: process.env.TAP_SOURCE || fileConfig.source || 'cli-agent',
         model: process.env.TAP_MODEL || undefined
@@ -130,11 +130,11 @@ async function callTool (url, apiKey, name, args) {
     try { return JSON.parse(text) } catch (e) { return text }
 }
 
-async function resolveRecipeId (url, apiKey, config) {
-    if (config.recipeId) return config.recipeId
+async function resolveJobId (url, apiKey, config) {
+    if (config.jobId) return config.jobId
     if (!config.project) return null
-    const res = await callTool(url, apiKey, 'get_active_recipe', { project: config.project })
-    return res && res.active_recipe ? res.active_recipe.id : null
+    const res = await callTool(url, apiKey, 'get_active_job', { project: config.project })
+    return res && res.active_job ? res.active_job.id : null
 }
 
 async function main () {
@@ -145,12 +145,12 @@ async function main () {
     let ev = {}
     try { ev = raw ? JSON.parse(raw) : {} } catch (e) { ev = {} }
 
-    const recipeId = await resolveRecipeId(config.url, config.apiKey, config)
-    if (!recipeId) return // no active task thread to append to - nothing to do
+    const jobId = await resolveJobId(config.url, config.apiKey, config)
+    if (!jobId) return // no active task thread to append to - nothing to do
 
     const { signal, label } = classify(ev)
     await callTool(config.url, config.apiKey, 'append_step', {
-        recipe_id: recipeId,
+        job_id: jobId,
         kind: 'steering',
         signal,
         content: label,

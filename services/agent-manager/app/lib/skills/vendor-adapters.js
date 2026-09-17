@@ -29,21 +29,21 @@ function skillSlug (value) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 64) || 'recipe'
+        .slice(0, 64) || 'job'
 }
 
 /**
  * Claude Skill (SKILL.md) - Anthropic's portable skill bundle format: YAML
  * frontmatter (name, description) + a markdown body the model loads when the
- * skill is invoked. One self-contained SKILL.md; recipes have no separate
+ * skill is invoked. One self-contained SKILL.md; jobs have no separate
  * asset files today, so the bundle is the single file.
- * @param {object} resource full approved recipe
+ * @param {object} resource full approved job
  * @returns {{filename: string, mimeType: string, content: string}}
  */
 function buildClaudeSkill (resource) {
     const f = resource.fields || {}
     const work = [resource.epic, resource.story, resource.task].filter(Boolean).join(' > ')
-    const description = `Certified company recipe (${resource.type})${work ? ` from "${work}"` : ''}: ${resource.title}. Use when this captured know-how applies to the task.`
+    const description = `Certified company job (${resource.type})${work ? ` from "${work}"` : ''}: ${resource.title}. Use when this captured know-how applies to the task.`
 
     const content = [
         '---',
@@ -53,7 +53,7 @@ function buildClaudeSkill (resource) {
         '',
         `# ${resource.title}`,
         '',
-        `> Certified house recipe from the company cookbook (kind: ${resource.type}).`,
+        `> Certified house job from the company cookbook (kind: ${resource.type}).`,
         `> URI: resource://company/${resource.type}/${resource.id}`,
         work ? `> Work item: ${work}` : null,
         f.source ? `> Source: ${f.source}${f.anchor ? `#${f.anchor}` : ''}` : null,
@@ -70,7 +70,7 @@ function buildClaudeSkill (resource) {
 module.exports = [
     {
         format: 'claude-skill',
-        description: 'Claude Skill bundle - SKILL.md with name/description frontmatter and the recipe as its body',
+        description: 'Claude Skill bundle - SKILL.md with name/description frontmatter and the job as its body',
         build: buildClaudeSkill
     }
 ]

@@ -12,15 +12,15 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Migrate the already-ingested recipes into the Increment-9 model (D42):
+ * Migrate the already-ingested jobs into the Increment-9 model (D42):
  *   - segments.project = "Tap Portability Layer" (promotes the old top bucket to a Project)
  *   - map the existing epic/story into segments
  *   - set owner to the default (service) principal - set server-side on save
- *   - keep each recipe's current approval status
+ *   - keep each job's current approval status
  *
  * Runs locally against the deployed connector via x-api-key (like the ingest script).
  *
- * Idempotent + no duplicates by construction: it re-saves each recipe under its OWN
+ * Idempotent + no duplicates by construction: it re-saves each job under its OWN
  * stable id with its EXACT existing content, so save_resource takes the metadata-only
  * update path - no version bump, no re-approval, status preserved - and a second run
  * skips anything that already carries segments.project. (Idempotency comes from
@@ -72,7 +72,7 @@ async function main () {
     const catalog = await callTool(mcpUrl, apiKey, 'list_resources', {})
     const validTypes = new Set((await callTool(mcpUrl, apiKey, 'list_resource_types', {})).map(t => t.type))
     console.log(`Migrating into ${mcpUrl}`)
-    console.log(`Catalog: ${catalog.length} recipes\n`)
+    console.log(`Catalog: ${catalog.length} jobs\n`)
 
     const result = { migrated: [], skipped: [], legacy: [], failed: [] }
     for (const entry of catalog) {

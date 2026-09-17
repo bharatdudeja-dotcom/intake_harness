@@ -100,7 +100,7 @@ describe('capture policy: only agent work is recorded', () => {
         })
 
         test('cannot open a working thread of its own', async () => {
-            const body = await callTool('start_recipe', {
+            const body = await callTool('start_job', {
                 title: 'Some chat session',
                 project: 'Comcast Intake'
             })
@@ -109,7 +109,7 @@ describe('capture policy: only agent work is recorded', () => {
         })
 
         test('the refusal names the escape hatch, so an admin is not left guessing', async () => {
-            const body = await callTool('start_recipe', { title: 'x', project: 'p' })
+            const body = await callTool('start_job', { title: 'x', project: 'p' })
             expect(text(body)).toMatch(/capture_mode/)
         })
     })
@@ -130,18 +130,18 @@ describe('capture policy: only agent work is recorded', () => {
             // Build a run the way start_intake does: what makes it an agent run
             // is `upstream`, and nothing else.
             setMode('open')
-            const created = await callTool('start_recipe', { title: 'Q4 HSD Upsell', project: 'Comcast Intake' })
-            const recipeId = JSON.parse(text(created)).id
+            const created = await callTool('start_job', { title: 'Q4 HSD Upsell', project: 'Comcast Intake' })
+            const jobId = JSON.parse(text(created)).id
 
             const store = require('../lib/store')
-            const resource = await store.getResource(recipeId)
+            const resource = await store.getResource(jobId)
             resource.upstream = { system_id: 'agentic-harness', run_id: 'r-1' }
             await store.saveResource(resource)
 
             // Now close the policy. Steering that run must still be recordable.
             setMode('agent-runs-only')
             const body = await callTool('append_step', {
-                recipe_id: recipeId,
+                job_id: jobId,
                 kind: 'steering',
                 signal: 'correct',
                 content: 'Offer was $200; the campaign is $600.',
@@ -152,12 +152,12 @@ describe('capture policy: only agent work is recorded', () => {
 
         test('but NOT appending to a run no agent ever touched', async () => {
             setMode('open')
-            const created = await callTool('start_recipe', { title: 'Hand-made notes', project: 'Comcast Intake' })
-            const recipeId = JSON.parse(text(created)).id
+            const created = await callTool('start_job', { title: 'Hand-made notes', project: 'Comcast Intake' })
+            const jobId = JSON.parse(text(created)).id
 
             setMode('agent-runs-only')
             const body = await callTool('append_step', {
-                recipe_id: recipeId,
+                job_id: jobId,
                 kind: 'doc',
                 content: 'Some notes from a chat.',
                 source: 'desktop-ai'
@@ -170,10 +170,10 @@ describe('capture policy: only agent work is recorded', () => {
     describe('the gate is on the target, not the caller', () => {
         test('a chat client may steer an agent run; the agent pipeline is not the only permitted author', async () => {
             setMode('open')
-            const created = await callTool('start_recipe', { title: 'Run', project: 'P' })
-            const recipeId = JSON.parse(text(created)).id
+            const created = await callTool('start_job', { title: 'Run', project: 'P' })
+            const jobId = JSON.parse(text(created)).id
             const store = require('../lib/store')
-            const r = await store.getResource(recipeId)
+            const r = await store.getResource(jobId)
             r.upstream = { system_id: 's', run_id: '1' }
             await store.saveResource(r)
 
@@ -182,7 +182,7 @@ describe('capture policy: only agent work is recorded', () => {
             // arrives through one, and refusing it would throw away the record
             // this product exists to keep.
             const body = await callTool('append_step', {
-                recipe_id: recipeId, kind: 'steering', signal: 'reject',
+                job_id: jobId, kind: 'steering', signal: 'reject',
                 content: 'Wrong audience.', source: 'desktop-ai'
             })
             expect(refused(body)).toBeFalsy()

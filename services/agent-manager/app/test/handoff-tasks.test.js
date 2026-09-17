@@ -12,8 +12,8 @@ governing permissions and limitations under the License.
 
 /**
  * Handoff Prompts & Active Tasks tests (Increment 8, D36): the handoff-prompt
- * recipe kind, export_as_skill, list_active_tasks, set_task_status, and
- * link_recipes, driven end to end through main() like the other MCP tests.
+ * job kind, export_as_skill, list_active_tasks, set_task_status, and
+ * link_jobs, driven end to end through main() like the other MCP tests.
  */
 
 jest.mock('@adobe/aio-lib-files')
@@ -111,7 +111,7 @@ describe('list_active_tasks', () => {
         expect(ids.indexOf(third.id)).toBeLessThan(ids.indexOf(second.id))
     })
 
-    test('does not include non-handoff recipe kinds', async () => {
+    test('does not include non-handoff job kinds', async () => {
         await callTool('save_resource', { type: 'decision', title: 'not a handoff', content: 'x' })
         const active = parseResult(await callTool('list_active_tasks', {}))
         expect(active.find(t => t.title === 'not a handoff')).toBeUndefined()
@@ -145,37 +145,37 @@ describe('set_task_status', () => {
     })
 })
 
-describe('link_recipes', () => {
-    test('records lineage from a handoff to the recipes it produced', async () => {
+describe('link_jobs', () => {
+    test('records lineage from a handoff to the jobs it produced', async () => {
         const handoff = await saveHandoff()
         const decision = parseResult(await callTool('save_resource', { type: 'decision', title: 'outcome', content: 'x', project: 'P' }))
 
-        const linked = parseResult(await callTool('link_recipes', { handoff_id: handoff.id, recipe_ids: [decision.id] }))
-        expect(linked.linked_recipes).toEqual([decision.id])
+        const linked = parseResult(await callTool('link_jobs', { handoff_id: handoff.id, job_ids: [decision.id] }))
+        expect(linked.linked_jobs).toEqual([decision.id])
 
         const full = parseResult(await callTool('get_resource', { id: handoff.id }))
-        expect(full.linked_recipes).toEqual([decision.id])
+        expect(full.linked_jobs).toEqual([decision.id])
     })
 
     test('accumulates without duplicating on repeated calls', async () => {
         const handoff = await saveHandoff()
-        await callTool('link_recipes', { handoff_id: handoff.id, recipe_ids: ['a', 'b'] })
-        const second = parseResult(await callTool('link_recipes', { handoff_id: handoff.id, recipe_ids: ['b', 'c'] }))
-        expect(second.linked_recipes.sort()).toEqual(['a', 'b', 'c'])
+        await callTool('link_jobs', { handoff_id: handoff.id, job_ids: ['a', 'b'] })
+        const second = parseResult(await callTool('link_jobs', { handoff_id: handoff.id, job_ids: ['b', 'c'] }))
+        expect(second.linked_jobs.sort()).toEqual(['a', 'b', 'c'])
     })
 
     test('rejects a non-handoff resource', async () => {
         const decision = parseResult(await callTool('save_resource', { type: 'decision', title: 't', content: 'c', project: 'P' }))
-        const body = await callTool('link_recipes', { handoff_id: decision.id, recipe_ids: ['x'] })
+        const body = await callTool('link_jobs', { handoff_id: decision.id, job_ids: ['x'] })
         expect(body.result.isError).toBe(true)
     })
 })
 
 describe('export_as_skill tool', () => {
-    test('exports an approved recipe as a prompt by default (after certify)', async () => {
+    test('exports an approved job as a prompt by default (after certify)', async () => {
         const saved = parseResult(await callTool('save_resource', { type: 'decision', title: 'Exportable', content: 'body text', project: 'P' }))
         await callTool('approve_resource', { id: saved.id }) // must be certified to export
-        const exported = parseResult(await callTool('export_as_skill', { recipe_id: saved.id }))
+        const exported = parseResult(await callTool('export_as_skill', { job_id: saved.id }))
         expect(exported.format).toBe('prompt')
         expect(exported.content).toContain('body text')
     })
@@ -183,22 +183,22 @@ describe('export_as_skill tool', () => {
     test('exports as a claude-skill SKILL.md when requested (after certify)', async () => {
         const saved = parseResult(await callTool('save_resource', { type: 'decision', title: 'Exportable', content: 'body text', project: 'P' }))
         await callTool('approve_resource', { id: saved.id })
-        const exported = parseResult(await callTool('export_as_skill', { recipe_id: saved.id, format: 'claude-skill' }))
+        const exported = parseResult(await callTool('export_as_skill', { job_id: saved.id, format: 'claude-skill' }))
         expect(exported.filename).toBe('SKILL.md')
         expect(exported.content).toMatch(/^---/)
     })
 
-    test('refuses to export an experimental (uncertified) recipe', async () => {
+    test('refuses to export an experimental (uncertified) job', async () => {
         const saved = parseResult(await callTool('save_resource', {
             type: 'architecture-diagram', title: 'Gated', content: 'graph TD;', format: 'mermaid', project: 'P'
         }))
-        const body = await callTool('export_as_skill', { recipe_id: saved.id })
+        const body = await callTool('export_as_skill', { job_id: saved.id })
         expect(body.result.isError).toBe(true)
         expect(body.result.content[0].text).toMatch(/experimental/i)
     })
 
-    test('errors clearly for an unknown recipe id', async () => {
-        const body = await callTool('export_as_skill', { recipe_id: 'no-such-id' })
+    test('errors clearly for an unknown job id', async () => {
+        const body = await callTool('export_as_skill', { job_id: 'no-such-id' })
         expect(body.result.isError).toBe(true)
     })
 })
@@ -213,9 +213,9 @@ describe('server instructions mention handoff prompts', () => {
     })
 })
 
-describe('use-recipe prompt', () => {
+describe('use-job prompt', () => {
     test('prompts/get renders a message that calls export_as_skill with the given id', async () => {
-        const body = await rpc('prompts/get', { name: 'use-recipe', arguments: { recipe_id: 'decision-example-1' } })
+        const body = await rpc('prompts/get', { name: 'use-job', arguments: { job_id: 'decision-example-1' } })
         expect(body.result.messages[0].content.text).toContain('export_as_skill')
         expect(body.result.messages[0].content.text).toContain('decision-example-1')
     })

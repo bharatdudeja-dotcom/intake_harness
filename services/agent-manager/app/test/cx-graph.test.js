@@ -39,9 +39,9 @@ function seed (id, owner, status, extra = {}) {
 
 describe('multi-tenant owner isolation (D53, tightened in D86) - store level', () => {
     /*
-     * This test previously asserted that any recipe whose status canonicalised to "approved" was
+     * This test previously asserted that any job whose status canonicalised to "approved" was
      * visible to everyone. That was the bug, not the specification: approving one ingredient
-     * auto-promotes its recipe, so a working draft became company-visible the moment its author
+     * auto-promotes its job, so a working draft became company-visible the moment its author
      * approved a single ingredient of it. The rule is now four explicit cases, asserted below.
      */
     test('a personal view sees own work only, not a colleague approved-but-unsubmitted draft', async () => {
@@ -71,7 +71,7 @@ describe('multi-tenant owner isolation (D53, tightened in D86) - store level', (
         expect((await store.listResources({ visibleTo: 'alice', visibleSubmitted: true })).map(r => r.id).sort()).toEqual(['a1', 'b1'])
     })
 
-    test('an ASSIGNED recipe is visible to its assignee, and to nobody else', async () => {
+    test('an ASSIGNED job is visible to its assignee, and to nobody else', async () => {
         await seed('b1', 'bob', 'experimental', { assigned_to: ['alice'] })
         await seed('b2', 'bob', 'experimental')
 
@@ -79,7 +79,7 @@ describe('multi-tenant owner isolation (D53, tightened in D86) - store level', (
         expect((await store.listResources({ visibleTo: 'carol' })).map(r => r.id)).toEqual([])
     })
 
-    test('listProjects owner filter scopes to the caller (approved recipes aside)', async () => {
+    test('listProjects owner filter scopes to the caller (approved jobs aside)', async () => {
         await store.upsertProjectByName({ name: 'Alice Proj', owner: 'alice' })
         await store.upsertProjectByName({ name: 'Bob Proj', owner: 'bob' })
         expect((await store.listProjects({ owner: 'alice' })).map(p => p.name)).toEqual(['Alice Proj'])
@@ -88,7 +88,7 @@ describe('multi-tenant owner isolation (D53, tightened in D86) - store level', (
 })
 
 describe('CX graph compiler (D40/D53/D64) - cross-owner, approved + Head Chef-admitted only', () => {
-    test('includes cx_approved recipes across owners, excludes experimental, links shared tag/segment', async () => {
+    test('includes cx_approved jobs across owners, excludes experimental, links shared tag/segment', async () => {
         await seed('a1', 'alice', 'approved', { tags: ['auth'], segments: { project: 'P1' }, cx_approved: true })
         await seed('b1', 'bob', 'approved', { tags: ['auth'], segments: { project: 'P1' }, cx_approved: true })
         await seed('c1', 'carol', 'experimental', { tags: ['auth'], segments: { project: 'P1' } })
@@ -97,24 +97,24 @@ describe('CX graph compiler (D40/D53/D64) - cross-owner, approved + Head Chef-ad
         expect(g.approved_only).toBe(true)
         expect(g.cross_owner).toBe(true)
         expect(g.generated_at).toBe('2026-07-06T00:00:00.000Z')
-        expect(g.recipe_count).toBe(2)
+        expect(g.job_count).toBe(2)
         expect(g.owners.sort()).toEqual(['alice', 'bob'])
-        const recipeNodeIds = g.nodes.filter(n => n.node === 'recipe').map(n => n.id).sort()
-        expect(recipeNodeIds).toEqual(['a1', 'b1'])
+        const jobNodeIds = g.nodes.filter(n => n.node === 'job').map(n => n.id).sort()
+        expect(jobNodeIds).toEqual(['a1', 'b1'])
         expect(g.nodes.some(n => n.id === 'c1')).toBe(false) // experimental excluded
         expect(g.edges.some(e => e.rel === 'shared-tag' && e.tag === 'auth')).toBe(true)
         expect(g.edges.some(e => e.rel === 'shared-segment' && e.segment === 'P1')).toBe(true)
     })
 
-    test('D64: an approved recipe that is NOT cx_approved is excluded (baking alone does not admit it)', async () => {
+    test('D64: an approved job that is NOT cx_approved is excluded (baking alone does not admit it)', async () => {
         await seed('a1', 'alice', 'approved', { cx_approved: true }) // Head Chef admitted
         await seed('b1', 'bob', 'approved', { baked: true }) // baked/approved but NOT cx_approved
         await seed('c1', 'carol', 'approved') // approved, no cx flag at all
 
         const g = await cxGraph.buildCxGraph('2026-07-06T00:00:00.000Z')
-        expect(g.recipe_count).toBe(1)
-        const recipeNodeIds = g.nodes.filter(n => n.node === 'recipe').map(n => n.id)
-        expect(recipeNodeIds).toEqual(['a1'])
+        expect(g.job_count).toBe(1)
+        const jobNodeIds = g.nodes.filter(n => n.node === 'job').map(n => n.id)
+        expect(jobNodeIds).toEqual(['a1'])
         expect(g.nodes.some(n => n.id === 'b1')).toBe(false)
         expect(g.nodes.some(n => n.id === 'c1')).toBe(false)
     })
@@ -124,20 +124,20 @@ describe('CX graph compiler (D40/D53/D64) - cross-owner, approved + Head Chef-ad
         const built = await cxGraph.rebuildAndStore('2026-07-06T00:00:00.000Z')
         const read = await store.getCxGraph()
         expect(read.generated_at).toBe(built.generated_at)
-        expect(read.recipe_count).toBe(1)
+        expect(read.job_count).toBe(1)
     })
 
-    test('a handoff-prompt linked to a cx_approved recipe appears as a lineage node/edge (D54)', async () => {
+    test('a handoff-prompt linked to a cx_approved job appears as a lineage node/edge (D54)', async () => {
         await seed('a1', 'alice', 'approved', { cx_approved: true })
-        await store.saveResource({ id: 'h1', title: 'a handoff', type: 'handoff-prompt', content: 'do it', owner: 'alice', status: 'approved', linked_recipes: ['a1'] })
+        await store.saveResource({ id: 'h1', title: 'a handoff', type: 'handoff-prompt', content: 'do it', owner: 'alice', status: 'approved', linked_jobs: ['a1'] })
 
         const g = await cxGraph.buildCxGraph('2026-07-06T00:00:00.000Z')
         expect(g.nodes.some(n => n.node === 'handoff' && n.id === 'h1')).toBe(true)
         expect(g.edges.some(e => e.rel === 'lineage' && e.from === 'h1' && e.to === 'a1')).toBe(true)
-        expect(g.recipe_count).toBe(1) // the handoff never counts as a "recipe"
+        expect(g.job_count).toBe(1) // the handoff never counts as a "job"
     })
 
-    test('an ingredient node carries its steering signal (for steered-recipe styling)', async () => {
+    test('an ingredient node carries its steering signal (for steered-job styling)', async () => {
         const rec = { id: 'a1', title: 'a1', type: 'decision', content: 'x', owner: 'alice', status: 'approved', cx_approved: true, steps: [{ id: 'a1::s0', order: 0, kind: 'steering', signal: 'correct', status: 'approved', content: 'fixed it' }] }
         await store.saveResource(rec)
         const g = await cxGraph.buildCxGraph('2026-07-06T00:00:00.000Z')
@@ -147,7 +147,7 @@ describe('CX graph compiler (D40/D53/D64) - cross-owner, approved + Head Chef-ad
 
     test('an empty cookbook yields an empty (but valid) graph', async () => {
         const g = await cxGraph.buildCxGraph('2026-07-06T00:00:00.000Z')
-        expect(g.recipe_count).toBe(0)
+        expect(g.job_count).toBe(0)
         expect(g.nodes).toEqual([])
         expect(g.edges).toEqual([])
     })
@@ -162,12 +162,12 @@ describe('admin cross-owner tools (D55)', () => {
     }
 
     /*
-     * These two tests previously asserted that admin_list_recipes returned every recipe in the
+     * These two tests previously asserted that admin_list_jobs returned every job in the
      * company regardless of state. That assertion WAS the bug (D98): an admin read everybody's
      * private drafts. The cross-owner view now shows work people chose to submit, plus admitted
      * work, plus the caller's own, and the tests say so.
      */
-    test('admin_list_recipes spans owners for SUBMITTED and ADMITTED work', async () => {
+    test('admin_list_jobs spans owners for SUBMITTED and ADMITTED work', async () => {
         await seed('a1', 'alice', 'baked', { baked: true })
         await seed('b1', 'bob', 'approved', { baked: true, cx_approved: true })
 
@@ -175,22 +175,22 @@ describe('admin cross-owner tools (D55)', () => {
         // seeded head-chef roster, so it is a REVIEWER. It therefore sees the submitted candidate
         // in the personal view too, which is correct. The peer case (a plain chef who must NOT see
         // a submitted candidate) is covered in test/users-and-logins.test.js.
-        const admin = await callTool('admin_list_recipes', {})
+        const admin = await callTool('admin_list_jobs', {})
         expect(admin.map(r => r.id)).toEqual(expect.arrayContaining(['a1', 'b1']))
     })
 
-    test('admin_list_recipes does NOT expose an unsubmitted draft, whatever filter is used', async () => {
+    test('admin_list_jobs does NOT expose an unsubmitted draft, whatever filter is used', async () => {
         await seed('a2', 'alice', 'experimental')
         await seed('a3', 'alice', 'approved') // approved ingredients, never baked: still private
         await seed('b2', 'bob', 'baked', { baked: true })
 
-        const all = await callTool('admin_list_recipes', {})
+        const all = await callTool('admin_list_jobs', {})
         expect(all.map(r => r.id)).not.toContain('a2')
         expect(all.map(r => r.id)).not.toContain('a3')
         expect(all.map(r => r.id)).toContain('b2')
 
         // Naming the owner does not unlock their drafts either.
-        const aliceOnly = await callTool('admin_list_recipes', { owner: 'alice' })
+        const aliceOnly = await callTool('admin_list_jobs', { owner: 'alice' })
         expect(aliceOnly.map(r => r.id)).not.toContain('a2')
         expect(aliceOnly.map(r => r.id)).not.toContain('a3')
     })
@@ -214,24 +214,24 @@ describe('CX graph via the tool path (main)', () => {
         const before = await callTool('get_cx_graph', {})
         expect(before.built).toBe(false)
 
-        const rec = await callTool('start_recipe', { project: 'CX Live', title: 'a task' })
-        await callTool('append_step', { recipe_id: rec.id, kind: 'decision', content: 'chose X', source: 'desktop' })
-        await callTool('bake_recipe', { id: rec.id, approve_all: true })
+        const rec = await callTool('start_job', { project: 'CX Live', title: 'a task' })
+        await callTool('append_step', { job_id: rec.id, kind: 'decision', content: 'chose X', source: 'desktop' })
+        await callTool('bake_job', { id: rec.id, approve_all: true })
 
         // Baked but not yet Head Chef-admitted -> absent from the CX graph, present in the queue.
         let rebuilt = await callTool('rebuild_cx_graph', {})
-        expect(rebuilt.recipe_count).toBe(0)
+        expect(rebuilt.job_count).toBe(0)
         const pending = await callTool('list_cx_pending', {})
         expect(pending.map(r => r.id)).toContain(rec.id)
 
         // The service-account principal is on the seeded head-chef roster, so it may admit.
-        const admitted = await callTool('headchef_approve', { recipe_id: rec.id })
+        const admitted = await callTool('headchef_approve', { job_id: rec.id })
         expect(admitted.cx_approved).toBe(true)
 
         rebuilt = await callTool('rebuild_cx_graph', {})
-        expect(rebuilt.recipe_count).toBe(1)
+        expect(rebuilt.job_count).toBe(1)
         const after = await callTool('get_cx_graph', {})
-        expect(after.nodes.some(n => n.node === 'recipe' && n.id === rec.id)).toBe(true)
+        expect(after.nodes.some(n => n.node === 'job' && n.id === rec.id)).toBe(true)
 
         // Once admitted, it leaves the pending queue.
         const pendingAfter = await callTool('list_cx_pending', {})
@@ -250,10 +250,10 @@ describe('Head Chef role + guard (D64)', () => {
         return JSON.parse((await callTool(name, args)).result.content[0].text)
     }
 
-    async function bakedRecipe () {
-        const rec = await callOk('start_recipe', { project: 'HC', title: 'a task' })
-        await callOk('append_step', { recipe_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
-        await callOk('bake_recipe', { id: rec.id, approve_all: true })
+    async function bakedJob () {
+        const rec = await callOk('start_job', { project: 'HC', title: 'a task' })
+        await callOk('append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
+        await callOk('bake_job', { id: rec.id, approve_all: true })
         return rec
     }
 
@@ -264,36 +264,36 @@ describe('Head Chef role + guard (D64)', () => {
         expect(role.head_chefs).toContain('service-account')
     })
 
-    test('non-head-chef headchef_approve is REFUSED (guard), and the recipe stays out of the CX graph', async () => {
+    test('non-head-chef headchef_approve is REFUSED (guard), and the job stays out of the CX graph', async () => {
         // Take the service-account OFF the roster so this caller is a plain chef.
         await callOk('set_head_chefs', { head_chefs: ['someone-else@example.com'] })
         expect((await callOk('get_role', {})).role).toBe('chef')
 
-        const rec = await bakedRecipe()
-        const res = await callTool('headchef_approve', { recipe_id: rec.id })
+        const rec = await bakedJob()
+        const res = await callTool('headchef_approve', { job_id: rec.id })
         expect(res.result.isError).toBe(true)
         expect(res.result.content[0].text).toMatch(/only a Head Chef/i)
 
         const rebuilt = await callOk('rebuild_cx_graph', {})
-        expect(rebuilt.recipe_count).toBe(0) // never admitted
+        expect(rebuilt.job_count).toBe(0) // never admitted
     })
 
-    test('headchef_approve requires the recipe to be baked first (candidate only)', async () => {
-        const rec = await callOk('start_recipe', { project: 'HC', title: 'unbaked' })
-        await callOk('append_step', { recipe_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
-        const res = await callTool('headchef_approve', { recipe_id: rec.id })
+    test('headchef_approve requires the job to be baked first (candidate only)', async () => {
+        const rec = await callOk('start_job', { project: 'HC', title: 'unbaked' })
+        await callOk('append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
+        const res = await callTool('headchef_approve', { job_id: rec.id })
         expect(res.result.isError).toBe(true)
         expect(res.result.content[0].text).toMatch(/not baked/i)
     })
 
-    test('headchef_reject clears cx_approved and removes an admitted recipe from the CX graph', async () => {
-        const rec = await bakedRecipe()
-        await callOk('headchef_approve', { recipe_id: rec.id })
-        expect((await callOk('rebuild_cx_graph', {})).recipe_count).toBe(1)
+    test('headchef_reject clears cx_approved and removes an admitted job from the CX graph', async () => {
+        const rec = await bakedJob()
+        await callOk('headchef_approve', { job_id: rec.id })
+        expect((await callOk('rebuild_cx_graph', {})).job_count).toBe(1)
 
-        const rejected = await callOk('headchef_reject', { recipe_id: rec.id })
+        const rejected = await callOk('headchef_reject', { job_id: rec.id })
         expect(rejected.cx_approved).toBe(false)
-        expect((await callOk('rebuild_cx_graph', {})).recipe_count).toBe(0)
+        expect((await callOk('rebuild_cx_graph', {})).job_count).toBe(0)
     })
 })
 
@@ -307,18 +307,18 @@ describe('bake rule: >= 1 approved ingredient (D64)', () => {
     async function callOk (name, args) { return JSON.parse((await callTool(name, args)).result.content[0].text) }
 
     test('bake without approve_all is REFUSED when no ingredient is approved (no auto-approve)', async () => {
-        const rec = await callOk('start_recipe', { project: 'Bake', title: 'r' })
-        await callOk('append_step', { recipe_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
-        const res = await callTool('bake_recipe', { id: rec.id })
+        const rec = await callOk('start_job', { project: 'Bake', title: 'r' })
+        await callOk('append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
+        const res = await callTool('bake_job', { id: rec.id })
         expect(res.result.isError).toBe(true)
         expect(res.result.content[0].text).toMatch(/no approved ingredients/i)
     })
 
     test('bake succeeds once at least one ingredient is approved', async () => {
-        const rec = await callOk('start_recipe', { project: 'Bake', title: 'r2' })
-        const step = await callOk('append_step', { recipe_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
+        const rec = await callOk('start_job', { project: 'Bake', title: 'r2' })
+        const step = await callOk('append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
         await callOk('approve_step', { step_id: step.id })
-        const res = await callOk('bake_recipe', { id: rec.id })
+        const res = await callOk('bake_job', { id: rec.id })
         expect(res.baked).toBe(true)
     })
 })

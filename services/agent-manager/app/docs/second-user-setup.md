@@ -2,7 +2,7 @@
 
 The connector's data is **owned per-caller**. With a single shared `x-api-key` everyone is
 the same owner (`service-account`) — no personal separation. To give a colleague their own
-identity (their own personal view: own recipes + everyone's approved ones, never your
+identity (their own personal view: own jobs + everyone's approved ones, never your
 drafts), connect them one of two ways. Both use the same **Local MCP server** connection
 in Claude Desktop that Increment 12/D50 established for real capture — no org-admin
 custom-connector approval needed for either path.
@@ -30,7 +30,7 @@ shares a secret, and each person's identity is cryptographically theirs.
 3. `mcp-remote` opens a browser OAuth flow against the configured provider. The second
    user logs in with **their own** account.
 4. Every tool call now carries their Bearer token; `owner` = their `sub`/email — their
-   recipes are theirs, and only their *approved* recipes become visible to others (and to
+   jobs are theirs, and only their *approved* jobs become visible to others (and to
    the Company CX graph).
 
 ## Option B — a mapped API key (quick self-serve demo)
@@ -62,18 +62,18 @@ For a fast demo without setting up a second OAuth login, give the second user th
 
 ## What isolation actually means today
 
-- **Personal view** (`list_recipes`, `list_resources`, `search_resources`,
-  `list_active_tasks`, `list_projects`): a caller sees **their own** recipes/projects plus
-  **anyone's approved** recipes. They never see another owner's experimental drafts.
+- **Personal view** (`list_jobs`, `list_resources`, `search_resources`,
+  `list_active_tasks`, `list_projects`): a caller sees **their own** jobs/projects plus
+  **anyone's approved** jobs. They never see another owner's experimental drafts.
 - **Company CX Graph**: cross-owner, **approved-only** — the consent gate (certify/bake) is
-  what makes a recipe visible to the whole company, regardless of who owns it.
+  what makes a job visible to the whole company, regardless of who owns it.
 - **Admin ("All owners") dashboard view**: an explicit toggle that bypasses personal
-  scoping entirely (`admin_list_recipes`/`admin_list_projects`) so you can watch a second
+  scoping entirely (`admin_list_jobs`/`admin_list_projects`) so you can watch a second
   user's data appear live. It is guarded by naming and by being off-by-default, not by a
   real permission check — that's the honest caveat: **real per-user access control lands
   with per-user RBAC / org rollout**, not in this increment. Until then, anyone with
   dashboard access can flip the admin toggle.
-- **Direct-by-id reads** (`get_resource`/`get_recipe` given a known id) are **not**
+- **Direct-by-id reads** (`get_resource`/`get_job` given a known id) are **not**
   owner-gated — if you already know a specific id, you can read it regardless of owner.
   Isolation today is a *listing/discovery* boundary, not a hard per-record ACL.
 

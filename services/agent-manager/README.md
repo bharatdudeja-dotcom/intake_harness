@@ -11,23 +11,23 @@ failing, and exactly where a human stepped in and decided.
 It began from the TAP Company Cookbook's storage and graph engine and has since
 diverged into its own product — its own domain model, its own MCP surface, its
 own instructions to connected clients. That lineage still shows in some internal
-names (a run is stored with `type: "recipe"`, because renaming a stored value
+names (a run is stored with `type: "job"`, because renaming a stored value
 would orphan every record written before the rename), so this table is the
 translation between what is stored and what things are called.
 
 | Stored as | Called |
 |---|---|
 | Project | Programme |
-| Recipe | Run — one Workfront intake |
+| Job | Run — one Workfront intake |
 | Step / ingredient | Event |
 | Chef | Marketer |
-| Head chef | **Hero Agent** — proposes only, never approves |
+| Head chef | **Oracle** — proposes only, never approves |
 | Practice | Agent — from the registry, never hardcoded |
 | Company CX Graph | Shared Knowledge Graph |
 | Active tasks | Live Queue |
 | Cook-off | removed |
 
-The rule that does not move: **the Hero Agent proposes, a named human decides.**
+The rule that does not move: **the Oracle proposes, a named human decides.**
 Ask "who decided this was true" and the answer is always a person.
 
 ## Layout

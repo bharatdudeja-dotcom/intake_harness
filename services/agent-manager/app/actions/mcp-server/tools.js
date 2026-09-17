@@ -16,18 +16,18 @@ governing permissions and limitations under the License.
  * Host-neutral: no AI-vendor-specific code - any MCP client can call these tools.
  * Storage lives behind lib/store.js (see the // SWAP POINT there for a future backend swap).
  * The Resource Policy (config/resource-policy.json, lib/policy.js) is data, not code - it
- * declares what resource types ("recipe kinds") this connector accepts, their required
+ * declares what resource types ("job kinds") this connector accepts, their required
  * fields, formats, storage routing, and approval rules. save_resource enforces it;
  * get_resource_policy / list_resource_types let any AI learn it.
  *
  * Two dimensions organize every resource (D30/D33): its policy `type` (kind) and its
  * work context `epic -> story -> task` - so the cookbook is browsable by the unit of
- * work that produced a recipe, not just by kind. Work context is declared by the AI or
+ * work that produced a job, not just by kind. Work context is declared by the AI or
  * user (set_work_context / save_resource fields); an issue tracker can populate it
  * later without any coupling here.
  *
  * Everything is EXPERIMENTAL on capture and stays in the Test Kitchen until a human
- * certifies it (D38); only approved recipes enter the cookbook / MCP Resources. Recipes are
+ * certifies it (D38); only approved jobs enter the cookbook / MCP Resources. Jobs are
  * segmented per configurable levels (D39, default Project -> Epic -> Story; project required),
  * updated-in-place by stable id (version++ + history, not duplicated), carry a token counter
  * and an owner (D39/D40). handoff-prompt is exempt from cookbook approval (task_status lifecycle).
@@ -37,15 +37,15 @@ governing permissions and limitations under the License.
  * - get_segmentation_config - the ordered segmentation levels (Project/Epic/Story...)
  * - start_project      - start/select a Project + make it the active work context (D39)
  * - set_work_context   - set the active project + default segment levels for later saves
- * - save_resource      - contribute/UPDATE a recipe (policy-validated, routed, experimental
+ * - save_resource      - contribute/UPDATE a job (policy-validated, routed, experimental
  *                        by default; upsert by stable id -> version++/history; tokens + owner)
- * - find_similar       - find existing recipes before saving, to update not duplicate
+ * - find_similar       - find existing jobs before saving, to update not duplicate
  * - approve_resource / certify - human-consent approval -> approved (records approved_by/at/note)
- * - export_as_skill    - turn an APPROVED recipe into a portable skill/prompt (D31)
- * - list_active_tasks / set_task_status / link_recipes - handoff-prompt task lifecycle (D36)
- * - list_resources     - discover recipes (metadata only), filter by project/kind/tag/status/epic/story/owner
- * - search_resources   - find recipes by keyword, same filters
- * - get_resource       - read a recipe's full content
+ * - export_as_skill    - turn an APPROVED job into a portable skill/prompt (D31)
+ * - list_active_tasks / set_task_status / link_jobs - handoff-prompt task lifecycle (D36)
+ * - list_resources     - discover jobs (metadata only), filter by project/kind/tag/status/epic/story/owner
+ * - search_resources   - find jobs by keyword, same filters
+ * - get_resource       - read a job's full content
  *
  * Also re-exposes captured resources as native MCP Resources (resources/list, resources/read,
  * a resource://company/{type}/{id} template) so any MCP client - not just the one that saved
@@ -128,7 +128,7 @@ function callerHasRole (context, role) {
  * May this caller see other people's SUBMITTED (baked) work? (D86)
  *
  * Head Chefs and admins must, because they cannot review a candidate they cannot open. Nobody else
- * does: a colleague's baked-but-not-yet-admitted recipe is still under review, not yet company
+ * does: a colleague's baked-but-not-yet-admitted job is still under review, not yet company
  * knowledge. Assignment is the separate, explicit route for sharing unfinished work.
  * @param {object} context
  * @returns {boolean}
@@ -145,7 +145,7 @@ function callerCanReview (context) {
  *
  * This exists because filtering the LIST was not enough. Every read-by-id path went straight to
  * storage, so a colleague's private draft was one predictable id away: ids are
- * `recipe-<timestamp>-<slug-of-title>`, and get_resource / get_recipe / list_steps returned the
+ * `job-<timestamp>-<slug-of-title>`, and get_resource / get_job / list_steps returned the
  * whole thing. Enforcing privacy only on enumeration makes it decorative.
  *
  * @param {object} resource full resource
@@ -169,7 +169,7 @@ function callerCanRead (resource, context) {
  * Whether the caller may CHANGE this resource. D88 and D99 closed the read paths, and every
  * mutation was then gated on callerCanRead - which is the wrong rule, because reading and
  * writing are not the same permission. callerCanRead says yes to anything in the CX graph, so
- * everyone could edit the shared recipes nobody owns; and save_resource had no gate at all, so
+ * everyone could edit the shared jobs nobody owns; and save_resource had no gate at all, so
  * a peer who knew an id could overwrite a colleague's private draft, take its authorship (owner
  * was reassigned to the caller unconditionally), and leave the real author unable to read their
  * own work. Sharing something to be read is not consent to have it rewritten.
@@ -192,12 +192,12 @@ function callerCanWrite (resource, context) {
 
 /** The single refusal for a write the caller does not own. */
 function notWritableError (id) {
-    return errorResult(`Refused: '${id}' is not yours to change. You may change your own recipes, and ones where its author has assigned you an ingredient. If you need to work on this, ask its author to assign you an ingredient with assign_step. If you are reviewing it, use headchef_approve or headchef_reject.`)
+    return errorResult(`Refused: '${id}' is not yours to change. You may change your own jobs, and ones where its author has assigned you an ingredient. If you need to work on this, ask its author to assign you an ingredient with assign_step. If you are reviewing it, use headchef_approve or headchef_reject.`)
 }
 
 /** The single refusal message, so every read path says the same thing. */
 function notVisibleError (id) {
-    return errorResult(`No resource visible to you with id '${id}'. It may not exist, or it may be someone else's unfinished work: a recipe becomes readable when its author bakes it and a Head Chef admits it, or when they assign you one of its ingredients.`)
+    return errorResult(`No resource visible to you with id '${id}'. It may not exist, or it may be someone else's unfinished work: a job becomes readable when its author bakes it and a Head Chef admits it, or when they assign you one of its ingredients.`)
 }
 
 /**
@@ -207,15 +207,24 @@ function notVisibleError (id) {
  * against the live registration set in tests.
  */
 const WRITE_TOOLS = new Set([
-    'save_resource', 'start_project', 'start_recipe', 'append_step', 'set_work_context',
+    'save_resource', 'start_project', 'start_job', 'append_step', 'set_work_context',
     'approve_resource', 'certify', 'approve_step', 'approve_steps', 'discard_step',
-    'bake_recipe', 'bake_project', 'set_project_status', 'set_task_status', 'link_recipes',
+    'bake_job', 'bake_project', 'set_project_status', 'set_task_status', 'link_jobs',
     'update_settings', 'set_head_chefs', 'set_user_roles', 'set_practices', 'set_user_practices',
     'headchef_approve', 'headchef_reject',
     'rebuild_cx_graph', 'purge_expired', 'admin_reset_data',
-    'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_recipe', 'assign_step', 'unassign_step', 'set_user_display_name',
+    'create_user', 'set_user_password', 'set_user_enabled', 'change_my_password', 'delete_job', 'assign_step', 'unassign_step', 'set_user_display_name',
     // Starts a run upstream AND writes the captured run here.
     'start_intake',
+    /*
+     * Opens the gate at 1.5, which makes the pipeline run agents and write to
+     * Workfront. As state-changing as anything on this server: a reader able to
+     * call these could send a campaign into the audience build.
+     *
+     * The D79 guard test caught this being absent, which is exactly what it is
+     * for - the gate is only as good as its completeness.
+     */
+    'approve_intake', 'reject_intake',
     // Changes which MCP servers agents can reach, and which upstreams execute them.
     'set_mcp_server', 'set_agent_system'
 ])
@@ -264,13 +273,95 @@ WHAT IT IS FOR
    ledger. get_intake reads one back. The run is created BY the pipeline running - you do
    not assemble it yourself, and you should not append to it to "complete" it.
 
-3. Reading across runs. list_recipes / get_recipe / search_resources answer "has this
+3. Reading across runs. list_jobs / get_job / search_resources answer "has this
    failed before", which no single run can. That is the whole point of the layer: one run
    looks fine, ten runs show the same tool failing every time.
 
 4. Managing MCP servers. list_mcp_servers, set_mcp_server and check_mcp_server register and
    verify the Adobe MCP endpoints (Workfront, AEP, AEM) that agents reach through. Adding a
    server is configuration, never code.
+
+5. Moving a run past the approval at 1.5. approve_intake / reject_intake. See below, because
+   this is the one thing on this server that is easy to get wrong.
+
+YOU REPORT THIS PROCESS. YOU DO NOT DECIDE IT.
+
+The steps, their order and the points where the work waits are fixed by the
+harness. They are not yours to interpret, shorten, or route around, and the
+right behaviour when something is missing or odd is to SAY SO and stop - not to
+offer the person a way past it.
+
+Specifically:
+
+- Do not ask the person whether to proceed past a point where the process waits.
+  It waits on a named thing happening elsewhere, not on their permission for you
+  to continue. Offering "approve and continue, or reject and fix it?" invents a
+  decision that is not in the process, and the answer to it has already been
+  mistaken once for a Workfront approval that had not happened.
+- Do not describe an agent's output in terms of what you would have done. Report
+  what it reported, including the parts that read badly.
+- Do not fill a gap in what you can see with an inference. "I could not read
+  stage 2's output" is a complete and useful answer; guessing from a previous
+  job is not.
+- Do not use our internal step numbers with anyone. They are in the tool
+  descriptions to tell YOU where you are. A marketer has never heard of 2.1 and
+  should be told "the request has been turned into a project", not a coordinate.
+
+THE WORD "APPROVE" MEANS TWO DIFFERENT THINGS HERE. READ THIS.
+
+There are two approvals and they are unrelated. Getting them the wrong way round has already
+produced a wrong outcome: a person said "approved 6aac001e..." naming a Workfront ticket, the
+job was certified into Playbooks, and the run went on sitting at awaiting_approval with
+Agent 2 never invoked. The campaign did not move. Nothing reported an error.
+
+  approve_intake / reject_intake   A decision about THIS REQUEST, at step 1.5 of the
+                                   process. It opens the gate so Agent 2 runs and the
+                                   campaign proceeds. THIS is what someone means when they
+                                   say a brief or a ticket is approved.
+
+  approve_step / bake_job /     A decision about the RECORD of a run - whether it is
+  certify                          worth keeping as knowledge, and whether the Oracle
+                                   may learn from it. It changes NOTHING about whether the
+                                   campaign proceeds.
+
+How to tell which one is meant:
+
+  - A Workfront object id, a ticket, a brief, a request -> approve_intake.
+  - A run sitting at awaiting_approval -> approve_intake. Nothing else moves it.
+  - The words "certify", "playbooks", "knowledge", "worth keeping" -> the job path.
+  - Genuinely unsure -> ask. "Do you mean approve the request so it moves to the audience
+    build, or approve the record of this run for Playbooks?" is one short question and it
+    is cheaper than either mistake.
+
+approve_intake takes the Workfront id directly, so you do not need to make anyone look up a
+run id for something they have already approved.
+
+Neither tool approves anything INSIDE Workfront. A named person clicks Approve in
+Workfront's own Approvals tab; approve_intake records that they did so the pipeline can
+move. Do not claim to have approved a Workfront object.
+
+WHY A RUN MAY SHOW FEWER STAGES THAN YOU EXPECT
+
+An agent behind a closed gate is not called and writes no stage at all. So a run with one
+stage is normal and means "waiting", not "broken" and not "lost". get_intake returns a
+waiting_for field saying which decision is outstanding - report that, and do not describe
+the missing stages as having failed or as having been skipped.
+
+DO NOT TIDY UP. RETRIES ARE THE DATA.
+
+If start_intake comes back needs_input, do not delete the run and try again with different
+wording. Answer the question it asked, or tell the person what it asked for. Every attempt
+stays.
+
+This has already gone wrong: a brief was submitted, returned needs_input twice, was
+rephrased until it passed, and the two failed attempts were then deleted "so you are not
+left with junk runs". What that produced was a store containing one clean run and no trace
+of a parser that had just failed twice. B1 measures agent health by the number of rounds a
+brief takes - "more than two rounds means the agent failed, not the marketer" - so the
+failed attempts are the measurement. Deleting them reports a success that did not happen.
+
+delete_job now refuses agent runs for this reason. Do not force past it to clean up;
+force is for when a human has explicitly told you to remove a run.
 
 WHAT TO DO ABOUT A FAULTED RUN
 
@@ -284,10 +375,12 @@ CAPTURE THAT IS WELCOME HERE
 Only things about a run that already exists:
   - append_step with kind:"steering" and a signal (affirm/reject/correct) to record how a
     human steered or corrected a run. Corrections are the most valuable thing in here.
-  - approve_step / approve_steps to mark the parts of a run worth keeping, then bake_recipe
-    to hand the run to the Hero Agent, which reads it against every earlier run and
-    PROPOSES what should be learned. A named human always decides; the Hero Agent never
+  - approve_step / approve_steps to mark the parts of a run worth keeping, then bake_job
+    to hand the run to the Oracle, which reads it against every earlier run and
+    PROPOSES what should be learned. A named human always decides; the Oracle never
     admits anything to the Shared Knowledge Graph by itself.
+    These are about the RECORD. If someone wants the campaign to proceed, they want
+    approve_intake instead - see the section above.
 
 ALWAYS report provenance on anything you do write: model, tokens_used, and source (which
 client you are, e.g. "desktop-ai", "ide-agent"). An omitted tokens_used is recorded as "not
@@ -296,7 +389,7 @@ reported", never as zero, and shows in the dashboard as missing telemetry.
 HANDING WORK TO ANOTHER TOOL
 
 When you write a prompt meant for another agent or coding tool, save it as a
-"handoff-prompt" with target_agent set, and recipe_id set to the run it belongs to. It then
+"handoff-prompt" with target_agent set, and job_id set to the run it belongs to. It then
 appears in the Live Queue as an open task, can be picked up outside this chat, and is marked
 in_progress/done with set_task_status. That is a pointer to work, not an artifact you made,
 which is why it belongs here and a diagram does not.
@@ -347,9 +440,33 @@ function briefTerms (text) {
  * It reports; it never blocks. A revised offer is a completely legitimate reason
  * for two similar briefs to exist.
  */
+/**
+ * Prior work worth reusing, and near-duplicates worth a second look.
+ *
+ * THESE ARE TWO DIFFERENT QUESTIONS AND THEY USED TO BE ONE.
+ *
+ * This searched every stored run, experimental ones included, and offered them
+ * as prior work. On a real brief that produced: "this exact brief was already
+ * raised - three times today" and a recommendation to reuse a run in which
+ * Agent 3 had built nothing and Agent 2 had swallowed a failed tool call. An
+ * unapproved run is not knowledge. It is a thing that happened, and most of
+ * what happens in a pipeline like this is what we are trying to stop happening.
+ *
+ * So:
+ *
+ *   `similar` (REUSABLE)   approved runs only - the Shared Knowledge Graph. A
+ *                          human certified these, which is exactly what makes
+ *                          them safe to build on.
+ *   `duplicates` (CAUTION) unapproved runs that look like this brief. NOT
+ *                          offered as prior work. They answer a different and
+ *                          still-useful question: "are you about to raise a
+ *                          fourth Workfront ticket for this?"
+ *
+ * Conflating them meant the caution was dressed up as a recommendation.
+ */
 async function findSimilarRuns (brief, project, context) {
     const terms = briefTerms(brief)
-    if (terms.size < 3) return []
+    if (terms.size < 3) return { similar: [], duplicates: [] }
 
     const entries = await store.listResources({
         visibleTo: resolvePrincipal(context),
@@ -359,7 +476,8 @@ async function findSimilarRuns (brief, project, context) {
     const money = (text) => [...new Set(String(text || '').match(/\$\s?\d[\d,]*|\b\d[\d,]*\s*(?:dollar|usd)s?\b/gi) || [])]
     const mine = money(brief)
 
-    const out = []
+    const similar = []
+    const duplicates = []
     for (const entry of entries) {
         if (!entry.upstream) continue
         if (project && entry.project && entry.project !== project) continue
@@ -379,8 +497,8 @@ async function findSimilarRuns (brief, project, context) {
         const differing = mine.filter(m => theirs.length && !theirs.includes(m))
             .concat(theirs.filter(t => mine.length && !mine.includes(t)))
 
-        out.push({
-            recipe_id: entry.id,
+        const row = {
+            job_id: entry.id,
             title: entry.title,
             created: entry.created,
             overlap: Math.round(overlap * 100) / 100,
@@ -388,10 +506,141 @@ async function findSimilarRuns (brief, project, context) {
             differing_figures: [...new Set(differing)],
             agents: entry.agents || [],
             faulted: entry.agent_faults || []
-        })
+        }
+
+        if (statusLib.isApproved(entry.status)) similar.push(row)
+        else duplicates.push({ ...row, status: 'experimental' })
     }
-    out.sort((a, b) => b.overlap - a.overlap)
-    return out.slice(0, 5)
+    similar.sort((a, b) => b.overlap - a.overlap)
+    duplicates.sort((a, b) => b.overlap - a.overlap)
+    return { similar: similar.slice(0, 5), duplicates: duplicates.slice(0, 5) }
+}
+
+/**
+ * Is this Workfront record actually approved, according to Workfront?
+ *
+ * Reads the object and looks at its status. Workfront encodes a pending
+ * approval as a `:A` suffix on the status code - an issue submitted for
+ * approval reads `INP:A` (In Progress, Pending Approval) - and drops the suffix
+ * once the approval clears. `:R` is rejected.
+ *
+ * Returns a tri-state, and the middle one matters most: `null` means the check
+ * could not be performed, and the caller treats that as NOT approved. Failing
+ * open here would restore exactly the hole this closes, because the easiest way
+ * to get a false approval past a checker is to break the checker.
+ */
+async function workfrontApprovalState (objCode, objId) {
+    const entity = objCode === 'PROJ' ? 'project' : 'issue'
+    let summary
+    try {
+        summary = await mcpGateway.callProxied(
+            'workfront-adobe__insights_summarize_object',
+            {
+                entity,
+                object_id: objId,
+                intent: 'Check whether this intake request has actually been approved before letting the pipeline continue.'
+            },
+            settings.mcpServers()
+        )
+    } catch (e) {
+        return { approved: null, status: null, detail: `Workfront could not be read: ${e.message}` }
+    }
+
+    const markdown = (summary && typeof summary === 'object' && typeof summary.markdown === 'string')
+        ? summary.markdown
+        : (typeof summary === 'string' ? summary : JSON.stringify(summary || {}))
+
+    const status = (markdown.match(/\*\*Status\*\*:\s*([A-Z]{2,4}(?::[A-Z])?)/) || [])[1] || null
+    // Workfront hands back its own deep link. Preferred over building one,
+    // because it is right even if our tenant configuration is not.
+    const url = (markdown.match(/\]\((https:\/\/[^)\s]+)\)/) || [])[1] || null
+
+    /*
+     * The update log, newest first. The FIRST line that speaks to approval is
+     * the current state; earlier lines are history.
+     */
+    const events = markdown.split('\n').filter(l => /approved this|submitted this to approval|rejected this/i.test(l))
+    const latest = events[0] || null
+
+    if (latest && /rejected this/i.test(latest)) {
+        return { approved: false, status, url, detail: `Workfront records a REJECTION: ${latest.trim()}` }
+    }
+    if (latest && /approved this/i.test(latest)) {
+        return { approved: true, status, url, detail: `Workfront records the approval: ${latest.trim()}` }
+    }
+    if (/:A$/.test(status || '') || (latest && /submitted this to approval/i.test(latest))) {
+        return {
+            approved: false,
+            status,
+            url,
+            detail: `Workfront reports "${status}" - submitted for approval and still waiting on an approver.`
+        }
+    }
+
+    /*
+     * No approval history at all. NOT approved, and the distinction matters:
+     * this is a request nobody has put into approval yet, which is the normal
+     * state of one an agent created a moment ago.
+     */
+    return {
+        approved: false,
+        status,
+        url,
+        detail:
+            `Workfront reports "${status}" and its update log records no approval at all - this request ` +
+            'has not been submitted for approval yet, let alone approved.'
+    }
+}
+
+/**
+ * A link to the record, so "go and approve it" names a place.
+ *
+ * Built from whichever Workfront MCP server is registered, so the tenant
+ * follows the configuration rather than being written in here.
+ */
+function workfrontLink (objCode, objId) {
+    const servers = mcpServers.list(settings.mcpServers())
+    const wf = servers.find(x => x.practice === 'workfront' && x.instance) || servers.find(x => x.instance)
+    return wf ? narrate.workfrontUrl(objCode, objId, wf.instance) : null
+}
+
+/**
+ * The run a Workfront object belongs to.
+ *
+ * Checks the rolled-up catalog first, which covers every run captured since
+ * workfront_refs existed. Runs captured before it fall back to a scan of their
+ * own artifacts - slower, and it means an older run is still addressable by the
+ * id on its ticket rather than being unreachable because of when it was made.
+ */
+async function findRunByWorkfrontId (objId, context) {
+    const wanted = String(objId || '').trim().toLowerCase()
+    if (!wanted) return null
+
+    const entries = await store.listResources({
+        visibleTo: resolvePrincipal(context),
+        visibleSubmitted: callerCanReview(context)
+    }).catch(() => [])
+
+    const runs = entries.filter(e => e.upstream)
+
+    for (const e of runs) {
+        const refs = e.workfront_refs || []
+        if (refs.some(r => String(r.objId).toLowerCase() === wanted)) return e.id
+    }
+
+    // Older runs, projected before the rollup existed.
+    for (const e of runs) {
+        if (e.workfront_refs) continue
+        const full = await store.getResource(e.id).catch(() => null)
+        if (!full) continue
+        for (const st of (full.steps || [])) {
+            const payload = st.provenance && st.provenance.upstream_payload
+            if (!payload) continue
+            if (narrate.findWorkfrontRefs(payload.output)
+                .some(r => String(r.objId).toLowerCase() === wanted)) return e.id
+        }
+    }
+    return null
 }
 
 /**
@@ -456,19 +705,19 @@ function errorResult (message) {
 }
 
 /**
- * Recompute a recipe's flat projection from its steps (D45/D47) and attach the steps.
- * `status` is step-derived (experimental/approved) UNLESS the recipe has been baked
+ * Recompute a job's flat projection from its steps (D45/D47) and attach the steps.
+ * `status` is step-derived (experimental/approved) UNLESS the job has been baked
  * (D47), in which case `baked` is the source of truth and status shows "baked" - which
- * canonicalizes to "approved" for cookbook/MCP-resource exposure, so a baked recipe stays
+ * canonicalizes to "approved" for cookbook/MCP-resource exposure, so a baked job stays
  * visible even if a later experimental step or a retention purge would otherwise recompute
  * it. Timestamps are only touched when `now` is passed (save_resource preserves its own).
  * @param {object} resource
  * @param {object[]} steps
  * @param {string} [now] ISO timestamp; when given, updates updated/updated_at
  */
-function projectRecipe (resource, steps, now) {
+function projectJob (resource, steps, now) {
     resource.steps = steps
-    resource.status = resource.baked ? 'baked' : stepsLib.recipeStatusFromSteps(steps)
+    resource.status = resource.baked ? 'baked' : stepsLib.jobStatusFromSteps(steps)
     resource.content = stepsLib.composeContent(steps)
     const tokens = stepsLib.aggregateTokens(steps)
     resource.tokens_used = tokens.total
@@ -476,7 +725,7 @@ function projectRecipe (resource, steps, now) {
     resource.models_used = stepsLib.aggregateModels(steps)
     resource.step_count = steps.filter(s => s.status !== 'discarded').length
     resource.expires_at = stepsLib.earliestExpiry(steps) // earliest experimental-step expiry (D48 Home/Work Log lens)
-    // D86: everyone assigned on any live ingredient. Rolled up to the recipe because visibility is
+    // D86: everyone assigned on any live ingredient. Rolled up to the job because visibility is
     // decided from the catalog, and a discarded ingredient must not keep granting access.
     const assignees = new Set()
     for (const s of steps) {
@@ -489,7 +738,7 @@ function projectRecipe (resource, steps, now) {
      *
      * The catalog is what every list view reads, and it carried no trace of the
      * agents at all - so "which runs has the review agent worked on" and "what
-     * stage is this run on" were unanswerable without loading every recipe and
+     * stage is this run on" were unanswerable without loading every job and
      * its steps. A rollup, exactly like models_used: derived, never authored.
      *
      * The artifact tags an agent step as ['agent', <id>] and adds
@@ -514,6 +763,27 @@ function projectRecipe (resource, steps, now) {
     // appended - not alphabetical, and not the registry's order.
     resource.agents = agentsSeen.length ? agentsSeen : undefined
     resource.agent_faults = faulted.size ? [...faulted] : undefined
+
+    /*
+     * Every Workfront object this run created, rolled up for lookup.
+     *
+     * A person approves a ticket in Workfront and then says "approved
+     * 6aac001e0008d40c0ba4389f1247ad36" - the id they can see. They do not have
+     * the Agent Manager run id, and asking them for it to approve something they
+     * have already approved is the kind of friction that stops the gate being
+     * used at all. So the ids travel into the catalog and approve_intake takes
+     * either one.
+     */
+    const refs = []
+    for (const st of steps) {
+        if (st.status === 'discarded') continue
+        const payload = st.provenance && st.provenance.upstream_payload
+        if (!payload) continue
+        for (const r of narrate.findWorkfrontRefs(payload.output)) {
+            if (!refs.some(x => x.objId === r.objId)) refs.push(r)
+        }
+    }
+    resource.workfront_refs = refs.length ? refs : undefined
     if (now) { resource.updated = now; resource.updated_at = now }
 }
 
@@ -623,27 +893,27 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'save_resource',
-        `Record a run. Validated against the resource policy (call get_resource_policy for all kinds); routed to that kind's storage automatically. Everything is saved EXPERIMENTAL and stays experimental until a human certifies it - only then does it enter the shared cookbook (handoff-prompt is exempt - it uses task_status, not certification). project is required (start a project with start_project or set_work_context); other segment levels (${SEGMENT_LEVEL_KEYS.join(', ')}) are auto-filled. To refine earlier work, pass the existing recipe's id to UPDATE it in place (new version) - do not create a duplicate. Current kinds: ${POLICY_TYPE_IDS.join(', ')}.`,
+        `Record a run. Validated against the resource policy (call get_resource_policy for all kinds); routed to that kind's storage automatically. Everything is saved EXPERIMENTAL and stays experimental until a human certifies it - only then does it enter the shared cookbook (handoff-prompt is exempt - it uses task_status, not certification). project is required (start a project with start_project or set_work_context); other segment levels (${SEGMENT_LEVEL_KEYS.join(', ')}) are auto-filled. To refine earlier work, pass the existing job's id to UPDATE it in place (new version) - do not create a duplicate. Current kinds: ${POLICY_TYPE_IDS.join(', ')}.`,
         {
             type: z.enum(POLICY_TYPE_IDS).describe('Resource kind id - see get_resource_policy for the full list'),
-            title: z.string().min(1).describe('Short, descriptive title for the recipe'),
-            content: z.string().min(1).describe('The full content of the recipe'),
+            title: z.string().min(1).describe('Short, descriptive title for the job'),
+            content: z.string().min(1).describe('The full content of the job'),
             format: z.string().optional().describe('Content format - must be one the kind allows; optional if the kind allows only one format'),
-            id: z.string().regex(/^[a-z0-9][a-z0-9._-]{2,160}$/i).optional().describe('Stable recipe id. If a recipe with this id exists it is UPDATED in place (version++, prior version kept in history); otherwise created with this id. Omit for a generated id. Pass the existing id when refining earlier work - do NOT create a new recipe.'),
-            project: z.string().optional().describe('Project this recipe belongs to (required unless set via start_project/set_work_context, or the kind is handoff-prompt)'),
+            id: z.string().regex(/^[a-z0-9][a-z0-9._-]{2,160}$/i).optional().describe('Stable job id. If a job with this id exists it is UPDATED in place (version++, prior version kept in history); otherwise created with this id. Omit for a generated id. Pass the existing id when refining earlier work - do NOT create a new job.'),
+            project: z.string().optional().describe('Project this job belongs to (required unless set via start_project/set_work_context, or the kind is handoff-prompt)'),
             epic: z.string().optional().describe('Segment level: epic (defaults to the set_work_context value)'),
             story: z.string().optional().describe('Segment level: story (defaults to the set_work_context value)'),
             task: z.string().optional().describe('Optional task label within the story'),
             segments: z.record(z.string(), z.string()).optional().describe('Segment level values keyed by configured level key (see get_segmentation_config) - an alternative to the project/epic/story arguments'),
             tags: z.array(z.string()).optional().describe('Optional list of tags for discovery'),
             fields: z.record(z.string(), z.any()).optional().describe("Additional kind-specific fields required by the policy (e.g. 'system' for architecture-diagram), plus free-form provenance (source, session...)"),
-            tokens_used: z.number().int().nonnegative().optional().describe('Tokens this save consumed (best-effort, AI-reported). Accumulated across a recipe\'s revisions.'),
+            tokens_used: z.number().int().nonnegative().optional().describe('Tokens this save consumed (best-effort, AI-reported). Accumulated across a job\'s revisions.'),
             model: z.string().optional().describe('Free-text model identifier that produced this content (vendor-neutral), e.g. "opus-4.8". Shown per step in the dashboard.'),
-            recipe_id: z.string().optional().describe('For kind "handoff-prompt": the id of the task-thread Recipe this prompt belongs to, so the agent that picks it up appends its work to the same recipe (get_active_recipe / start_recipe).'),
+            job_id: z.string().optional().describe('For kind "handoff-prompt": the id of the task-thread Job this prompt belongs to, so the agent that picks it up appends its work to the same job (get_active_job / start_job).'),
             target_agent: z.string().optional().describe('For kind "handoff-prompt": which agent or coding tool this prompt is for - see get_resource_policy\'s target_agents hint'),
             task_status: z.enum(TASK_STATUSES).optional().describe('For kind "handoff-prompt": the task lifecycle status - defaults to "open"')
         },
-        async ({ type, title, content, format, id, project, epic, story, task, segments, tags, fields, tokens_used: tokensDelta, model, recipe_id: recipeId, target_agent: targetAgent, task_status: taskStatus }) => {
+        async ({ type, title, content, format, id, project, epic, story, task, segments, tags, fields, tokens_used: tokensDelta, model, job_id: jobId, target_agent: targetAgent, task_status: taskStatus }) => {
             /*
              * A handoff-prompt is a POINTER to work somebody else will do, not a
              * record of a conversation, and the server instructions actively ask
@@ -718,7 +988,7 @@ function registerTools (server, context = {}) {
             let updatedAt
             let existed = false
             let reapproved = false
-            let linkedRecipes
+            let linkedJobs
 
             if (existing) {
                 // An id is a guessable string, so "pass the same id to update in place" was also
@@ -727,7 +997,7 @@ function registerTools (server, context = {}) {
                 existed = true
                 created = existing.created || now
                 updatedAt = now
-                linkedRecipes = existing.linked_recipes
+                linkedJobs = existing.linked_jobs
                 // Authorship belongs to whoever did the work, not to whoever touched it last.
                 ownerFinal = existing.owner || owner
                 authorFinal = existing.author || author
@@ -755,7 +1025,7 @@ function registerTools (server, context = {}) {
                         tokens_used: existing.tokens_used
                     })
                     if (statusLib.isApproved(existing.status) && REAPPROVE_ON_CHANGE) {
-                        // Re-consent on material change (D38): an approved recipe returns to
+                        // Re-consent on material change (D38): an approved job returns to
                         // experimental; its prior approval is preserved in history above.
                         status = statusLib.EXPERIMENTAL
                         reapproved = true
@@ -786,38 +1056,38 @@ function registerTools (server, context = {}) {
                 tokens_used: tokensTotal, tokens_last: tokensLast,
                 storage: policyEntry.storage,
                 target_agent: targetAgent, task_status: taskStatus,
-                recipe_id: recipeId !== undefined ? recipeId : (existing ? existing.recipe_id : undefined),
+                job_id: jobId !== undefined ? jobId : (existing ? existing.job_id : undefined),
                 baked: existing ? existing.baked : undefined,
                 baked_at: existing ? existing.baked_at : undefined,
                 baked_by: existing ? existing.baked_by : undefined,
                 // CX-graph admission MUST survive an update-in-place (D79 bugfix). This object is a
                 // full rebuild, so any field not carried over here is silently DROPPED - and losing
-                // cx_approved silently evicted an already-admitted recipe from the Company CX Graph
+                // cx_approved silently evicted an already-admitted job from the Company CX Graph
                 // the next time anyone refined it. Found by the E2E validation, not by a unit test,
                 // because it only shows up in the save -> headchef_approve -> save-again sequence.
                 cx_approved: existing ? existing.cx_approved : undefined,
                 cx_approved_by: existing ? existing.cx_approved_by : undefined,
                 cx_approved_at: existing ? existing.cx_approved_at : undefined,
                 // Practice/capability group (D79): preserved on update, inherited from the
-                // consultant's own practice on create - same rule as start_recipe, so a recipe
+                // consultant's own practice on create - same rule as start_job, so a job
                 // never silently loses the discipline that makes it findable.
                 practice: existing ? existing.practice : (settings.defaultPracticeFor(owner) || undefined),
-                linked_recipes: linkedRecipes,
+                linked_jobs: linkedJobs,
                 history: history && history.length ? history : undefined
             }
 
             // Increment 11 (D45): save_resource is a back-compat wrapper that always
-            // targets a recipe's step at order 0. Everything above is unchanged from
+            // targets a job's step at order 0. Everything above is unchanged from
             // Increment 9/10 (version/history/reapprove-on-change/tokens computed exactly
-            // as before) so the single-step case - every recipe created this way, and all
-            // 65 migrated recipes - behaves identically. Composing status/content/tokens
-            // across ALL of the recipe's steps (not just step 0) keeps a recipe correct if
+            // as before) so the single-step case - every job created this way, and all
+            // 65 migrated jobs - behaves identically. Composing status/content/tokens
+            // across ALL of the job's steps (not just step 0) keeps a job correct if
             // it later grows via append_step.
             const priorSteps = existing ? stepsLib.ensureSteps(existing) : []
             const priorStep0 = priorSteps.find(s => s.order === 0)
             const step0 = {
                 id: stepsLib.makeStepId(id, 0),
-                recipe_id: id,
+                job_id: id,
                 order: 0,
                 source: (priorStep0 && priorStep0.source) || (fields && fields.source) || 'unknown',
                 model: model !== undefined ? model : (priorStep0 ? priorStep0.model : undefined),
@@ -839,17 +1109,17 @@ function registerTools (server, context = {}) {
             }
             const allSteps = [step0, ...priorSteps.filter(s => s.order !== 0)]
             // step0.status already carries save_resource's version/history-aware value
-            // (incl. reapprove-on-change); projectRecipe derives the recipe-level status
+            // (incl. reapprove-on-change); projectJob derives the job-level status
             // from all steps (honoring bake) and composes content/tokens/models/step_count.
-            projectRecipe(resource, allSteps)
+            projectJob(resource, allSteps)
 
             await store.saveResource(resource)
 
             // D84: warn when this looks like a SIBLING of work just captured - one working thread
-            // that produced several artifacts. save_resource creates one recipe per call, so an AI
+            // that produced several artifacts. save_resource creates one job per call, so an AI
             // saving an architecture-diagram and then an architecture-doc for the same task ends up
-            // with two 1-ingredient recipes instead of one recipe with two ingredients. Observed
-            // live: two recipes 20 seconds apart, same project, same subject, one baked and one not,
+            // with two 1-ingredient jobs instead of one job with two ingredients. Observed
+            // live: two jobs 20 seconds apart, same project, same subject, one baked and one not,
             // which made the work look half-finished to its author and to the Head Chef. This does
             // not block the save - guessing wrong must not lose someone's work - it tells the caller
             // what to do instead.
@@ -871,7 +1141,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'start_project',
-        'Start (or select) a Project - the top segmentation level. Call this at the start of a new, unrelated conversation and name it, so its recipes stay separate from other work. Sets the active project for subsequent save_resource calls and returns the project id.',
+        'Start (or select) a Project - the top segmentation level. Call this at the start of a new, unrelated conversation and name it, so its jobs stay separate from other work. Sets the active project for subsequent save_resource calls and returns the project id.',
         {
             name: z.string().min(1).describe('A short, descriptive project name'),
             note: z.string().optional().describe('Optional note describing the project')
@@ -902,7 +1172,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'get_segmentation_config',
-        'Get the configured segmentation levels (ordered { key, label }) - how recipes are organized by unit of work. project is the required top level; the rest are auto-filled. Labels reflect any Settings overrides (D48).',
+        'Get the configured segmentation levels (ordered { key, label }) - how jobs are organized by unit of work. project is the required top level; the rest are auto-filled. Labels reflect any Settings overrides (D48).',
         {},
         async () => {
             const base = segmentation.getConfig()
@@ -913,13 +1183,13 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'find_similar',
-        'Find existing recipes similar to a title or snippet BEFORE saving, so you update the right recipe instead of creating a near-duplicate. Returns lightweight matches (id, title, kind, status, segments).',
+        'Find existing jobs similar to a title or snippet BEFORE saving, so you update the right job instead of creating a near-duplicate. Returns lightweight matches (id, title, kind, status, segments).',
         {
-            query: z.string().min(1).describe('A title or snippet to match against existing recipes'),
+            query: z.string().min(1).describe('A title or snippet to match against existing jobs'),
             project: z.string().optional().describe('Restrict to a project (recommended - scope to the current work)')
         },
         async ({ query, project }) => {
-            // D99: scoped like every other search. Before this it returned any recipe in the
+            // D99: scoped like every other search. Before this it returned any job in the
             // company, so a caller could discover a colleague's private work by guessing words.
             const matches = await store.searchResources(query, {
                 ...(project ? { project } : {}),
@@ -939,7 +1209,7 @@ function registerTools (server, context = {}) {
      * @returns {Promise<object>}
      */
     /**
-     * Look for a recipe by the same owner, in the same project, created in the last few minutes,
+     * Look for a job by the same owner, in the same project, created in the last few minutes,
      * whose title covers the same subject - i.e. almost certainly another artifact from the SAME
      * working thread (D84).
      *
@@ -970,9 +1240,9 @@ function registerTools (server, context = {}) {
             // Two or more shared meaningful words, and most of the shorter title in common.
             if (shared.length >= 2 && shared.length >= Math.min(mine.size, theirs.size) * 0.5) {
                 return `This looks like a second artifact from the same work as '${r.id}' ("${r.title}"), created minutes ago in the same project. ` +
-                    'Both are now SEPARATE recipes with one ingredient each, which splits one piece of work in two: each looks half-finished, and each has to be curated and baked on its own. ' +
-                    `If they belong together, capture the rest as INGREDIENTS of one recipe instead: append_step({recipe_id: '${r.id}', kind: 'diagram'|'doc'|'code'|..., content, model, tokens_used}). ` +
-                    'Use save_resource for a NEW, distinct piece of work, or with an EXISTING id to refine that recipe in place.'
+                    'Both are now SEPARATE jobs with one ingredient each, which splits one piece of work in two: each looks half-finished, and each has to be curated and baked on its own. ' +
+                    `If they belong together, capture the rest as INGREDIENTS of one job instead: append_step({job_id: '${r.id}', kind: 'diagram'|'doc'|'code'|..., content, model, tokens_used}). ` +
+                    'Use save_resource for a NEW, distinct piece of work, or with an EXISTING id to refine that job in place.'
             }
         }
         return undefined
@@ -984,12 +1254,12 @@ function registerTools (server, context = {}) {
             return errorResult(`No resource found with id '${id}'`)
         }
         if (resource.type === HANDOFF_TYPE) {
-            return errorResult(`Resource '${id}' is a handoff-prompt, not a cookbook recipe - handoffs use set_task_status, not certification`)
+            return errorResult(`Resource '${id}' is a handoff-prompt, not a cookbook job - handoffs use set_task_status, not certification`)
         }
         if (!callerCanWrite(resource, context)) return notWritableError(id)
-        // Idempotent, not an error (D79): approving any step already promotes the recipe, so a
+        // Idempotent, not an error (D79): approving any step already promotes the job, so a
         // caller following the documented capture -> approve -> certify order would otherwise hit
-        // a hard failure for asking for a state the recipe is already in. The intent is satisfied;
+        // a hard failure for asking for a state the job is already in. The intent is satisfied;
         // say so, and flag that nothing changed so an agent does not report a fresh consent.
         if (statusLib.isApproved(resource.status)) {
             return jsonResult({
@@ -1008,8 +1278,8 @@ function registerTools (server, context = {}) {
         resource.approved_by = principal
         if (note) resource.approval_note = note
 
-        // Keep step 0 in sync (D45) so the ordered-step views (get_recipe/list_steps)
-        // agree with this legacy, whole-recipe consent record.
+        // Keep step 0 in sync (D45) so the ordered-step views (get_job/list_steps)
+        // agree with this legacy, whole-job consent record.
         const steps = stepsLib.ensureSteps(resource)
         const step0 = steps.find(s => s.order === 0)
         if (step0) {
@@ -1019,7 +1289,7 @@ function registerTools (server, context = {}) {
             if (note) step0.approval_note = note
             step0.expires_at = undefined
         }
-        projectRecipe(resource, steps, now)
+        projectJob(resource, steps, now)
 
         await store.saveResource(resource)
         return jsonResult({ id, status: resource.status, approved_by: principal, approved_at: now, ...(note ? { approval_note: note } : {}) })
@@ -1027,18 +1297,18 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'approve_resource',
-        'Certify an experimental recipe as a human consent, promoting it to "approved" so it enters Playbooks. Records who approved it and when. (Alias: certify.)',
+        'Certify an experimental job as a human consent, promoting it to "approved" so it enters Playbooks. Records who approved it and when. (Alias: certify.)',
         {
-            id: z.string().min(1).describe('The recipe id to approve')
+            id: z.string().min(1).describe('The job id to approve')
         },
         async ({ id }) => certifyHandler(id)
     )
 
     server.tool(
         'certify',
-        'Certify (approve) an experimental recipe - a human consent that promotes it into Playbooks, recording approved_by, approved_at, and an optional note. Same effect as approve_resource, with a note.',
+        'Certify (approve) an experimental job - a human consent that promotes it into Playbooks, recording approved_by, approved_at, and an optional note. Same effect as approve_resource, with a note. NOT the process approval at 1.5: this changes whether the RECORD is kept as knowledge, and nothing about whether the campaign proceeds. If a run is sitting at awaiting_approval, the tool that moves it is approve_intake.',
         {
-            id: z.string().min(1).describe('The recipe id to certify'),
+            id: z.string().min(1).describe('The job id to certify'),
             note: z.string().optional().describe('Optional consent note (why it is being certified)')
         },
         async ({ id, note }) => certifyHandler(id, note)
@@ -1046,29 +1316,29 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'export_as_skill',
-        `Export a certified (house) recipe as a portable skill/prompt any AI can consume (D31). For a multi-step recipe this is the end-to-end REPLAY: its approved steps in order (prompts, decisions, code, diagram/image references) so another AI can redo the task (D47). Only approved/baked recipes can be exported - an experimental one must be certified or baked first. Formats: ${skills.describeFormats()}.`,
+        `Export a certified (house) job as a portable skill/prompt any AI can consume (D31). For a multi-step job this is the end-to-end REPLAY: its approved steps in order (prompts, decisions, code, diagram/image references) so another AI can redo the task (D47). Only approved/baked jobs can be exported - an experimental one must be certified or baked first. Formats: ${skills.describeFormats()}.`,
         {
-            recipe_id: z.string().min(1).describe('The recipe id to export, as returned by save_resource or list_resources'),
+            job_id: z.string().min(1).describe('The job id to export, as returned by save_resource or list_resources'),
             format: z.enum(skills.listFormats()).optional().describe('Export format - defaults to "prompt" (portable, any AI)')
         },
-        async ({ recipe_id: recipeId, format }) => {
-            const resource = await store.getResource(recipeId)
+        async ({ job_id: jobId, format }) => {
+            const resource = await store.getResource(jobId)
             if (!resource) {
-                return errorResult(`No recipe found with id '${recipeId}'`)
+                return errorResult(`No job found with id '${jobId}'`)
             }
-            if (!callerCanRead(resource, context)) return notVisibleError(recipeId)
+            if (!callerCanRead(resource, context)) return notVisibleError(jobId)
             try {
                 // Export the APPROVED-steps view (D45), not the full working log - a
-                // multi-step recipe may still carry unreviewed drafts. A recipe with more
+                // multi-step job may still carry unreviewed drafts. A job with more
                 // than one approved step exports as an ordered end-to-end replay walkthrough
-                // (D47); a single-step recipe exports its plain content as before.
+                // (D47); a single-step job exports its plain content as before.
                 const allSteps = stepsLib.ensureSteps(resource)
                 const approvedSteps = allSteps.filter(s => s.status !== 'discarded' && statusLib.isApproved(s.status))
                 const content = approvedSteps.length > 1
                     ? stepsLib.composeReplay(allSteps, { approvedOnly: true })
                     : stepsLib.composeContent(allSteps, { approvedOnly: true })
                 const approvedView = { ...resource, content }
-                return jsonResult(skills.exportRecipe(approvedView, format))
+                return jsonResult(skills.exportJob(approvedView, format))
             } catch (e) {
                 return errorResult(e.message)
             }
@@ -1093,7 +1363,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'set_task_status',
-        'Move a handoff-prompt through its task lifecycle: open -> in_progress -> done. This is independent of the recipe\'s approval status.',
+        'Move a handoff-prompt through its task lifecycle: open -> in_progress -> done. This is independent of the job\'s approval status.',
         {
             id: z.string().min(1).describe('The handoff-prompt id'),
             status: z.enum(TASK_STATUSES).describe('The new task status')
@@ -1113,26 +1383,26 @@ function registerTools (server, context = {}) {
     )
 
     server.tool(
-        'link_recipes',
-        'Record lineage from a handoff-prompt to the recipe(s) it produced, once the handed-off work is done - builds the brainstorm -> build -> outcome graph (D36).',
+        'link_jobs',
+        'Record lineage from a handoff-prompt to the job(s) it produced, once the handed-off work is done - builds the brainstorm -> build -> outcome graph (D36).',
         {
             handoff_id: z.string().min(1).describe('The handoff-prompt id'),
-            recipe_ids: z.array(z.string().min(1)).min(1).describe('The id(s) of recipes this handoff produced')
+            job_ids: z.array(z.string().min(1)).min(1).describe('The id(s) of jobs this handoff produced')
         },
-        async ({ handoff_id: handoffId, recipe_ids: recipeIds }) => {
+        async ({ handoff_id: handoffId, job_ids: jobIds }) => {
             const handoff = await store.getResource(handoffId)
             if (!handoff) {
                 return errorResult(`No resource found with id '${handoffId}'`)
             }
             if (handoff.type !== 'handoff-prompt') {
-                return errorResult(`Resource '${handoffId}' is a '${handoff.type}', not a handoff-prompt - link_recipes only applies to handoff-prompts`)
+                return errorResult(`Resource '${handoffId}' is a '${handoff.type}', not a handoff-prompt - link_jobs only applies to handoff-prompts`)
             }
             if (!callerCanWrite(handoff, context)) return notWritableError(handoffId)
-            const existing = new Set(handoff.linked_recipes || [])
-            for (const recipeId of recipeIds) existing.add(recipeId)
-            handoff.linked_recipes = [...existing]
+            const existing = new Set(handoff.linked_jobs || [])
+            for (const jobId of jobIds) existing.add(jobId)
+            handoff.linked_jobs = [...existing]
             await store.saveResource(handoff)
-            return jsonResult({ id: handoffId, linked_recipes: handoff.linked_recipes })
+            return jsonResult({ id: handoffId, linked_jobs: handoff.linked_jobs })
         }
     )
 
@@ -1141,17 +1411,17 @@ function registerTools (server, context = {}) {
         'Discover runs in Playbooks. Returns metadata only (no full content) - use get_resource to read one. Filters are project-scoped by intent: pass a project to see just that project\'s work. Status filter accepts experimental/approved (pending/active still work as aliases).',
         {
             project: z.string().optional().describe('Filter by project'),
-            type: z.enum(POLICY_TYPE_IDS).optional().describe('Filter by recipe kind'),
+            type: z.enum(POLICY_TYPE_IDS).optional().describe('Filter by job kind'),
             tag: z.string().optional().describe('Filter by tag'),
             status: z.enum(['experimental', 'approved', 'pending', 'active']).optional().describe('Filter by approval status (experimental/approved; pending/active are aliases)'),
             epic: z.string().optional().describe('Filter by epic segment'),
             story: z.string().optional().describe('Filter by story segment'),
             practice: z.string().optional().describe('Filter by practice / capability group (aem, aep, braze, campaign - see list_practices)'),
-            owner: z.string().optional().describe('Filter by owner (the identity that captured the recipe)')
+            owner: z.string().optional().describe('Filter by owner (the identity that captured the job)')
         },
         async ({ project, type, tag, status, epic, story, owner, practice }) => {
             // Multi-tenant isolation (D53): a personal listing returns the caller's own
-            // recipes plus approved (cross-owner-visible) ones. On the x-api-key path the
+            // jobs plus approved (cross-owner-visible) ones. On the x-api-key path the
             // caller is the single service principal, so this is a no-op until per-user OAuth.
             const entries = await store.listResources({ project, type, tag, status, epic, story, owner, practice, visibleTo: resolvePrincipal(context), visibleSubmitted: callerCanReview(context) })
             return jsonResult(entries)
@@ -1160,11 +1430,11 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'search_resources',
-        'Find recipes by keyword (case-insensitive over title, tags, and content), optionally scoped by project/kind/status/segment/owner. Search here BEFORE saving to update an existing recipe instead of duplicating it.',
+        'Find jobs by keyword (case-insensitive over title, tags, and content), optionally scoped by project/kind/status/segment/owner. Search here BEFORE saving to update an existing job instead of duplicating it.',
         {
             query: z.string().min(1).describe('Keyword or phrase to search for'),
             project: z.string().optional().describe('Filter by project'),
-            type: z.enum(POLICY_TYPE_IDS).optional().describe('Filter by recipe kind'),
+            type: z.enum(POLICY_TYPE_IDS).optional().describe('Filter by job kind'),
             status: z.enum(['experimental', 'approved', 'pending', 'active']).optional().describe('Filter by approval status (experimental/approved; pending/active are aliases)'),
             epic: z.string().optional().describe('Filter by epic segment'),
             story: z.string().optional().describe('Filter by story segment'),
@@ -1193,18 +1463,18 @@ function registerTools (server, context = {}) {
         }
     )
 
-    // --- Ordered Step/Recipe model (Increment 11, D45) ---------------------------------
-    // A Recipe is an ordered container of Steps within a Project. The experimental recipe
+    // --- Ordered Step/Job model (Increment 11, D45) ---------------------------------
+    // A Job is an ordered container of Steps within a Project. The experimental job
     // is the full ordered step log; its cookbook view is just the approved steps, in their
     // original order. save_resource above remains a single-step shortcut (always step 0);
     // these tools are the multi-step path for a working session with more than one output.
 
     server.tool(
-        'start_recipe',
-        'Start a new, empty ordered Recipe - a working thread/session inside a Project. You then append its outputs in order with append_step. Distinct from start_project (which selects the Project itself). The recipe is experimental until at least one of its steps is approved.',
+        'start_job',
+        'Start a new, empty ordered Job - a working thread/session inside a Project. You then append its outputs in order with append_step. Distinct from start_project (which selects the Project itself). The job is experimental until at least one of its steps is approved.',
         {
-            project: z.string().min(1).describe('The project this recipe belongs to (start/select one first with start_project)'),
-            title: z.string().min(1).describe('A short, descriptive title for this recipe / working thread'),
+            project: z.string().min(1).describe('The project this job belongs to (start/select one first with start_project)'),
+            title: z.string().min(1).describe('A short, descriptive title for this job / working thread'),
             practice: z.string().optional().describe('Practice / capability group this work belongs to (e.g. aem, aep, braze, campaign - call list_practices). Omit to inherit your own configured practice, which is the normal case.'),
             segments: z.record(z.string(), z.string()).optional().describe('Optional additional segment level values (see get_segmentation_config)')
         },
@@ -1212,11 +1482,11 @@ function registerTools (server, context = {}) {
             await ensureProject(project) // a task thread implies its project record exists (D49)
             const now = new Date().toISOString()
             const owner = resolvePrincipal(context)
-            const id = makeResourceId('recipe', title)
+            const id = makeResourceId('job', title)
             const resolvedSegments = { ...(segments || {}), project }
             // Practice (D79): an explicit value wins, else inherit the consultant's own practice so
             // an AEM consultant's work lands in AEM with zero extra effort. An unknown id is a hard
-            // error rather than silently stored, or the filter would quietly miss this recipe.
+            // error rather than silently stored, or the filter would quietly miss this job.
             const resolvedPractice = practice || settings.defaultPracticeFor(owner)
             if (practice && !settings.practiceIds().includes(practice)) {
                 return errorResult(`Unknown practice '${practice}'. Valid: ${settings.practiceIds().join(', ') || '(none configured)'} - see list_practices.`)
@@ -1230,7 +1500,7 @@ function registerTools (server, context = {}) {
             const resource = {
                 id,
                 title,
-                type: 'recipe',
+                type: 'job',
                 content: '',
                 content_hash: contentHash(''),
                 project,
@@ -1329,11 +1599,11 @@ function registerTools (server, context = {}) {
                 return errorResult(`${system.id} refused the brief: ${e.message}`)
             }
 
-            const id = makeResourceId('recipe', runTitle)
+            const id = makeResourceId('job', runTitle)
             const resource = {
                 id,
                 title: runTitle,
-                type: 'recipe',
+                type: 'job',
                 content: '',
                 content_hash: contentHash(''),
                 project: resolvedProject,
@@ -1367,7 +1637,7 @@ function registerTools (server, context = {}) {
                 const at = new Date().toISOString()
                 resource.steps.push({
                     id: stepsLib.makeStepId(id, order),
-                    recipe_id: id,
+                    job_id: id,
                     order,
                     source: 'agent-manager',
                     kind,
@@ -1386,7 +1656,7 @@ function registerTools (server, context = {}) {
                 tags: ['brief'],
                 // Whoever called this read the brief and decided to start a run;
                 // that is their work and their cost, and it rolls up to the run
-                // through projectRecipe.
+                // through projectJob.
                 source: source || 'agent-manager',
                 model,
                 tokens_used: tokensUsed
@@ -1475,12 +1745,15 @@ function registerTools (server, context = {}) {
              * older runs only looked right because a backfill script had been
              * over them.
              */
-            projectRecipe(resource, resource.steps)
+            projectJob(resource, resource.steps)
             resource.content_hash = contentHash(resource.content)
             await store.saveResource(resource)
 
             const faults = steps.filter(st => st.embedded_error)
-            const similar = await findSimilarRuns(brief, resolvedProject, context).catch(() => [])
+            const related = await findSimilarRuns(brief, resolvedProject, context)
+                .catch(() => ({ similar: [], duplicates: [] }))
+            const similar = related.similar
+            const duplicates = related.duplicates
 
             return jsonResult({
                 run_id: id,
@@ -1500,11 +1773,52 @@ function registerTools (server, context = {}) {
                 // instead of reporting a green run.
                 warnings: faults.map(f => `${labelFor(f.agent_id)} reported "${f.upstream_status}" but its tool call failed: ${f.embedded_error}`)
                     .concat(similar.filter(s => s.differing_figures.length).map(s =>
-                        `A very similar brief ran before ("${s.title.slice(0, 60)}") and the figures differ: ` +
+                        `An APPROVED brief ran before ("${s.title.slice(0, 60)}") and the figures differ: ` +
                         `${s.differing_figures.join(' vs ')}. Confirm which is current before this is built - ` +
                         'two briefs alike in every word but a number are either a revision or a mistake.'
-                    )),
+                    ))
+                    .concat(duplicates.length
+                        ? [`${duplicates.length} UNAPPROVED run(s) look like this brief ` +
+                           `(${duplicates.map(d => d.title.slice(0, 40)).join('; ')}). ` +
+                           'They are not prior work to reuse - nobody has approved them - but check you are ' +
+                           'not raising a second Workfront request for the same thing.']
+                        : []),
+                /*
+                 * WHAT HAPPENS NEXT, AND WHERE.
+                 *
+                 * The approval is a manual step in Workfront, so the one useful
+                 * thing to return is the link and the fact that everything is
+                 * now waiting on a person opening it. Without this the caller
+                 * had a job in `awaiting_approval` and no idea what to do about
+                 * it, which is how an assistant came to invent its own
+                 * approve-or-reject question and then mistake the answer for a
+                 * Workfront approval that had not happened.
+                 */
+                waiting_for: (() => {
+                    const blocked = agentSystems.blockedOn(waited.envelope)
+                    if (!blocked) return undefined
+                    const url = blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : null
+                    return {
+                        explanation: blocked.awaiting,
+                        workfront_url: url || undefined,
+                        next: blocked.needs === 'approval'
+                            ? 'Give the person the link and stop. Do not offer to continue without the approval, and ' +
+                              'do not ask them whether to proceed anyway - nothing can proceed. Once Workfront shows ' +
+                              'the approval has cleared, call approve_intake; it re-reads Workfront and will refuse ' +
+                              'until then.'
+                            : 'This waits on an earlier step, not on a person.'
+                    }
+                })(),
+                // Approved runs only. This is the Shared Knowledge Graph, and a
+                // run in it has been certified by a person.
                 similar_runs: similar,
+                /*
+                 * Unapproved look-alikes. Deliberately NOT called similar_runs:
+                 * they are a duplicate-work warning, not knowledge, and an
+                 * assistant offered them under the same name recommended reusing
+                 * a run whose audience stage had built nothing.
+                 */
+                possible_duplicates: duplicates,
                 note: waited.settled
                     ? undefined
                     : 'The pipeline had not finished when this returned. Call get_intake with the run_id for the rest.'
@@ -1533,6 +1847,7 @@ function registerTools (server, context = {}) {
                 return errorResult(`Could not reach ${system.id}: ${e.message}`)
             }
             const steps = agentSystems.toSteps(envelope)
+            const blocked = agentSystems.blockedOn(envelope)
             return jsonResult({
                 run_id: runId,
                 upstream: ref,
@@ -1544,9 +1859,345 @@ function registerTools (server, context = {}) {
                     actual: st.embedded_error ? 'faulted' : st.upstream_status,
                     failure: st.embedded_error || undefined,
                     ms: st.duration_ms
-                }))
+                })),
+                /*
+                 * WHY THIS RUN HAS FEWER STAGES THAN YOU EXPECTED.
+                 *
+                 * Without this a gated run shows one stage and no explanation,
+                 * and an absent stage reads exactly like a lost one. It is
+                 * neither: the agent was never called, deliberately. Say which
+                 * decision is outstanding and name the tool that records it,
+                 * because the last time this was left implicit the approval was
+                 * recorded against the job instead and the run never moved.
+                 */
+                waiting_for: blocked
+                    ? {
+                        map_step: blocked.map_step,
+                        gate: blocked.gate_id,
+                        agent_not_yet_run: blocked.agent,
+                        explanation: blocked.awaiting,
+                        record_it_with: blocked.needs === 'approval'
+                            ? 'approve_intake (or reject_intake). NOT certify or bake_job - those are about the RECORD of this run, and neither makes the pipeline move.'
+                            : 'nothing - this waits on an earlier step, not on a person'
+                    }
+                    : undefined,
+                decisions: agentSystems.gateDecisions(envelope)
             })
         }
+    )
+
+
+    /* -----------------------------------------------------------------
+       The approval at 1.5.
+
+       THIS IS NOT approve_step / certify / bake_job, and the
+       difference has already caused one wrong outcome. A person typed
+       "approved <workfront id>", the assistant certified the JOB
+       into Playbooks, and the run went on sitting at
+       awaiting_approval with Agent 2 never invoked. It picked the only
+       approve-shaped tool on the server, which was the wrong one.
+
+         approve_intake   a decision about THIS REQUEST. Opens the gate
+                          so Agent 2 runs 2.1. The campaign proceeds.
+         certify / bake   a decision about the RECORD of a run. Puts it
+                          in Playbooks for the Oracle to learn from.
+                          Changes nothing about the campaign.
+       ----------------------------------------------------------------- */
+
+    /** Shared by approve_intake and reject_intake. */
+    async function recordGateDecision ({ runId, workfrontId, decision, reason, decidedBy, evidence }) {
+        let id = String(runId || '').trim()
+        if (!id && workfrontId) {
+            id = await findRunByWorkfrontId(workfrontId, context)
+            if (!id) {
+                return errorResult(
+                    `No run in Agent Manager created Workfront object '${workfrontId}'. ` +
+                    'Check the id, or pass run_id instead - list_jobs shows recent runs. ' +
+                    'Note that approving something created outside Agent Manager is not ' +
+                    'something this can record: there is no pipeline waiting on it.'
+                )
+            }
+        }
+        if (!id) return errorResult('Pass either run_id or workfront_id.')
+
+        const resource = await store.getResource(id)
+        if (!resource) return errorResult(`No run found with id '${id}'`)
+        const ref = resource.upstream
+        if (!ref || !ref.run_id) {
+            return errorResult(
+                `'${id}' is a captured record, not an agent run, so no pipeline is waiting on it. ` +
+                'If you meant to approve the RECORD for Playbooks, that is certify - a different thing.'
+            )
+        }
+        const { system, error } = agentSystems.resolve(ref.system_id, undefined, settings.agentSystems())
+        if (error) return errorResult(error)
+
+        /*
+         * The decision carries a name, and it defaults to the caller rather
+         * than to a label like "system".
+         *
+         * When the audience turns out wrong at 3.4, "who approved this brief"
+         * has to have an answer. A field always populated with a placeholder is
+         * worse than an empty one, because it looks answered.
+         */
+        /*
+         * THE APPROVAL IS VERIFIED, NOT ASSERTED.
+         *
+         * Only for an approval - a rejection needs no Workfront confirmation,
+         * because rejecting sends the request back for correction and the worst
+         * case is a wasted round trip rather than a campaign proceeding on a
+         * false record.
+         */
+        if (decision === 'approved') {
+            /*
+             * The Workfront record, from the rollup OR from the artifacts.
+             *
+             * workfront_refs is a projection added later, so jobs captured
+             * before it exists do not have it. Reading only the projection
+             * would make every one of those jobs permanently unapprovable -
+             * a verification step that cannot find the thing to verify is just
+             * an outage. The artifacts always carry the reference.
+             */
+            const refs = (resource.workfront_refs && resource.workfront_refs.length)
+                ? resource.workfront_refs
+                : (resource.steps || []).flatMap(st => {
+                    const payload = st.provenance && st.provenance.upstream_payload
+                    return payload ? narrate.findWorkfrontRefs(payload.output) : []
+                })
+            // The ISSUE is what carries the approval; a project created later at
+            // review time does not. Prefer it explicitly rather than taking
+            // whichever reference happens to be first.
+            const ref = refs.find(r => r.objCode === 'OPTASK') || refs[0] || null
+            if (!ref) {
+                return errorResult(
+                    `Cannot verify an approval for '${id}': this job has no Workfront record recorded against it, ` +
+                    'so there is nothing whose approval state can be read. A job that created no Workfront request ' +
+                    'has nothing to approve.'
+                )
+            }
+
+            const state = await workfrontApprovalState(ref.objCode, ref.objId)
+            const link = workfrontLink(ref.objCode, ref.objId)
+
+            if (state.approved !== true) {
+                return errorResult(
+                    `NOT APPROVED. ${state.detail}\n\n` +
+                    `Approve it in Workfront here: ${state.url || link || `${ref.objCode} ${ref.objId} (no tenant configured, so no link)`}\n\n` +
+                    'This is a manual step and it is deliberately the one thing this tool will not do for you. ' +
+                    'It does not accept "the user said to approve it": a person clicking Approve in Workfront is ' +
+                    'what an approval IS, and reading it back from Workfront is the only way to know it happened. ' +
+                    'Do not retry this call, do not look for another tool, and do not record the approval some other ' +
+                    'way - wait, and call again once Workfront shows it cleared.'
+                )
+            }
+        }
+
+        const who = String(decidedBy || '').trim() || resolveAuthor(context)
+        if (!who || who === 'unknown') {
+            return errorResult(
+                'Cannot record an approval with nobody\'s name on it. Sign in, or pass ' +
+                'decided_by with the name of the person who actually decided.'
+            )
+        }
+
+        let result
+        try {
+            result = await agentSystems.decideGate(system, ref.run_id, {
+                decision,
+                decided_by: who,
+                reason: reason || null,
+                evidence: { source: evidence || 'recorded through Agent Manager', recorded_by: resolveAuthor(context) }
+            })
+        } catch (e) {
+            return errorResult(`Could not record the decision on ${system.id}: ${e.message}`)
+        }
+
+        const steps = agentSystems.toSteps(result)
+        const blocked = agentSystems.blockedOn(result)
+
+        /*
+         * The Workfront tenant, for deep links in the narration. Read from the
+         * registry so changing tenant is a Settings change, as elsewhere.
+         */
+        const workfrontInstance = (() => {
+            const servers = mcpServers.list(settings.mcpServers())
+            const wf = servers.find(x => x.practice === 'workfront' && x.instance) ||
+                servers.find(x => x.instance)
+            return wf ? wf.instance : null
+        })()
+        const agentCatalog = await agentSystems.discoverAgents(system).catch(() => [])
+        const labelFor = (agentId) => {
+            const hit = agentCatalog.find(a => a.id === agentId)
+            return (hit && hit.label) || agentId
+        }
+
+        /*
+         * Capture the decision on the run as a steering artifact.
+         *
+         * A human steering a run is the most valuable thing in this store, and
+         * an approval is the plainest instance of it. Recording it here means
+         * the run's own history shows who let it through, without anyone having
+         * to join across to the harness's tables.
+         */
+        try {
+            const full = await store.getResource(id)
+            full.steps = full.steps || []
+
+            /*
+             * Narrate every stage that is not already on the record.
+             *
+             * Deduped on the upstream's own task_run id, so calling this twice -
+             * or resuming a job more than once - cannot double-write a stage.
+             * That id is the only stable identity a stage has across the
+             * boundary; matching on agent name would collapse the two runs of an
+             * agent that legitimately ran twice.
+             */
+            const already = new Set(
+                full.steps
+                    .map(x => x.provenance && x.provenance.upstream_task_run_id)
+                    .filter(Boolean)
+                    .map(String)
+            )
+            for (const st of steps) {
+                if (st.upstream_task_run_id && already.has(String(st.upstream_task_run_id))) continue
+
+                // Cost and model where the upstream reports them; ABSENT rather
+                // than zero where it does not - "not reported" and "free" are
+                // different claims.
+                const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
+                const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
+                const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
+                const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
+                    ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
+                const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
+
+                full.steps.push(stepsLib.make({
+                    kind: 'doc',
+                    content: narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }),
+                    format: 'md',
+                    source: st.agent_id,
+                    model,
+                    tokens_used: tokens,
+                    tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
+                    author: resolveAuthor(context),
+                    provenance: {
+                        upstream_task_run_id: st.upstream_task_run_id,
+                        duration_ms: st.duration_ms,
+                        started_at: st.started_at,
+                        finished_at: st.finished_at,
+                        // The narration is a reading of this; this is the evidence.
+                        upstream_payload: {
+                            agent: st.agent_id,
+                            upstream_status: st.upstream_status,
+                            input: st.input,
+                            output: st.output,
+                            metadata: st.metadata
+                        }
+                    }
+                }))
+            }
+
+            full.steps.push(stepsLib.make({
+                kind: 'steering',
+                signal: decision === 'approved' ? 'affirm' : 'reject',
+                content:
+                    `**1.5 - ${decision === 'approved' ? 'Approved' : 'Rejected'}** by ${who}.\n\n` +
+                    (reason ? `> ${reason}\n\n` : '') +
+                    (decision === 'approved'
+                        ? 'This is the process gate, not a job approval. Phase 2 may now run: ' +
+                          '2.1 converts the request to a project and writes the brief onto the project form.'
+                        : 'This is the 1.5a rework path. Agent 2 translates the reason above into the ' +
+                          'specific field to change, for the marketer to confirm.'),
+                format: 'md',
+                source: 'agent-manager',
+                tags: ['gate', '1.5', decision],
+                author: resolveAuthor(context)
+            }))
+            projectJob(full, full.steps, new Date().toISOString())
+            full.content_hash = contentHash(full.content)
+            await store.saveResource(full)
+        } catch (e) {
+            // The decision is recorded upstream and the pipeline has already
+            // moved. Failing to ALSO capture it here must not read as the
+            // approval having failed.
+        }
+
+        const ran = steps.map(st => ({
+            agent: st.agent_id,
+            reported: st.upstream_status,
+            actual: st.embedded_error ? 'faulted' : st.upstream_status,
+            failure: st.embedded_error || undefined,
+            ms: st.duration_ms
+        }))
+
+        return jsonResult({
+            run_id: id,
+            recorded: { gate: '1.5', decision, decided_by: who, reason: reason || null },
+            upstream_status: (result && result.run && result.run.status) || 'unknown',
+            // What ran BECAUSE of this decision.
+            stages: ran,
+            waiting_for: blocked
+                ? {
+                    explanation: blocked.awaiting,
+                    // The record to open, as a link. A person told to approve
+                    // something and not told where is a person who does not.
+                    workfront_url: blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : undefined
+                }
+                : undefined,
+            /*
+             * Say that the detail is now ON the job, because the last time it was
+             * not, a connected assistant correctly reported that it could not see
+             * what Agents 2 and 3 had done and had to advise checking Workfront
+             * by hand.
+             */
+            detail_captured: `Every stage this decision caused is now recorded on job ${id} as its own artifact, ` +
+                'with the agent\'s verbatim output attached. Read it with get_job before describing what happened - ' +
+                'the stage list below carries statuses and durations only.',
+            what_this_did: decision === 'approved'
+                ? 'Opened the gate at 1.5, so the pipeline moved into phase 2. Read `stages` for what ' +
+                  'Agent 2 actually did - 2.1 creates the project and writes the brief onto the project ' +
+                  'form, then 2.3 checks whether the audience already exists. This did NOT certify the ' +
+                  'run into Playbooks; that is certify, and it is a separate decision.'
+                : 'Sent the request down 1.5a. Agent 2 has triaged the reason into specific field changes ' +
+                  'for the marketer to confirm - confirming a redraft is a human step by design.'
+        })
+    }
+
+    server.tool(
+        'approve_intake',
+        'THE PROCESS APPROVAL AT STEP 1.5. Use this when a human says they have approved an intake ' +
+        'request - including when they name a Workfront object id, e.g. "approved 6aac001e...". It opens ' +
+        'the gate so Agent 2 runs (2.1, issue converted to project form) and the campaign proceeds. ' +
+        'It does NOT approve anything inside Workfront: a named person clicks Approve in Workfront\'s own ' +
+        'Approvals tab, and this records that they did so the pipeline can move. ' +
+        'DO NOT confuse this with certify / bake_job / approve_step - those promote the RECORD of a run ' +
+        'into Playbooks for the Oracle to learn from, and none of them makes the pipeline advance. ' +
+        'If a job is sitting at awaiting_approval, this is the tool that moves it. IT VERIFIES: it reads the record back from Workfront and REFUSES unless Workfront itself reports the approval has cleared. Saying that the user approved it is not enough and never will be - the last time this was taken on trust, a job reported three completed stages while the Workfront request was still Pending Approval.',
+        {
+            run_id: z.string().optional().describe('The Agent Manager run id from start_intake'),
+            workfront_id: z.string().optional().describe('The Workfront object id the human named, e.g. 6aac001e0008d40c0ba4389f1247ad36. Either this or run_id.'),
+            decided_by: z.string().optional().describe('The named human who approved. Defaults to the authenticated caller - pass this only when relaying someone else\'s decision, and name them.'),
+            note: z.string().optional().describe('How the approval happened, e.g. "approved in the Workfront Approvals tab, stage 1"')
+        },
+        async ({ run_id: runId, workfront_id: workfrontId, decided_by: decidedBy, note }) =>
+            recordGateDecision({ runId, workfrontId, decision: 'approved', reason: note || null, decidedBy, evidence: note })
+    )
+
+    server.tool(
+        'reject_intake',
+        'THE PROCESS REJECTION AT STEP 1.5, i.e. step 1.5a - sent back to the marketer as rework. ' +
+        'Agent 2 reads the reason and translates it into the specific missing field or wrong data source, ' +
+        'then proposes a redraft for the marketer to confirm. A reason is REQUIRED: an unexplained ' +
+        'rejection sends the marketer back to a form with eleven fields to guess at, which is the ' +
+        'unbounded rework loop this pipeline exists to close.',
+        {
+            run_id: z.string().optional().describe('The Agent Manager run id from start_intake'),
+            workfront_id: z.string().optional().describe('The Workfront object id the human named. Either this or run_id.'),
+            reason: z.string().min(1).describe('What is wrong, in the reviewer\'s own words. This is the input to the triage - the more specific, the fewer round trips.'),
+            decided_by: z.string().optional().describe('The named human who rejected it. Defaults to the authenticated caller.')
+        },
+        async ({ run_id: runId, workfront_id: workfrontId, reason, decided_by: decidedBy }) =>
+            recordGateDecision({ runId, workfrontId, decision: 'rejected', reason, decidedBy, evidence: 'rejected through Agent Manager' })
     )
 
     /* -----------------------------------------------------------------
@@ -1738,9 +2389,9 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'append_step',
-        'Append the next ordered Step to a Recipe (started with start_recipe) - the atomic capture primitive. Steps are appended in order and never reshuffled. Text kinds (message/code/decision/doc/handoff/config, and diagram when captured as mermaid/svg source) use "content"; image/rendered-diagram kinds use "asset" (base64 + mime_type) - give both together to keep a diagram\'s source alongside its rendered image. Use kind "steering" with a "signal" (affirm/reject/correct) to capture how a human steered the work (a correction is prime capture). New steps are EXPERIMENTAL and expire after the retention window unless approved (approve_step/approve_steps).',
+        'Append the next ordered Step to a Job (started with start_job) - the atomic capture primitive. Steps are appended in order and never reshuffled. Text kinds (message/code/decision/doc/handoff/config, and diagram when captured as mermaid/svg source) use "content"; image/rendered-diagram kinds use "asset" (base64 + mime_type) - give both together to keep a diagram\'s source alongside its rendered image. Use kind "steering" with a "signal" (affirm/reject/correct) to capture how a human steered the work (a correction is prime capture). New steps are EXPERIMENTAL and expire after the retention window unless approved (approve_step/approve_steps).',
         {
-            recipe_id: z.string().min(1).describe('The recipe id to append to, as returned by start_recipe'),
+            job_id: z.string().min(1).describe('The job id to append to, as returned by start_job'),
             source: z.string().optional().describe('Free text: which client produced this step, e.g. "desktop-ai", "ide-agent", "cli-agent" - vendor-neutral; defaults to "unknown"'),
             model: z.string().optional().describe('Free-text model identifier that produced this step (vendor-neutral), e.g. "opus-4.8"'),
             kind: z.enum(['message', 'code', 'diagram', 'image', 'decision', 'doc', 'handoff', 'config', 'steering', 'other']).describe('What kind of output this step captures'),
@@ -1757,16 +2408,16 @@ function registerTools (server, context = {}) {
             tags: z.array(z.string()).optional().describe('Optional tags for discovery'),
             provenance: z.record(z.string(), z.any()).optional().describe('Optional free-form provenance (session id, tool version, anchor...)')
         },
-        async ({ recipe_id: recipeId, source, model, kind, signal, content, asset, format, language, diff, tokens_used: tokensUsed, tags, provenance }) => {
+        async ({ job_id: jobId, source, model, kind, signal, content, asset, format, language, diff, tokens_used: tokensUsed, tags, provenance }) => {
             // A steering step is self-describing via its signal; other kinds need content or an asset.
             if (!content && !asset && kind !== 'steering') {
                 return errorResult('Provide "content" or "asset" - a step needs at least one')
             }
-            const resource = await store.getResource(recipeId)
+            const resource = await store.getResource(jobId)
             if (!resource) {
-                return errorResult(`No recipe found with id '${recipeId}' - start one with start_recipe`)
+                return errorResult(`No job found with id '${jobId}' - start one with start_job`)
             }
-            if (!callerCanWrite(resource, context)) return notWritableError(recipeId)
+            if (!callerCanWrite(resource, context)) return notWritableError(jobId)
             /*
              * Appending to an AGENT run is how a human's steering gets recorded,
              * and that is the most valuable thing in the store - so it is allowed
@@ -1777,13 +2428,13 @@ function registerTools (server, context = {}) {
              * is a record of agent work.
              */
             if (settings.captureMode() !== 'open' && !isAgentRunResource(resource)) {
-                return refuseCapture(`adding an artifact to "${resource.title || recipeId}", which is not an agent run`)
+                return refuseCapture(`adding an artifact to "${resource.title || jobId}", which is not an agent run`)
             }
             const steps = stepsLib.ensureSteps(resource)
             const order = stepsLib.nextOrder(steps)
             const now = new Date().toISOString()
             const owner = resolvePrincipal(context)
-            const stepId = stepsLib.makeStepId(recipeId, order)
+            const stepId = stepsLib.makeStepId(jobId, order)
 
             let assetPointer
             if (asset) {
@@ -1792,7 +2443,7 @@ function registerTools (server, context = {}) {
 
             const step = {
                 id: stepId,
-                recipe_id: recipeId,
+                job_id: jobId,
                 order,
                 source: source || 'unknown',
                 model,
@@ -1815,10 +2466,10 @@ function registerTools (server, context = {}) {
             }
 
             const nextSteps = [...steps, step]
-            projectRecipe(resource, nextSteps, now)
+            projectJob(resource, nextSteps, now)
             await store.saveResource(resource)
 
-            return jsonResult({ id: step.id, recipe_id: recipeId, order, kind, signal: step.signal, status: step.status, expires_at: step.expires_at })
+            return jsonResult({ id: step.id, job_id: jobId, order, kind, signal: step.signal, status: step.status, expires_at: step.expires_at })
         }
     )
 
@@ -1832,25 +2483,25 @@ function registerTools (server, context = {}) {
         const now = new Date().toISOString()
         const principal = resolvePrincipal(context)
         const results = []
-        const byRecipe = new Map()
+        const byJob = new Map()
         for (const stepId of stepIds) {
             const parsed = stepsLib.parseStepId(stepId)
             if (!parsed) {
                 results.push({ id: stepId, error: `Not a valid step id: '${stepId}'` })
                 continue
             }
-            if (!byRecipe.has(parsed.recipeId)) byRecipe.set(parsed.recipeId, [])
-            byRecipe.get(parsed.recipeId).push(stepId)
+            if (!byJob.has(parsed.jobId)) byJob.set(parsed.jobId, [])
+            byJob.get(parsed.jobId).push(stepId)
         }
 
-        for (const [recipeId, ids] of byRecipe) {
-            const resource = await store.getResource(recipeId)
+        for (const [jobId, ids] of byJob) {
+            const resource = await store.getResource(jobId)
             if (!resource) {
-                for (const stepId of ids) results.push({ id: stepId, error: `No recipe found for step '${stepId}'` })
+                for (const stepId of ids) results.push({ id: stepId, error: `No job found for step '${stepId}'` })
                 continue
             }
             if (!callerCanWrite(resource, context)) {
-                for (const stepId of ids) results.push({ id: stepId, error: `Refused: '${recipeId}' is not yours to change` })
+                for (const stepId of ids) results.push({ id: stepId, error: `Refused: '${jobId}' is not yours to change` })
                 continue
             }
             const steps = stepsLib.ensureSteps(resource)
@@ -1874,7 +2525,7 @@ function registerTools (server, context = {}) {
                 results.push({ id: stepId, status: statusLib.APPROVED, approved_by: principal, approved_at: now })
             }
             if (changed) {
-                projectRecipe(resource, steps, now)
+                projectJob(resource, steps, now)
                 await store.saveResource(resource)
             }
         }
@@ -1883,9 +2534,9 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'approve_step',
-        'Certify a single Step as a human consent, promoting it to "approved" - it joins its recipe\'s Playbooks view (in order) and is kept forever. Records approved_by/at and an optional note.',
+        'Certify a single Step as a human consent, promoting it to "approved" - it joins its job\'s Playbooks view (in order) and is kept forever. Records approved_by/at and an optional note. This is about the RECORD of a run, NOT the process approval at 1.5 - it does not make the pipeline advance. A run sitting at awaiting_approval is moved by approve_intake.',
         {
-            step_id: z.string().min(1).describe('The step id, as returned by append_step/get_recipe/list_steps'),
+            step_id: z.string().min(1).describe('The step id, as returned by append_step/get_job/list_steps'),
             note: z.string().optional().describe('Optional consent note')
         },
         async ({ step_id: stepId, note }) => {
@@ -1906,16 +2557,16 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'discard_step',
-        'Discard a Step - it is excluded from the recipe\'s full and approved views (e.g. a draft that turned out not to be useful). An already-approved step cannot be discarded (it is kept forever once certified). Idempotent.',
+        'Discard a Step - it is excluded from the job\'s full and approved views (e.g. a draft that turned out not to be useful). An already-approved step cannot be discarded (it is kept forever once certified). Idempotent.',
         {
             step_id: z.string().min(1).describe('The step id to discard')
         },
         async ({ step_id: stepId }) => {
             const parsed = stepsLib.parseStepId(stepId)
             if (!parsed) return errorResult(`Not a valid step id: '${stepId}'`)
-            const resource = await store.getResource(parsed.recipeId)
-            if (!resource) return errorResult(`No recipe found for step '${stepId}'`)
-            if (!callerCanWrite(resource, context)) return notWritableError(parsed.recipeId)
+            const resource = await store.getResource(parsed.jobId)
+            if (!resource) return errorResult(`No job found for step '${stepId}'`)
+            if (!callerCanWrite(resource, context)) return notWritableError(parsed.jobId)
             const steps = stepsLib.ensureSteps(resource)
             const step = steps.find(s => s.id === stepId)
             if (!step) return errorResult(`No step found with id '${stepId}'`)
@@ -1924,23 +2575,23 @@ function registerTools (server, context = {}) {
             }
             step.status = 'discarded'
             step.expires_at = undefined
-            projectRecipe(resource, steps, new Date().toISOString())
+            projectJob(resource, steps, new Date().toISOString())
             await store.saveResource(resource)
             return jsonResult({ id: stepId, status: 'discarded' })
         }
     )
 
     server.tool(
-        'get_recipe',
-        'Read a Recipe as its ordered Steps. view="full" (default) returns every non-discarded step in order - the full working log, including experimental drafts (the Test Kitchen view). view="approved" returns only approved steps in order - the composed, followable cookbook recipe. Image/diagram asset steps include their base64 data.',
+        'get_job',
+        'Read a Job as its ordered Steps. view="full" (default) returns every non-discarded step in order - the full working log, including experimental drafts (the Test Kitchen view). view="approved" returns only approved steps in order - the composed, followable cookbook job. Image/diagram asset steps include their base64 data.',
         {
-            id: z.string().min(1).describe('The recipe id'),
+            id: z.string().min(1).describe('The job id'),
             view: z.enum(['full', 'approved']).optional().describe('Defaults to "full"')
         },
         async ({ id, view }) => {
             const resource = await store.getResource(id)
             if (!resource) {
-                return errorResult(`No recipe found with id '${id}'`)
+                return errorResult(`No job found with id '${id}'`)
             }
             if (!callerCanRead(resource, context)) return notVisibleError(id)
             const steps = stepsLib.ensureSteps(resource)
@@ -1963,8 +2614,8 @@ function registerTools (server, context = {}) {
                 updated: resource.updated_at || resource.updated,
                 version: resource.version,
                 view: view || 'full',
-                // D89: the rollups the catalog already carries. get_recipe is the primary
-                // read-one-recipe tool, and it was the only view that could not answer "what stage
+                // D89: the rollups the catalog already carries. get_job is the primary
+                // read-one-job tool, and it was the only view that could not answer "what stage
                 // is this at, what did it cost, which models produced it" without a second call.
                 practice: resource.practice,
                 baked: resource.baked === true,
@@ -1982,8 +2633,8 @@ function registerTools (server, context = {}) {
     )
 
     server.tool(
-        'list_recipes',
-        'List Recipes (metadata only - title/project/status/owner/version/practice, no step content), optionally filtered by project, status and/or practice. Excludes handoff-prompts (task briefs, not recipes). Filter by practice to see just one discipline\'s knowledge (e.g. practice:"aem").',
+        'list_jobs',
+        'List Jobs (metadata only - title/project/status/owner/version/practice, no step content), optionally filtered by project, status and/or practice. Excludes handoff-prompts (task briefs, not jobs). Filter by practice to see just one discipline\'s knowledge (e.g. practice:"aem").',
         {
             project: z.string().optional().describe('Filter by project'),
             status: z.enum(['experimental', 'approved', 'pending', 'active']).optional().describe('Filter by approval status'),
@@ -1997,22 +2648,22 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'list_practices',
-        'List the configured practices / capability groups (e.g. AEM, AEP, Braze, Adobe Campaign) and which ones YOU belong to. Practices are how knowledge stays findable per discipline: filter list_recipes / search_resources / list_resources by practice to see just that discipline\'s work. Read-only, safe for anyone.',
+        'List the configured practices / capability groups (e.g. AEM, AEP, Braze, Adobe Campaign) and which ones YOU belong to. Practices are how knowledge stays findable per discipline: filter list_jobs / search_resources / list_resources by practice to see just that discipline\'s work. Read-only, safe for anyone.',
         {},
         async () => jsonResult({
             practices: settings.practices(),
             my_practices: settings.practicesForOwner(resolvePrincipal(context)),
             my_default_practice: settings.defaultPracticeFor(resolvePrincipal(context)),
-            note: 'A new recipe inherits your first practice unless you pass an explicit practice.'
+            note: 'A new job inherits your first practice unless you pass an explicit practice.'
         })
     )
 
     server.tool(
         'set_practices',
-        'ADMIN ONLY: replace the list of practices / capability groups the company delivers (e.g. add "analytics" or "target"). Full replace - pass the complete list. Practices are data, so adding one is a settings change, not a deploy. Existing recipes keep their practice id even if you relabel it.',
+        'ADMIN ONLY: replace the list of practices / capability groups the company delivers (e.g. add "analytics" or "target"). Full replace - pass the complete list. Practices are data, so adding one is a settings change, not a deploy. Existing jobs keep their practice id even if you relabel it.',
         {
             practices: z.array(z.object({
-                id: z.string().min(1).describe('Stable short id, lowercase (e.g. "aem") - never change this once recipes use it'),
+                id: z.string().min(1).describe('Stable short id, lowercase (e.g. "aem") - never change this once jobs use it'),
                 label: z.string().min(1).describe('Human-readable label shown in the UI (e.g. "AEM")')
             })).describe('The complete practice list')
         },
@@ -2031,7 +2682,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'set_user_practices',
-        'HEAD CHEF or ADMIN: set which practices a consultant belongs to. Their first practice is what their new recipes inherit by default, so this is what makes per-discipline capture automatic. Full replace for that user; pass an empty array to clear.',
+        'HEAD CHEF or ADMIN: set which practices a consultant belongs to. Their first practice is what their new jobs inherit by default, so this is what makes per-discipline capture automatic. Full replace for that user; pass an empty array to clear.',
         {
             owner: z.string().min(1).describe('The consultant\'s owner identity (email/username, as shown by get_my_roles)'),
             practices: z.array(z.string()).describe('The practice ids this consultant works in, most-primary first (see list_practices)')
@@ -2055,16 +2706,16 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'list_steps',
-        'List every non-discarded Step of a Recipe, in order, with lightweight asset pointers (no binary payload - use get_recipe for full asset bytes).',
+        'List every non-discarded Step of a Job, in order, with lightweight asset pointers (no binary payload - use get_job for full asset bytes).',
         {
-            recipe_id: z.string().min(1).describe('The recipe id')
+            job_id: z.string().min(1).describe('The job id')
         },
-        async ({ recipe_id: recipeId }) => {
-            const resource = await store.getResource(recipeId)
+        async ({ job_id: jobId }) => {
+            const resource = await store.getResource(jobId)
             if (!resource) {
-                return errorResult(`No recipe found with id '${recipeId}'`)
+                return errorResult(`No job found with id '${jobId}'`)
             }
-            if (!callerCanRead(resource, context)) return notVisibleError(recipeId)
+            if (!callerCanRead(resource, context)) return notVisibleError(jobId)
             const steps = stepsLib.ensureSteps(resource)
                 .filter(s => s.status !== 'discarded')
                 .sort((a, b) => a.order - b.order)
@@ -2074,39 +2725,39 @@ function registerTools (server, context = {}) {
     )
 
     server.tool(
-        'get_active_recipe',
-        'Resolve the active Recipe (task thread) for a project - the most recently updated, not-yet-baked recipe - so a second tool (e.g. a coding agent picking up a handoff) appends its work to the SAME recipe instead of starting a new one (D47). Returns null-ish if the project has no open recipe yet.',
+        'get_active_job',
+        'Resolve the active Job (task thread) for a project - the most recently updated, not-yet-baked job - so a second tool (e.g. a coding agent picking up a handoff) appends its work to the SAME job instead of starting a new one (D47). Returns null-ish if the project has no open job yet.',
         {
-            project: z.string().min(1).describe('The project to resolve the active recipe for')
+            project: z.string().min(1).describe('The project to resolve the active job for')
         },
         async ({ project }) => {
-            // D99: YOUR active recipe. It used to resolve across all owners, so it could return a
-            // colleague's open recipe and then invite the caller to append ingredients to it.
-            const entries = await store.listResources({ project, type: 'recipe', owner: resolvePrincipal(context) })
+            // D99: YOUR active job. It used to resolve across all owners, so it could return a
+            // colleague's open job and then invite the caller to append ingredients to it.
+            const entries = await store.listResources({ project, type: 'job', owner: resolvePrincipal(context) })
             const open = entries
                 .filter(r => !r.baked && r.status !== 'archived')
                 .sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || ''))
             const active = open[0]
-            if (!active) return jsonResult({ project, active_recipe: null })
-            return jsonResult({ project, active_recipe: { id: active.id, title: active.title, status: active.status, step_count: active.step_count } })
+            if (!active) return jsonResult({ project, active_job: null })
+            return jsonResult({ project, active_job: { id: active.id, title: active.title, status: active.status, step_count: active.step_count } })
         }
     )
 
     server.tool(
-        'bake_recipe',
-        'Finalize a Recipe (D47): experimental -> baked. With approve_all=true, first certifies every non-discarded step (records consent), so the recipe\'s followable cookbook view = its approved steps in order. A baked recipe stays in the cookbook even as later drafts come and go. Distinct from bake_project (which finalizes the whole engagement).',
+        'bake_job',
+        'Finalize a Job (D47): experimental -> baked. With approve_all=true, first certifies every non-discarded step (records consent), so the job\'s followable cookbook view = its approved steps in order. A baked job stays in the cookbook even as later drafts come and go. Distinct from bake_project (which finalizes the whole engagement). This is about the RECORD of a run, NOT the process approval at 1.5 - it does not make the pipeline advance. A run sitting at awaiting_approval is moved by approve_intake.',
         {
-            id: z.string().min(1).describe('The recipe id to bake'),
+            id: z.string().min(1).describe('The job id to bake'),
             approve_all: z.boolean().optional().describe('Approve all non-discarded steps as part of baking (default false - bake as-is, only already-approved steps are followable)'),
             note: z.string().optional().describe('Optional consent note recorded on the steps approved by approve_all')
         },
         async ({ id, approve_all: approveAll, note }) => {
             const resource = await store.getResource(id)
             if (!resource) {
-                return errorResult(`No recipe found with id '${id}'`)
+                return errorResult(`No job found with id '${id}'`)
             }
             if (resource.type === HANDOFF_TYPE) {
-                return errorResult(`Resource '${id}' is a handoff-prompt, not a recipe - use set_task_status`)
+                return errorResult(`Resource '${id}' is a handoff-prompt, not a job - use set_task_status`)
             }
             // Baking submits work for review, which shows it to every reviewer. That is the
             // author's decision to make, and nobody else's.
@@ -2114,18 +2765,18 @@ function registerTools (server, context = {}) {
             const now = new Date().toISOString()
             const principal = resolvePrincipal(context)
             const steps = stepsLib.ensureSteps(resource)
-            // D64 baking rule: you cannot bake a recipe with no approved ingredients. The
+            // D64 baking rule: you cannot bake a job with no approved ingredients. The
             // default path requires the human to have approved >= 1 ingredient in the Work Log
             // first (no auto-approve). approve_all=true is the explicit "approve them as part of
             // baking" path for API callers, and still needs >= 1 non-discarded ingredient to
-            // approve - you can't bake an empty recipe either way.
+            // approve - you can't bake an empty job either way.
             const nonDiscarded = steps.filter(s => s.status !== 'discarded')
             const approvedExisting = nonDiscarded.filter(s => statusLib.isApproved(s.status))
             if (!approveAll && approvedExisting.length === 0) {
-                return errorResult('Cannot bake: this recipe has no approved ingredients. Approve at least one ingredient first (or pass approve_all=true to approve them as part of baking).')
+                return errorResult('Cannot bake: this job has no approved ingredients. Approve at least one ingredient first (or pass approve_all=true to approve them as part of baking).')
             }
             if (approveAll && nonDiscarded.length === 0) {
-                return errorResult('Cannot bake: this recipe has no ingredients to approve.')
+                return errorResult('Cannot bake: this job has no ingredients to approve.')
             }
             let approvedCount = 0
             if (approveAll) {
@@ -2147,7 +2798,7 @@ function registerTools (server, context = {}) {
             resource.baked = true
             resource.baked_at = now
             resource.baked_by = principal
-            projectRecipe(resource, steps, now) // status -> 'baked' (resource.baked is now true)
+            projectJob(resource, steps, now) // status -> 'baked' (resource.baked is now true)
             await store.saveResource(resource)
             return jsonResult({ id, baked: true, baked_at: now, baked_by: principal, status: resource.status, approved_steps: approvedCount })
         }
@@ -2155,7 +2806,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'bake_project',
-        'Mark a Project "baked" - the consultant\'s signal that it is fully cooked (its Test Kitchen work is done). The project keeps its recipes; this just moves it out of the active working set.',
+        'Mark a Project "baked" - the consultant\'s signal that it is fully cooked (its Test Kitchen work is done). The project keeps its jobs; this just moves it out of the active working set.',
         {
             project: z.string().min(1).describe('The project name, as passed to start_project')
         },
@@ -2189,7 +2840,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'purge_expired',
-        'Run the retention purge on demand: deletes expired EXPERIMENTAL steps (past the retention window) and any recipe left with no approved/active steps as a result. Approved content is never touched. Idempotent - safe to call repeatedly (this also runs automatically on a daily schedule).',
+        'Run the retention purge on demand: deletes expired EXPERIMENTAL steps (past the retention window) and any job left with no approved/active steps as a result. Approved content is never touched. Idempotent - safe to call repeatedly (this also runs automatically on a daily schedule).',
         {},
         async () => jsonResult(await retention.purgeExpired())
     )
@@ -2248,8 +2899,8 @@ function registerTools (server, context = {}) {
     )
 
     server.tool(
-        'admin_list_recipes',
-        'ADMIN (D55, scoped in D98): recipes across all owners that have been SUBMITTED for review or ADMITTED to the Company CX Graph, plus your own work and anything assigned to you. It does NOT show other people\'s private drafts: an admin reviews what people chose to submit, and nobody reads unsubmitted work belonging to someone else. Optional project/status/owner filters.',
+        'admin_list_jobs',
+        'ADMIN (D55, scoped in D98): jobs across all owners that have been SUBMITTED for review or ADMITTED to the Company CX Graph, plus your own work and anything assigned to you. It does NOT show other people\'s private drafts: an admin reviews what people chose to submit, and nobody reads unsubmitted work belonging to someone else. Optional project/status/owner filters.',
         {
             project: z.string().optional().describe('Filter by project'),
             status: z.enum(['experimental', 'approved', 'pending', 'active']).optional().describe('Filter by approval status'),
@@ -2278,7 +2929,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'admin_list_projects',
-        'ADMIN (D55): list Project records across ALL owners (personal list_projects scopes to the caller). Same guard posture as admin_list_recipes.',
+        'ADMIN (D55): list Project records across ALL owners (personal list_projects scopes to the caller). Same guard posture as admin_list_jobs.',
         {},
         async () => {
             if (!callerHasRole(context, 'admin')) return errorResult('Refused: admin cross-owner listing requires the admin role.')
@@ -2288,14 +2939,14 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'admin_reset_data',
-        'DESTRUCTIVE ADMIN RESET (D52): delete ALL recipes/ingredients, the catalog index, all project records, the work-context, and stored assets - leaving tools/model/config (incl. the settings override) intact. Requires confirm=true. Not available through the dashboard proxy; x-api-key/admin only.',
+        'DESTRUCTIVE ADMIN RESET (D52): delete ALL jobs/ingredients, the catalog index, all project records, the work-context, and stored assets - leaving tools/model/config (incl. the settings override) intact. Requires confirm=true. Not available through the dashboard proxy; x-api-key/admin only.',
         {
             confirm: z.boolean().describe('Must be true - a guard against accidental wipes')
         },
         async ({ confirm }) => {
             if (!callerHasRole(context, 'admin')) return errorResult('Refused: only an admin may reset the data store.')
             if (confirm !== true) {
-                return errorResult('Refusing to reset: pass confirm=true to delete all recipes, ingredients, projects, and the catalog (config is preserved).')
+                return errorResult('Refusing to reset: pass confirm=true to delete all jobs, ingredients, projects, and the catalog (config is preserved).')
             }
             const result = await store.resetAll()
             return jsonResult({ reset: true, ...result })
@@ -2304,7 +2955,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'get_role',
-        'Report the caller\'s role(s) (D64/D66): "chef" (everyone by default), "head-chef" (admits baked recipes into the Company CX Graph), and/or "admin" (manage roles, admin views, settings/reset). Also returns the resolved owner identity, the full roles array, and the head-chef roster. Read-only, safe for anyone. NOTE: roles bind to owner identity - on the shared x-api-key path the owner is a single service account, so real per-user enforcement arrives once an OAuth provider is wired (D66/Phase 2).',
+        'Report the caller\'s role(s) (D64/D66): "chef" (everyone by default), "head-chef" (admits baked jobs into the Company CX Graph), and/or "admin" (manage roles, admin views, settings/reset). Also returns the resolved owner identity, the full roles array, and the head-chef roster. Read-only, safe for anyone. NOTE: roles bind to owner identity - on the shared x-api-key path the owner is a single service account, so real per-user enforcement arrives once an OAuth provider is wired (D66/Phase 2).',
         {},
         async () => {
             const roles = callerRoles(context)
@@ -2371,10 +3022,10 @@ function registerTools (server, context = {}) {
         {
             id: z.string().min(2).describe('Login id, e.g. "jesse.pinkman" (case-insensitive; letters, numbers, dot, dash, underscore)'),
             password: z.string().min(8).describe('Initial password (minimum 8 characters). Stored only as a scrypt hash.'),
-            email: z.string().optional().describe('Work email - becomes the owner identity that authors their recipes, and matches them to the same person if SSO is enabled later. Strongly recommended.'),
+            email: z.string().optional().describe('Work email - becomes the owner identity that authors their jobs, and matches them to the same person if SSO is enabled later. Strongly recommended.'),
             display_name: z.string().optional().describe('Human-readable name, e.g. "Jesse Pinkman"'),
             roles: z.array(z.enum(['chef', 'head-chef', 'admin', 'viewer'])).optional().describe('Roles to grant. Omit for a normal consultant (chef). "viewer" is exclusive and read-only.'),
-            practices: z.array(z.string()).optional().describe('Practice/capability group ids this consultant works in (call list_practices). Their recipes inherit the first one.')
+            practices: z.array(z.string()).optional().describe('Practice/capability group ids this consultant works in (call list_practices). Their jobs inherit the first one.')
         },
         async ({ id, password, email, display_name: displayName, roles, practices }) => {
             if (!callerHasRole(context, 'admin')) return errorResult('Refused: only an admin may create Cookbook logins.')
@@ -2463,7 +3114,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'set_user_display_name',
-        'ADMIN ONLY (D96): correct how a person\'s name is shown. Names get typed in a hurry when a login is created, and a wrong one then follows that person across every recipe they author, so it needs to be fixable without recreating the account.',
+        'ADMIN ONLY (D96): correct how a person\'s name is shown. Names get typed in a hurry when a login is created, and a wrong one then follows that person across every job they author, so it needs to be fixable without recreating the account.',
         {
             id: z.string().min(2).describe('The login id whose name to change'),
             display_name: z.string().min(1).describe('How this person should be shown, e.g. "Dirk"')
@@ -2542,7 +3193,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'assign_step',
-        'Assign one ingredient to a colleague, which is what makes an UNFINISHED recipe visible to them (D86). Without an assignment, your drafts are yours alone until a Head Chef admits the recipe to the Company CX Graph. Use this to hand over a piece of work, ask for a review, or pull someone in. Assign by their login id or email. The recipe owner, a Head Chef or an admin may assign.',
+        'Assign one ingredient to a colleague, which is what makes an UNFINISHED job visible to them (D86). Without an assignment, your drafts are yours alone until a Head Chef admits the job to the Company CX Graph. Use this to hand over a piece of work, ask for a review, or pull someone in. Assign by their login id or email. The job owner, a Head Chef or an admin may assign.',
         {
             step_id: z.string().min(1).describe('The ingredient id, as returned by append_step/list_steps'),
             assignee: z.string().min(1).describe('Who to assign it to: their Cookbook login id or email'),
@@ -2551,12 +3202,12 @@ function registerTools (server, context = {}) {
         async ({ step_id: stepId, assignee, note }) => {
             const parsed = stepsLib.parseStepId(stepId)
             if (!parsed) return errorResult(`Not a valid ingredient id: '${stepId}'`)
-            const resource = await store.getResource(parsed.recipeId)
-            if (!resource) return errorResult(`No recipe found for ingredient '${stepId}'`)
+            const resource = await store.getResource(parsed.jobId)
+            if (!resource) return errorResult(`No job found for ingredient '${stepId}'`)
 
             const principal = resolvePrincipal(context)
             const mayAssign = resource.owner === principal || callerHasRole(context, 'head-chef') || callerHasRole(context, 'admin')
-            if (!mayAssign) return errorResult('Refused: only the recipe\'s owner, a Head Chef or an admin may assign its ingredients.')
+            if (!mayAssign) return errorResult('Refused: only the job\'s owner, a Head Chef or an admin may assign its ingredients.')
 
             const steps = stepsLib.ensureSteps(resource)
             const step = steps.find(s => s.id === stepId)
@@ -2573,23 +3224,23 @@ function registerTools (server, context = {}) {
             step.assignment_note = note || step.assignment_note
             step.assigned_by = principal
             step.assigned_at = new Date().toISOString()
-            projectRecipe(resource, steps, new Date().toISOString())
+            projectJob(resource, steps, new Date().toISOString())
             await store.saveResource(resource)
 
             return jsonResult({
                 step_id: stepId,
-                recipe_id: resource.id,
+                job_id: resource.id,
                 assigned_to: step.assigned_to,
                 already_assigned: already,
-                recipe_visible_to: resource.assigned_to || [],
-                note: `${who.owner} can now see this recipe in their Work Log, including the parts that are not finished.`
+                job_visible_to: resource.assigned_to || [],
+                note: `${who.owner} can now see this job in their Work Log, including the parts that are not finished.`
             })
         }
     )
 
     server.tool(
         'unassign_step',
-        'Remove an assignment from an ingredient (D86). If that was the only reason a colleague could see the recipe, they lose access to it again.',
+        'Remove an assignment from an ingredient (D86). If that was the only reason a colleague could see the job, they lose access to it again.',
         {
             step_id: z.string().min(1).describe('The ingredient id'),
             assignee: z.string().min(1).describe('Who to remove: their Cookbook login id or email')
@@ -2597,12 +3248,12 @@ function registerTools (server, context = {}) {
         async ({ step_id: stepId, assignee }) => {
             const parsed = stepsLib.parseStepId(stepId)
             if (!parsed) return errorResult(`Not a valid ingredient id: '${stepId}'`)
-            const resource = await store.getResource(parsed.recipeId)
-            if (!resource) return errorResult(`No recipe found for ingredient '${stepId}'`)
+            const resource = await store.getResource(parsed.jobId)
+            if (!resource) return errorResult(`No job found for ingredient '${stepId}'`)
 
             const principal = resolvePrincipal(context)
             const mayAssign = resource.owner === principal || callerHasRole(context, 'head-chef') || callerHasRole(context, 'admin')
-            if (!mayAssign) return errorResult('Refused: only the recipe\'s owner, a Head Chef or an admin may change its assignments.')
+            if (!mayAssign) return errorResult('Refused: only the job\'s owner, a Head Chef or an admin may change its assignments.')
 
             const steps = stepsLib.ensureSteps(resource)
             const step = steps.find(s => s.id === stepId)
@@ -2616,18 +3267,18 @@ function registerTools (server, context = {}) {
             step.assigned_to = (step.assigned_to || []).filter(a => a !== target)
             const removed = before !== step.assigned_to.length
             if (!step.assigned_to.length) delete step.assigned_to
-            projectRecipe(resource, steps, new Date().toISOString())
+            projectJob(resource, steps, new Date().toISOString())
             await store.saveResource(resource)
 
             const stillVisible = (resource.assigned_to || []).includes(target)
             return jsonResult({
                 step_id: stepId,
                 removed,
-                recipe_visible_to: resource.assigned_to || [],
+                job_visible_to: resource.assigned_to || [],
                 note: removed
                     ? (stillVisible
-                        ? `${target} is still assigned to another ingredient of this recipe, so they keep access.`
-                        : `${target} no longer has access to this recipe, unless it is admitted to the CX graph.`)
+                        ? `${target} is still assigned to another ingredient of this job, so they keep access.`
+                        : `${target} no longer has access to this job, unless it is admitted to the CX graph.`)
                     : `${target} was not assigned to this ingredient. Nothing changed.`
             })
         }
@@ -2648,9 +3299,9 @@ function registerTools (server, context = {}) {
                     if (s.status === 'discarded' || !(s.assigned_to || []).includes(me)) continue
                     out.push({
                         step_id: s.id,
-                        recipe_id: entry.id,
-                        recipe_title: entry.title,
-                        recipe_owner: entry.owner,
+                        job_id: entry.id,
+                        job_title: entry.title,
+                        job_owner: entry.owner,
                         kind: s.kind,
                         assigned_by: s.assigned_by || null,
                         assigned_at: s.assigned_at || null,
@@ -2664,18 +3315,52 @@ function registerTools (server, context = {}) {
     )
 
     server.tool(
-        'delete_recipe',
-        'ADMIN ONLY (D84): permanently delete ONE recipe - for junk, test data, or something captured by mistake. Until now an admin\'s only delete was admin_reset_data, which wipes everything, so removing one bad recipe meant destroying everyone\'s work. Refuses a recipe already admitted to the Company CX Graph unless force is true, because other people are relying on it.',
+        'delete_job',
+        'ADMIN ONLY (D84): permanently delete ONE job - for junk, test data, or something captured by mistake. NOT for tidying up agent runs: a run that ended in needs_input or faulted is evidence, and deleting the failed attempts after a retry makes the pipeline look like it worked first time. Runs are refused unless force is true and a human asked. Until now an admin\'s only delete was admin_reset_data, which wipes everything, so removing one bad job meant destroying everyone\'s work. Refuses a job already admitted to the Company CX Graph unless force is true, because other people are relying on it.',
         {
-            id: z.string().min(1).describe('The recipe id to delete'),
+            id: z.string().min(1).describe('The job id to delete'),
             force: z.boolean().optional().describe('Delete even if it is in the Company CX Graph. Requires deliberate intent - other people\'s work may reference it.')
         },
         async ({ id, force }) => {
-            if (!callerHasRole(context, 'admin')) return errorResult('Refused: only an admin may delete a recipe.')
+            if (!callerHasRole(context, 'admin')) return errorResult('Refused: only an admin may delete a job.')
             const resource = await store.getResource(id)
             if (!resource) return errorResult(`No resource found with id '${id}' - nothing to delete.`)
             if (resource.cx_approved === true && force !== true) {
                 return errorResult(`Refused: '${id}' is in the Company CX Graph, so other people's work may reference it. Hold it back first with headchef_reject, or pass force: true if you are certain.`)
+            }
+            /*
+             * AN AGENT RUN IS EVIDENCE, NOT CLUTTER.
+             *
+             * An assistant submitted a brief, got needs_input, rephrased it,
+             * got needs_input again, rephrased again, succeeded - and then
+             * deleted the two failures so as not to leave "junk runs". The
+             * store was left with one clean run, and the truth was three
+             * attempts against a parser that false-negatived twice.
+             *
+             * That is the exact opposite of what this layer is for. B1 says:
+             * "Track loop count as a health metric - more than two rounds means
+             * the agent FAILED, not the marketer." The failed attempts ARE the
+             * metric. Delete them and the agent looks like it worked first time,
+             * which is the reported-success-while-failing pattern this whole
+             * service exists to expose, produced by our own tidying up.
+             *
+             * So a run is refused by default. Junk and test data - things
+             * captured by hand, by mistake - delete as before.
+             */
+            if (resource.upstream && force !== true) {
+                const ranTo = (resource.agents || []).join(', ') || 'no stages'
+                return errorResult(
+                    `Refused: '${id}' is an AGENT RUN (${ranTo}), not something captured by hand, so it is ` +
+                    'evidence of what the pipeline did and it is not junk. ' +
+                    'If it ended in needs_input or faulted, that is the most useful kind of record in here: ' +
+                    'B1 measures agent health by how many rounds a brief takes, and deleting the rounds ' +
+                    'that failed makes the pipeline look like it worked first time. Three attempts recorded ' +
+                    'as one successful run is a false record, and producing those is the failure this ' +
+                    'service exists to catch. ' +
+                    'If you are cleaning up after retrying a brief: do not. Leave the attempts. ' +
+                    'If a specific artifact inside the run is genuinely wrong, discard_step removes that ' +
+                    'one and keeps the run. If a human has told you to delete this run, pass force: true.'
+                )
             }
             const summary = {
                 id,
@@ -2687,7 +3372,7 @@ function registerTools (server, context = {}) {
             }
             await store.deleteResource(id)
 
-            // D91: say when this leaves an empty project behind. Deleting recipes silently
+            // D91: say when this leaves an empty project behind. Deleting jobs silently
             // accumulated project records with nothing in them, which then showed up in the
             // dashboard's project filter and selected to an empty screen.
             let projectNowEmpty = false
@@ -2701,8 +3386,8 @@ function registerTools (server, context = {}) {
                 deleted_by: resolvePrincipal(context),
                 ...(projectNowEmpty ? { project_now_empty: summary.project } : {}),
                 note: projectNowEmpty
-                    ? `Permanently removed. '${summary.project}' now has no recipes: archive it with set_project_status so it stops appearing as a choice. Rebuild the CX graph if this recipe was in it.`
-                    : 'Permanently removed. Rebuild the CX graph (rebuild_cx_graph) if this recipe was in it.'
+                    ? `Permanently removed. '${summary.project}' now has no jobs: archive it with set_project_status so it stops appearing as a choice. Rebuild the CX graph if this job was in it.`
+                    : 'Permanently removed. Rebuild the CX graph (rebuild_cx_graph) if this job was in it.'
             })
         }
     )
@@ -2780,7 +3465,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'set_head_chefs',
-        'ADMIN ONLY (D64/D66): replace the Head Chef roster - the list of owner identities allowed to admit recipes into the Company CX Graph. Full replace. Persisted as a settings override. Guarded by the admin role. (set_user_roles is the newer, more general way to grant head-chef; this remains for roster-style edits.)',
+        'ADMIN ONLY (D64/D66): replace the Head Chef roster - the list of owner identities allowed to admit jobs into the Company CX Graph. Full replace. Persisted as a settings override. Guarded by the admin role. (set_user_roles is the newer, more general way to grant head-chef; this remains for roster-style edits.)',
         {
             head_chefs: z.array(z.string().min(1)).describe('The complete list of owner identities (email/username/sub, or "service-account" for the shared key) that should hold the head-chef role')
         },
@@ -2796,7 +3481,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'list_cx_pending',
-        'The Head Chef review queue (D64): baked recipes that a Head Chef has NOT yet admitted to the Company CX Graph (cx_approved !== true). Cross-owner (a Head Chef reviews everyone\'s candidates). Read-only. A baked recipe stays here until headchef_approve admits it or headchef_reject holds it back.',
+        'The Head Chef review queue (D64): baked jobs that a Head Chef has NOT yet admitted to the Company CX Graph (cx_approved !== true). Cross-owner (a Head Chef reviews everyone\'s candidates). Read-only. A baked job stays here until headchef_approve admits it or headchef_reject holds it back.',
         {
             project: z.string().optional().describe('Filter the queue to one project')
         },
@@ -2814,54 +3499,54 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'headchef_approve',
-        'HEAD CHEF ONLY (D64): admit a baked recipe into the Company CX Graph - sets cx_approved. Guarded: only a caller whose owner identity is on the head-chef roster (settings.head_chefs) may call this; anyone else is refused. The recipe must be baked first (a candidate). This is the second tier of the two-tier flow: chef bakes -> Head Chef admits.',
+        'HEAD CHEF ONLY (D64): admit a baked job into the Company CX Graph - sets cx_approved. Guarded: only a caller whose owner identity is on the head-chef roster (settings.head_chefs) may call this; anyone else is refused. The job must be baked first (a candidate). This is the second tier of the two-tier flow: chef bakes -> Head Chef admits.',
         {
-            recipe_id: z.string().min(1).describe('The baked recipe id to admit into the CX graph')
+            job_id: z.string().min(1).describe('The baked job id to admit into the CX graph')
         },
-        async ({ recipe_id: recipeId }) => {
+        async ({ job_id: jobId }) => {
             if (!callerHasRole(context, 'head-chef')) {
-                return errorResult('Refused: only a Head Chef may admit recipes into the Company CX Graph. Ask an admin to add you to settings.head_chefs (set_head_chefs).')
+                return errorResult('Refused: only a Head Chef may admit jobs into the Company CX Graph. Ask an admin to add you to settings.head_chefs (set_head_chefs).')
             }
-            const resource = await store.getResource(recipeId)
-            if (!resource) return errorResult(`No recipe found with id '${recipeId}'`)
-            if (resource.type === HANDOFF_TYPE) return errorResult(`Resource '${recipeId}' is a handoff-prompt, not a recipe`)
-            if (resource.baked !== true) return errorResult(`Recipe '${recipeId}' is not baked yet - only baked recipes are CX candidates. Bake it first (bake_recipe).`)
+            const resource = await store.getResource(jobId)
+            if (!resource) return errorResult(`No job found with id '${jobId}'`)
+            if (resource.type === HANDOFF_TYPE) return errorResult(`Resource '${jobId}' is a handoff-prompt, not a job`)
+            if (resource.baked !== true) return errorResult(`Job '${jobId}' is not baked yet - only baked jobs are CX candidates. Bake it first (bake_job).`)
             const now = new Date().toISOString()
             resource.cx_approved = true
             resource.cx_approved_by = resolvePrincipal(context)
             resource.cx_approved_at = now
             await store.saveResource(resource)
-            return jsonResult({ id: recipeId, cx_approved: true, cx_approved_by: resource.cx_approved_by, cx_approved_at: now })
+            return jsonResult({ id: jobId, cx_approved: true, cx_approved_by: resource.cx_approved_by, cx_approved_at: now })
         }
     )
 
     server.tool(
         'headchef_reject',
-        'HEAD CHEF ONLY (D64): hold a baked recipe back OUT of the Company CX Graph - clears cx_approved (false). Same head-chef guard as headchef_approve. Use to reverse an earlier admission or to explicitly decline a candidate; the recipe stays baked and owner-visible, it just does not appear in the cross-owner CX graph.',
+        'HEAD CHEF ONLY (D64): hold a baked job back OUT of the Company CX Graph - clears cx_approved (false). Same head-chef guard as headchef_approve. Use to reverse an earlier admission or to explicitly decline a candidate; the job stays baked and owner-visible, it just does not appear in the cross-owner CX graph.',
         {
-            recipe_id: z.string().min(1).describe('The recipe id to hold back out of the CX graph')
+            job_id: z.string().min(1).describe('The job id to hold back out of the CX graph')
         },
-        async ({ recipe_id: recipeId }) => {
+        async ({ job_id: jobId }) => {
             if (!callerHasRole(context, 'head-chef')) {
-                return errorResult('Refused: only a Head Chef may change a recipe\'s CX-graph admission. Ask an admin to add you to settings.head_chefs (set_head_chefs).')
+                return errorResult('Refused: only a Head Chef may change a job\'s CX-graph admission. Ask an admin to add you to settings.head_chefs (set_head_chefs).')
             }
-            const resource = await store.getResource(recipeId)
-            if (!resource) return errorResult(`No recipe found with id '${recipeId}'`)
-            if (resource.type === HANDOFF_TYPE) return errorResult(`Resource '${recipeId}' is a handoff-prompt, not a recipe`)
-            // Candidate gate (D79 bugfix): only a BAKED recipe is a CX candidate, so only a baked
-            // recipe can be held back. headchef_approve always enforced this; reject did not - which
+            const resource = await store.getResource(jobId)
+            if (!resource) return errorResult(`No job found with id '${jobId}'`)
+            if (resource.type === HANDOFF_TYPE) return errorResult(`Resource '${jobId}' is a handoff-prompt, not a job`)
+            // Candidate gate (D79 bugfix): only a BAKED job is a CX candidate, so only a baked
+            // job can be held back. headchef_approve always enforced this; reject did not - which
             // let a head-chef stamp cx_approved:false onto another owner's private, un-baked,
             // still-experimental work (a pointless cross-owner write on something that was never a
             // candidate, and a confusing audit trail). Now symmetric with approve.
             if (resource.baked !== true) {
-                return errorResult(`Recipe '${recipeId}' is not baked, so it is not a CX candidate - there is nothing to hold back. Only baked recipes reach the Head Chef queue (list_cx_pending).`)
+                return errorResult(`Job '${jobId}' is not baked, so it is not a CX candidate - there is nothing to hold back. Only baked jobs reach the Head Chef queue (list_cx_pending).`)
             }
             const now = new Date().toISOString()
             resource.cx_approved = false
             resource.cx_approved_by = resolvePrincipal(context)
             resource.cx_approved_at = now
             await store.saveResource(resource)
-            return jsonResult({ id: recipeId, cx_approved: false, cx_approved_by: resource.cx_approved_by, cx_approved_at: now })
+            return jsonResult({ id: jobId, cx_approved: false, cx_approved_by: resource.cx_approved_by, cx_approved_at: now })
         }
     )
 
@@ -2875,18 +3560,18 @@ function registerTools (server, context = {}) {
      * 100% blue to everybody else. A leaderboard that ranks and colours people differently
      * depending on who is looking is not a leaderboard.
      *
-     * So the denominator is published here, as COUNTS ONLY: how many recipes each person has
+     * So the denominator is published here, as COUNTS ONLY: how many jobs each person has
      * submitted, and how many got in. No titles, no ids, no projects, no dates - nothing about WHAT
      * anyone submitted, which stays as private as it was. What this does reveal is that a colleague
-     * has n recipes waiting on review, and that is the accepted cost of one honest board.
+     * has n jobs waiting on review, and that is the accepted cost of one honest board.
      */
     server.tool(
         'get_cookoff',
-        'The Cook-off board: per-person counts of recipes SUBMITTED for review and ADMITTED to the Company CX Graph, so every viewer computes the same standings and the same purity. Counts only - it carries no titles, ids, projects or dates, and reveals nothing about the content of anyone\'s unadmitted work. Readable by everyone on purpose: a leaderboard that differs by viewer is not a leaderboard.',
+        'The Cook-off board: per-person counts of jobs SUBMITTED for review and ADMITTED to the Company CX Graph, so every viewer computes the same standings and the same purity. Counts only - it carries no titles, ids, projects or dates, and reveals nothing about the content of anyone\'s unadmitted work. Readable by everyone on purpose: a leaderboard that differs by viewer is not a leaderboard.',
         {},
         async () => {
             // Deliberately unscoped: this aggregates across owners by design, and returns nothing
-            // that identifies a recipe. Every other cross-owner read in this file is filtered.
+            // that identifies a job. Every other cross-owner read in this file is filtered.
             const entries = await store.listResources({})
             const byOwner = new Map()
             for (const entry of entries) {
@@ -2895,7 +3580,7 @@ function registerTools (server, context = {}) {
                 if (entry.type === HANDOFF_TYPE) continue
                 if (!byOwner.has(owner)) byOwner.set(owner, { owner, submitted: 0, admitted: 0 })
                 const row = byOwner.get(owner)
-                // Admitting a recipe never clears baked, so submitted is the superset.
+                // Admitting a job never clears baked, so submitted is the superset.
                 if (entry.baked === true) row.submitted++
                 if (entry.cx_approved === true) row.admitted++
             }
@@ -2903,7 +3588,7 @@ function registerTools (server, context = {}) {
                 .filter(r => r.submitted > 0 || r.admitted > 0)
                 .map(r => ({
                     ...r,
-                    // A recipe admitted without a recorded bake would otherwise produce >100%.
+                    // A job admitted without a recorded bake would otherwise produce >100%.
                     submitted: Math.max(r.submitted, r.admitted),
                     purity: r.submitted || r.admitted
                         ? Math.round((r.admitted / Math.max(r.submitted, r.admitted)) * 1000) / 10
@@ -2916,7 +3601,7 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'get_cx_graph',
-        'Read the compiled Company CX Knowledge Graph (D40/D53): the cross-owner, APPROVED-ONLY view (nodes = approved recipes + their approved ingredients; edges = composition, lineage, and shared tag/segment/kind). Read-only and safe cross-owner - only consented content is here. Returns the last compile (generated_at) or a not-yet-built marker.',
+        'Read the compiled Company CX Knowledge Graph (D40/D53): the cross-owner, APPROVED-ONLY view (nodes = approved jobs + their approved ingredients; edges = composition, lineage, and shared tag/segment/kind). Read-only and safe cross-owner - only consented content is here. Returns the last compile (generated_at) or a not-yet-built marker.',
         {},
         async () => {
             const graph = await store.getCxGraph()
@@ -2927,11 +3612,11 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'rebuild_cx_graph',
-        'Recompile the Company CX Knowledge Graph now from all APPROVED recipes across owners, and cache it. Guarded write (runs under the shared service key today; per-user RBAC later). Also runs daily on a schedule.',
+        'Recompile the Company CX Knowledge Graph now from all APPROVED jobs across owners, and cache it. Guarded write (runs under the shared service key today; per-user RBAC later). Also runs daily on a schedule.',
         {},
         async () => {
             const graph = await cxGraph.rebuildAndStore()
-            return jsonResult({ rebuilt: true, generated_at: graph.generated_at, recipe_count: graph.recipe_count, node_count: graph.node_count, edge_count: graph.edge_count, owners: graph.owners })
+            return jsonResult({ rebuilt: true, generated_at: graph.generated_at, job_count: graph.job_count, node_count: graph.node_count, edge_count: graph.edge_count, owners: graph.owners })
         }
     )
 }
@@ -2939,7 +3624,7 @@ function registerTools (server, context = {}) {
 /**
  * Register captured resources as native MCP Resources (Part B, D26) - so any MCP
  * client (not just the one that saved it) can list/read company knowledge, not
- * just via the custom tools above. Only APPROVED cookbook recipes are exposed:
+ * just via the custom tools above. Only APPROVED cookbook jobs are exposed:
  * experimental ones aren't consented yet, and handoff-prompts are active task
  * briefs, not reusable cookbook knowledge (D38/D42), so both are excluded. The
  * "active" status filter is alias-aware, so it matches both the new "approved"
@@ -2957,7 +3642,7 @@ function registerResources (server, context = {}) {
     const template = new ResourceTemplate('resource://company/{type}/{id}', {
         list: async () => {
             // D99: the same visibility rules as every other read. "approved" alone is not a
-            // sharing decision, because approving one ingredient promotes its recipe, so this
+            // sharing decision, because approving one ingredient promotes its job, so this
             // surface was listing people's private drafts to any connected client.
             const entries = (await store.listResources({
                 status: 'approved',
@@ -2987,7 +3672,7 @@ function registerResources (server, context = {}) {
                 throw new Error(`Resource ${uri} not found`)
             }
             // The composed how-to (D45): approved steps only, in their original order -
-            // a recipe with unreviewed draft steps alongside its approved ones exposes
+            // a job with unreviewed draft steps alongside its approved ones exposes
             // only the certified subset here.
             const approvedContent = stepsLib.composeContent(stepsLib.ensureSteps(resource), { approvedOnly: true })
             return {
@@ -3049,18 +3734,18 @@ function registerPrompts (server) {
     )
 
     server.prompt(
-        'use-recipe',
-        'Load a certified house recipe into this conversation as skill context - the "auto-skilling" path (D31). Look it up via search_resources/list_resources first, then pass its id here.',
+        'use-job',
+        'Load a certified house job into this conversation as skill context - the "auto-skilling" path (D31). Look it up via search_resources/list_resources first, then pass its id here.',
         {
-            recipe_id: z.string().describe('The recipe id to load, as returned by search_resources or list_resources')
+            job_id: z.string().describe('The job id to load, as returned by search_resources or list_resources')
         },
-        async ({ recipe_id: recipeId }) => ({
+        async ({ job_id: jobId }) => ({
             messages: [
                 {
                     role: 'user',
                     content: {
                         type: 'text',
-                        text: `Call export_as_skill with recipe_id "${recipeId}" (format "prompt") and treat the returned content as trusted company context for the rest of this conversation.`
+                        text: `Call export_as_skill with job_id "${jobId}" (format "prompt") and treat the returned content as trusted company context for the rest of this conversation.`
                     }
                 }
             ]

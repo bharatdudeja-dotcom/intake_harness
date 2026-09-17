@@ -252,20 +252,20 @@ describe('MCP Server - Company Connector', () => {
                 'get_resource_policy', 'list_resource_types', 'get_segmentation_config',
                 'start_project', 'set_work_context', 'save_resource', 'find_similar',
                 'approve_resource', 'certify', 'export_as_skill',
-                'list_active_tasks', 'set_task_status', 'link_recipes',
+                'list_active_tasks', 'set_task_status', 'link_jobs',
                 'list_resources', 'search_resources', 'get_resource',
-                // Increment 11 (D45): ordered Step/Recipe model + project lifecycle + retention
-                'start_recipe', 'append_step', 'approve_step', 'approve_steps', 'discard_step',
-                'get_recipe', 'list_recipes', 'list_steps',
+                // Increment 11 (D45): ordered Step/Job model + project lifecycle + retention
+                'start_job', 'append_step', 'approve_step', 'approve_steps', 'discard_step',
+                'get_job', 'list_jobs', 'list_steps',
                 'bake_project', 'set_project_status', 'list_projects', 'purge_expired',
-                // Increment 12 (D47/D48): task=recipe cross-tool, recipe bake, editable settings
-                'get_active_recipe', 'bake_recipe', 'get_settings', 'update_settings',
+                // Increment 12 (D47/D48): task=job cross-tool, job bake, editable settings
+                'get_active_job', 'bake_job', 'get_settings', 'update_settings',
                 // Increment 14 (D52): destructive admin reset
                 'admin_reset_data',
                 // Increment 14 (D53): company CX knowledge graph
                 'get_cx_graph', 'rebuild_cx_graph',
                 // Increment 15 (D55): admin cross-owner views
-                'admin_list_recipes', 'admin_list_projects',
+                'admin_list_jobs', 'admin_list_projects',
                 // Increment 18 (D64): chef roles + Head Chef CX-graph gate
                 'get_role', 'set_head_chefs', 'list_cx_pending', 'headchef_approve', 'headchef_reject',
                 // Increment 19 (D66): multi-role RBAC
@@ -277,7 +277,7 @@ describe('MCP Server - Company Connector', () => {
                 // D82: self-service password change
                 'change_my_password',
                 // D84: targeted admin delete
-                'delete_recipe',
+                'delete_job',
                 // D86: assignment, the explicit share of unfinished work
                 'assign_step', 'unassign_step', 'list_my_assignments',
                 // D96: the name directory
@@ -294,10 +294,16 @@ describe('MCP Server - Company Connector', () => {
             // not be a deploy, so it gets the same setter/checker pair.
             expect(toolNames).toContain('set_agent_system')
             expect(toolNames).toContain('check_agent_system')
-                        // The gateway's own tools are DISCOVERED and are not in this count:
+            // The approval at 1.5 - the decision that lets a job leave phase 1.
+            // Named here because an assistant with no tool for the PROCESS
+            // approval reached for certify instead, promoting the record into
+            // Playbooks while the job sat unmoved at the gate.
+            expect(toolNames).toContain('approve_intake')
+            expect(toolNames).toContain('reject_intake')
+            // The gateway's own tools are DISCOVERED and are not in this count:
             // no server has gateway:true in the seed, so nothing is proxied here.
             expect(toolNames).toContain('list_gateway_tools')
-            expect(toolNames).toHaveLength(70)
+            expect(toolNames).toHaveLength(72)
         })
 
     })
@@ -353,7 +359,7 @@ describe('MCP Server - Company Connector', () => {
             expect(byTag[0].title).toBe('other note')
         })
 
-        test('recipe saves experimental; approve_resource promotes it to approved with consent fields', async () => {
+        test('job saves experimental; approve_resource promotes it to approved with consent fields', async () => {
             const saveBody = await callTool('save_resource', {
                 type: 'architecture-diagram',
                 title: 'System overview',

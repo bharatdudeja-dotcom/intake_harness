@@ -73,8 +73,8 @@ a real constraint on local verification — see *Not yet verified* below.
 There is no database. Everything is JSON blobs via `aio-lib-files`:
 
 ```
-resources/index.json        catalog - metadata projection of every recipe
-resources/<id>.json         one full recipe document, steps inline
+resources/index.json        catalog - metadata projection of every job
+resources/<id>.json         one full job document, steps inline
 resources/projects.json     project list
 resources/work-context.json active project/epic/story per owner
 resources/settings.json     retention window, roles, practices
@@ -84,11 +84,11 @@ resources/users.json        accounts + credentials (own doc, so a settings
 assets/<id>.<ext>           binary blobs (images, rendered diagrams)
 ```
 
-**Project → Recipe → Step.** A recipe is an *ordered container of steps*
-(`lib/steps.js`, D45). Step ids are `<recipeId>::s<order>` — parseable, stable,
-never reshuffled. The recipe's flat top-level fields (`content`, `status`,
+**Project → Job → Step.** A job is an *ordered container of steps*
+(`lib/steps.js`, D45). Step ids are `<jobId>::s<order>` — parseable, stable,
+never reshuffled. The job's flat top-level fields (`content`, `status`,
 `tokens_used`, ...) are a **composed projection of its steps**, computed on read,
-not stored as independent truth. Pre-D45 recipes have no `steps` array;
+not stored as independent truth. Pre-D45 jobs have no `steps` array;
 `ensureSteps()` synthesizes one from the legacy fields, so every tool works
 either way.
 
@@ -111,7 +111,7 @@ callers changing. Useful to us: our own storage decision is isolated to one file
 - `x-cookbook-login: user:password` → the direct login header
 
 `resolveRequestAuth()` returns the owner identity. **Everything binds to
-`owner`** — recipes, roles, visibility. The `x-api-key` path resolves to a
+`owner`** — jobs, roles, visibility. The `x-api-key` path resolves to a
 single service account, which is exactly the attribution problem we hit earlier
 in this project.
 
@@ -133,30 +133,30 @@ themselves, so each person sees their own cookbook rather than one shared view.
 and a green variant. Warm canvas `#FAF9F5`, terracotta accent `#C96442`,
 Fraunces for headings, Inter for body. We kept all of it.
 
-## Approval path — the part the Hero Agent replaces
+## Approval path — the part the Oracle replaces
 
 Two-tier consent (D64):
 
 1. A **chef** (everyone, by default) approves individual steps
-   (`approve_step` / `approve_steps`) and **bakes** the recipe once at least one
+   (`approve_step` / `approve_steps`) and **bakes** the job once at least one
    step is approved. That finalizes it into that owner's cookbook.
-2. A **head chef** then admits a baked recipe into the Company CX Graph
+2. A **head chef** then admits a baked job into the Company CX Graph
    (`headchef_approve` / `headchef_reject`), flipping `cx_approved`.
 
-`lib/cx-graph.js` compiles the graph from recipes where `cx_approved === true`
-only, and builds nodes for recipes, their approved ingredients, and handoffs,
+`lib/cx-graph.js` compiles the graph from jobs where `cx_approved === true`
+only, and builds nodes for jobs, their approved ingredients, and handoffs,
 with `lineage` edges between them.
 
 Role checks are `callerHasRole(context, 'head-chef') || callerHasRole(context, 'admin')`.
 
 **This is precisely where our rule lands:** where the cookbook lets a head chef
-approve, Agent Manager makes that a human-only gate, and the Hero Agent gets no
+approve, Agent Manager makes that a human-only gate, and the Oracle gets no
 code path to it.
 
 ## Retention
 
 `lib/retention.js` (D44/D45). A step is purged only while **still experimental
-AND past `expires_at`**. Approved content is never touched. A recipe left with
+AND past `expires_at`**. Approved content is never touched. A job left with
 no approved steps goes too. Shared by the `purge_expired` tool and a daily cron
 (`0 3 * * *`); the CX graph recompiles daily at `0 4 * * *`. Idempotent.
 
@@ -175,19 +175,19 @@ no approved steps goes too. Shared by the `purge_expired` tool and a daily cron
 ## The rename, and what is deliberately staged
 
 Applied to **everything a person sees**, and verified: all identifiers intact
-(`recipe_id`, `data-open-recipe`, `linked_recipes`, the `head-chef` role value),
+(`job_id`, `data-open-job`, `linked_jobs`, the `head-chef` role value),
 and the 2256-line inline script still passes `node --check`.
 
 | Cookbook | Agent Manager | Where |
 |---|---|---|
 | Project | Programme | nav, panel title |
-| Recipe | Run | panel copy |
+| Job | Run | panel copy |
 | Step / ingredient | Event | Event Log |
 | Chef | Marketer | role chip, display copy |
-| Head chef | **Hero Agent** | nav, panel title, all copy |
-| Practice | **Agent** (with a mark) | graph filter, recipe meta, login form |
+| Head chef | **Oracle** | nav, panel title, all copy |
+| Practice | **Agent** (with a mark) | graph filter, job meta, login form |
 | Company CX Graph | Shared Knowledge Graph | nav, panel title |
-| Knowledge Graph | **Hero Agent Graph** | nav |
+| Knowledge Graph | **Oracle Graph** | nav |
 | Active tasks | Live Queue | nav, panel title |
 | Cookbook | Playbooks | nav, panel title |
 | Cook-off | **removed** | nav entry deleted |
@@ -201,7 +201,7 @@ source of truth**.
 
 ### Staged on purpose, not forgotten
 
-`recipe` / `ingredient` / `project` are **not** renamed in storage keys, MCP tool
+`job` / `ingredient` / `project` are **not** renamed in storage keys, MCP tool
 names or JSON field names. Those are the wire contract: tool names are what
 connected Claude clients call, and field names are what every stored document
 already uses. Renaming them is a migration plus a client-config change, buys a
@@ -221,6 +221,6 @@ Honest list, because CX Agent Manager has not been deployed:
   the dashboard proxy under the new name.
 - `renderCookOff()` and its panel markup are still present, now unreachable
   because the nav entry is gone. Dead code to delete, not a behaviour change.
-- The Chauncey adapter, the Hero's Journey stage mapping, loop-count surfacing,
+- The Chauncey adapter, the Oracle's Journey stage mapping, loop-count surfacing,
   reconciliation and the queue filters from the Python build are **not yet
   ported**. That is the next piece of work.

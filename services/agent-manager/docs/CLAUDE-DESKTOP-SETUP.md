@@ -84,7 +84,7 @@ WHAT TO DO HERE
   a time ledger. get_intake reads one back.
 - list_agent_systems / list_system_agents show the estate. Read it, never
   assume it — an agent added upstream appears without a deploy.
-- list_recipes / get_recipe / search_resources answer "has this failed
+- list_jobs / get_job / search_resources answer "has this failed
   before", which no single run can. That is the point of the layer.
 - list_gateway_tools shows what other MCP servers are being re-exposed through
   Agent Manager.
@@ -103,7 +103,7 @@ WHAT YOU MAY WRITE
   record how a human steered or corrected a run. Corrections are the most
   valuable thing in the store.
 - approve_step / approve_steps to mark the parts of a run worth keeping, then
-  bake_recipe to hand it to the Hero Agent, which reads it against every
+  bake_job to hand it to the Oracle, which reads it against every
   earlier run and PROPOSES what should be learned. A named human always
   decides.
 
@@ -133,8 +133,8 @@ Expect all three stages and a time ledger. Then open
 <http://localhost:3000> → **Event Log** and read the artifacts. Any Workfront
 object an agent created is linked from the artifact that created it.
 
-Approvals live in **Agents → the Hero Agent card**, not a panel of their own:
-the Hero Agent proposes and a named human decides, so both sit together.
+Approvals live in **Agents → the Oracle card**, not a panel of their own:
+the Oracle proposes and a named human decides, so both sit together.
 
 **D. B1, the loop.** *"Start an intake for: we want to do something for our
 existing customers next quarter."*

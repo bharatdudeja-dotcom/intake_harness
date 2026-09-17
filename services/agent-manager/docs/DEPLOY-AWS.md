@@ -205,7 +205,7 @@ being asked for and **it cannot work yet.**
 - A brief starts a run on Chauncey's pipeline
 - Intake, review and audience-creation execute
 - Every stage is captured as artifacts of one run, visible in the dashboard
-- Approve hands the run to the Hero Agent; a named human promotes
+- Approve hands the run to the Oracle; a named human promotes
 
 **Does not work yet, and neither is ours to fix:**
 
@@ -235,5 +235,5 @@ fixes on Chauncey's side and worth doing before any demo.**
 4. Create logins, hand out the kit from Settings → Team
 5. A marketer writes a brief in Claude Desktop and we watch it land
 
-Steps 3 to 5 do not depend on 1 and 2 — the log, the dashboard and the Hero
+Steps 3 to 5 do not depend on 1 and 2 — the log, the dashboard and the Oracle
 Agent all work without Workfront. But the demo is much better with them done.

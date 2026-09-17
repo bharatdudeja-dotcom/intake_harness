@@ -25,10 +25,17 @@ const { purgeExpired } = require('../../lib/retention')
  * @returns {Promise<{statusCode: number, body: object}>}
  */
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     const logger = Core.Logger('purge-scheduled', { level: params.LOG_LEVEL || 'info' })
     try {
         const result = await purgeExpired()
-        logger.info(`Retention purge complete: checked ${result.checked}, purged ${result.purged_steps} step(s), removed ${result.purged_recipes} empty recipe(s)`)
+        logger.info(`Retention purge complete: checked ${result.checked}, purged ${result.purged_steps} step(s), removed ${result.purged_jobs} empty job(s)`)
         return { statusCode: 200, body: result }
     } catch (error) {
         logger.error('Retention purge failed:', error)

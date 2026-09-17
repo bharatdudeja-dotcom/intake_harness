@@ -33,7 +33,7 @@ flowchart TB
         LIB["lib/ · agent-systems · mcp-servers · cx-graph<br/>narrate · steps · policy · retention · segmentation"]
         CFG[("config/*.json · six registries")]
         ST[("store.js → storage/<br/>fs · s3 · gcs · aio<br/><b>append-only run log</b>")]
-        HERO["Hero Agent<br/><i>proposes only</i>"]
+        ORACLE["Oracle<br/><i>proposes only</i>"]
     end
 
     HU(["HUMAN<br/><i>every promotion</i>"])
@@ -56,7 +56,7 @@ flowchart TB
     HAR --> AG
     AG -->|"<b>direct — bypasses Agent Manager</b>"| AEC
     LIB -. "registry entry only,<br/>no live path" .-> WF
-    ST --> HERO -->|"proposes"| HU ==>|"only path to promotion"| CX
+    ST --> ORACLE -->|"proposes"| HU ==>|"only path to promotion"| CX
 
     style AM fill:#0E6E6E15,stroke:#0E6E6E
     style UP fill:#5C687515,stroke:#5C6875,stroke-dasharray: 4 4
@@ -129,7 +129,7 @@ which makes it the knowledge graph.
 ## 5. Where this differs from the whiteboard sketch
 
 The sketch is right about the shape: one MCP to the assistant, a hub, agents
-behind it, Hero Agent proposing into a human-gated CX Graph. Four differences
+behind it, Oracle proposing into a human-gated CX Graph. Four differences
 matter.
 
 **1. Capture is polled, not intercepted.** The sketch implies every agent call
@@ -145,7 +145,7 @@ the harness agents, not routed through Agent Manager. The MCP-server registry is
 a catalogue Agent Manager reasons about, not a proxy it sits in. Three of the
 four hexagons on the sketch are aspiration today.
 
-**3. Hero Agent is not a downstream box.** It is a function inside Agent Manager,
+**3. Oracle is not a downstream box.** It is a function inside Agent Manager,
 `lib/cx-graph.js` plus the proposal path. Human approval as the only route into
 the CX Graph is correct on the sketch and correct in the code.
 

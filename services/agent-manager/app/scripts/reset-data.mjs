@@ -12,7 +12,7 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Reset the connector to a blank slate (D51/D52): delete all recipes/ingredients, the
+ * Reset the connector to a blank slate (D51/D52): delete all jobs/ingredients, the
  * catalog index, all project records, the work-context, and stored assets from the store,
  * plus the LOCAL ingest/recapture manifests - leaving tools/model/config intact.
  *
@@ -58,7 +58,7 @@ async function callTool (mcpUrl, apiKey, name, args) {
 
 async function main () {
     if (!process.argv.includes('--confirm')) {
-        console.error('✗ Refusing to reset. This deletes ALL recipes, ingredients, and project records.')
+        console.error('✗ Refusing to reset. This deletes ALL jobs, ingredients, and project records.')
         console.error('  Re-run with --confirm to proceed:  node scripts/reset-data.mjs --confirm')
         process.exit(1)
     }
@@ -72,7 +72,7 @@ async function main () {
 
     console.log(`Resetting ${mcpUrl} …`)
     const result = await callTool(mcpUrl, apiKey, 'admin_reset_data', { confirm: true })
-    console.log(`  store: deleted ${result.deleted} file(s) (${result.recipes} recipe/index/project, ${result.assets} asset). Settings/config preserved.`)
+    console.log(`  store: deleted ${result.deleted} file(s) (${result.jobs} job/index/project, ${result.assets} asset). Settings/config preserved.`)
 
     for (const name of LOCAL_MANIFESTS) {
         const p = join(SCRIPTS_DIR, name)
@@ -80,10 +80,10 @@ async function main () {
     }
 
     // Verify blank slate
-    const recipes = await callTool(mcpUrl, apiKey, 'list_recipes', {})
+    const jobs = await callTool(mcpUrl, apiKey, 'list_jobs', {})
     const projects = await callTool(mcpUrl, apiKey, 'list_projects', {})
-    console.log(`\n=== Verify ===\nlist_recipes: ${recipes.length}   list_projects: ${projects.length}`)
-    if (recipes.length !== 0 || projects.length !== 0) { console.error('✗ Not empty after reset'); process.exit(1) }
+    console.log(`\n=== Verify ===\nlist_jobs: ${jobs.length}   list_projects: ${projects.length}`)
+    if (jobs.length !== 0 || projects.length !== 0) { console.error('✗ Not empty after reset'); process.exit(1) }
     console.log('✓ Blank slate.')
 }
 

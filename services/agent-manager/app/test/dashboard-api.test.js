@@ -171,7 +171,7 @@ describe('dashboard-api - per-user IMS login (D65)', () => {
             DASHBOARD_OAUTH_CLIENT_ID: 'spa-public-123',
             __ow_method: 'post',
             __ow_headers: { authorization: 'Bearer USER-IMS-TOKEN' },
-            __ow_body: rpcBody('tools/call', { name: 'list_recipes', arguments: {} })
+            __ow_body: rpcBody('tools/call', { name: 'list_jobs', arguments: {} })
         }))
         expect(result.statusCode).toBe(200)
         const [, init] = global.fetch.mock.calls[0]
@@ -183,7 +183,7 @@ describe('dashboard-api - per-user IMS login (D65)', () => {
         const result = await main(baseParams({
             DASHBOARD_OAUTH_CLIENT_ID: 'spa-public-123',
             __ow_method: 'post',
-            __ow_body: rpcBody('tools/call', { name: 'list_recipes', arguments: {} })
+            __ow_body: rpcBody('tools/call', { name: 'list_jobs', arguments: {} })
         }))
         expect(result.statusCode).toBe(401)
         expect(global.fetch).not.toHaveBeenCalled()
@@ -192,7 +192,7 @@ describe('dashboard-api - per-user IMS login (D65)', () => {
 
     test('when login is NOT configured, anonymous shared-key mode still works (back-compat)', async () => {
         global.fetch.mockResolvedValueOnce({ status: 200, text: async () => JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }) })
-        const result = await main(baseParams({ __ow_method: 'post', __ow_body: rpcBody('tools/call', { name: 'list_recipes', arguments: {} }) }))
+        const result = await main(baseParams({ __ow_method: 'post', __ow_body: rpcBody('tools/call', { name: 'list_jobs', arguments: {} }) }))
         expect(result.statusCode).toBe(200)
         const [, init] = global.fetch.mock.calls[0]
         expect(init.headers['x-api-key']).toBe(TEST_KEY)
@@ -204,7 +204,7 @@ describe('dashboard-api - per-user IMS login (D65)', () => {
         const result = await main(baseParams({
             __ow_method: 'post',
             __ow_headers: { authorization: 'Bearer USER-TOKEN' },
-            __ow_body: rpcBody('tools/call', { name: 'list_recipes', arguments: {} })
+            __ow_body: rpcBody('tools/call', { name: 'list_jobs', arguments: {} })
         }))
         expect(result.statusCode).toBe(200)
         const [, init] = global.fetch.mock.calls[0]
@@ -219,7 +219,7 @@ describe('dashboard-api - per-user IMS login (D65)', () => {
 })
 
 describe('dashboard-api - interim static-passcode lock (D65 stopgap)', () => {
-    const rpcCall = () => rpcBody('tools/call', { name: 'list_recipes', arguments: {} })
+    const rpcCall = () => rpcBody('tools/call', { name: 'list_jobs', arguments: {} })
 
     test('GET info advertises whether a passcode is required, never the passcode itself', async () => {
         const off = JSON.parse((await main(baseParams())).body)
@@ -325,9 +325,9 @@ describe('dashboard-api - tool allowlist (observe + approve, not author)', () =>
     test('allows the Increment 12 daily-driver reads + lifecycle writes + guarded update_settings (D48)', async () => {
         const tools = [
             // reads
-            'get_recipe', 'list_recipes', 'list_steps', 'list_projects', 'get_settings',
+            'get_job', 'list_jobs', 'list_steps', 'list_projects', 'get_settings',
             // consent / lifecycle writes
-            'approve_step', 'approve_steps', 'discard_step', 'bake_recipe', 'bake_project', 'set_project_status',
+            'approve_step', 'approve_steps', 'discard_step', 'bake_job', 'bake_project', 'set_project_status',
             // guarded settings write
             'update_settings',
             // CX graph: read + guarded rebuild (D53)
@@ -358,7 +358,7 @@ test('rejects the admin list tools - the dashboard has one view and does not cal
         // These were proxied for a "My view / All owners" toggle. D98 scoped them to the same
         // visibility rules as every other read, so the toggle promised a cross-owner view it could
         // not deliver; D103 removed the toggle, and the proxy surface goes with it.
-        for (const name of ['admin_list_recipes', 'admin_list_projects']) {
+        for (const name of ['admin_list_jobs', 'admin_list_projects']) {
             const result = await main(baseParams({
                 __ow_method: 'post',
                 __ow_body: rpcBody('tools/call', { name, arguments: {} })
@@ -377,15 +377,15 @@ test('rejects the admin list tools - the dashboard has one view and does not cal
         expect(global.fetch).not.toHaveBeenCalled()
     })
 
-    test('still rejects the capture/authoring writes: start_recipe, append_step, start_project, general save_resource (D48)', async () => {
-        for (const name of ['start_recipe', 'append_step', 'start_project', 'set_work_context']) {
+    test('still rejects the capture/authoring writes: start_job, append_step, start_project, general save_resource (D48)', async () => {
+        for (const name of ['start_job', 'append_step', 'start_project', 'set_work_context']) {
             const result = await main(baseParams({
                 __ow_method: 'post',
                 __ow_body: rpcBody('tools/call', { name, arguments: {} })
             }))
             expect(result.statusCode).toBe(403)
         }
-        // general save_resource (non-handoff) is still blocked - the dashboard does not author recipes
+        // general save_resource (non-handoff) is still blocked - the dashboard does not author jobs
         const save = await main(baseParams({
             __ow_method: 'post',
             __ow_body: rpcBody('tools/call', { name: 'save_resource', arguments: { type: 'decision', title: 't', content: 'c' } })
@@ -422,10 +422,10 @@ test('rejects the admin list tools - the dashboard has one view and does not cal
         expect(global.fetch).toHaveBeenCalledTimes(1)
     })
 
-    test('blocks append_step for any kind other than image/diagram - the dashboard does not author recipe content (D58)', async () => {
+    test('blocks append_step for any kind other than image/diagram - the dashboard does not author job content (D58)', async () => {
         const result = await main(baseParams({
             __ow_method: 'post',
-            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { recipe_id: 'r1', kind: 'message', content: 'hi' } })
+            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { job_id: 'r1', kind: 'message', content: 'hi' } })
         }))
 
         expect(result.statusCode).toBe(403)
@@ -440,22 +440,22 @@ test('rejects the admin list tools - the dashboard has one view and does not cal
 
         const image = await main(baseParams({
             __ow_method: 'post',
-            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { recipe_id: 'r1', kind: 'image', asset: { data: 'AAAA', mime_type: 'image/png' } } })
+            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { job_id: 'r1', kind: 'image', asset: { data: 'AAAA', mime_type: 'image/png' } } })
         }))
         expect(image.statusCode).toBe(200)
 
         const diagram = await main(baseParams({
             __ow_method: 'post',
-            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { recipe_id: 'r1', kind: 'diagram', format: 'mermaid', content: 'graph TD; A-->B' } })
+            __ow_body: rpcBody('tools/call', { name: 'append_step', arguments: { job_id: 'r1', kind: 'diagram', format: 'mermaid', content: 'graph TD; A-->B' } })
         }))
         expect(diagram.statusCode).toBe(200)
         expect(global.fetch).toHaveBeenCalledTimes(2)
     })
 
-    test('rejects link_recipes - not part of the dashboard allowlist (out of scope this increment)', async () => {
+    test('rejects link_jobs - not part of the dashboard allowlist (out of scope this increment)', async () => {
         const result = await main(baseParams({
             __ow_method: 'post',
-            __ow_body: rpcBody('tools/call', { name: 'link_recipes', arguments: { handoff_id: 'x', recipe_ids: ['y'] } })
+            __ow_body: rpcBody('tools/call', { name: 'link_jobs', arguments: { handoff_id: 'x', job_ids: ['y'] } })
         }))
         expect(result.statusCode).toBe(403)
         expect(global.fetch).not.toHaveBeenCalled()

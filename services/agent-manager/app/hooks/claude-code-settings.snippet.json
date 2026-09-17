@@ -1,5 +1,5 @@
 {
-  "//": "Steering-capture wiring for Claude Code (D47). Merge the `hooks` block into your project's .claude/settings.json (or ~/.claude/settings.json). Set TAP_MCP_URL / TAP_API_KEY / TAP_PROJECT (or TAP_RECIPE_ID) in your environment before starting Claude Code. Adjust the absolute path to steering-capture.mjs for your checkout.",
+  "//": "Steering-capture wiring for Claude Code (D47). Merge the `hooks` block into your project's .claude/settings.json (or ~/.claude/settings.json). Set TAP_MCP_URL / TAP_API_KEY / TAP_PROJECT (or TAP_JOB_ID) in your environment before starting Claude Code. Adjust the absolute path to steering-capture.mjs for your checkout.",
   "hooks": {
     "PreToolUse": [
       {

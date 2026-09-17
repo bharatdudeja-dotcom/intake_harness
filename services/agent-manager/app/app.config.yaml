@@ -25,6 +25,11 @@ application:
             inputs:
               # Set log level (debug, info, warn, error)
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
               # Set to "none" to temporarily expose MCP without OAuth/API-key auth.
               # Leave blank/default for normal OAuth + x-api-key dual auth.
               MCP_AUTH_MODE: $MCP_AUTH_MODE
@@ -75,6 +80,11 @@ application:
               memory: 256
             inputs:
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
               SERVICE_API_KEY: $SERVICE_API_KEY
               AUTH_PROVIDER: $AUTH_PROVIDER
               OIDC_ISSUER: $OIDC_ISSUER
@@ -125,6 +135,11 @@ application:
             runtime: 'nodejs:20'
             inputs:
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
               AUTH_PROVIDER: $AUTH_PROVIDER
               OIDC_ISSUER: $OIDC_ISSUER
               OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
@@ -159,6 +174,11 @@ application:
               memory: 256
             inputs:
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
               AUTH_PROVIDER: $AUTH_PROVIDER
               OIDC_ISSUER: $OIDC_ISSUER
               OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
@@ -181,8 +201,41 @@ application:
               # Own CORS entirely (see the identical D29 rationale on dashboard-api above) -
               # needed here too since this action sets its own Access-Control-* headers.
               web-custom-options: true
+          # OAuth connect + callback for registering an Adobe MCP server (Workfront,
+          # AEP, AEM) against this deployment. This is the "Authenticate" button:
+          # /mcp-connect/start begins the provider's own login, /mcp-connect/callback
+          # receives the code and exchanges it server-side, and the token is stored
+          # against the server registry - never returned to the browser and never
+          # shown to the user, who only ever sees "authenticated".
+          #
+          # raw-http and web-custom-options because it owns its own redirects and
+          # CORS, for the same reason oauth-bridge does.
+          mcp-connect:
+            function: actions/mcp-connect/index.js
+            web: 'yes'
+            runtime: 'nodejs:20'
+            limits:
+              timeout: 60000
+              memory: 256
+            inputs:
+              LOG_LEVEL: debug
+              STORAGE_DRIVER: $STORAGE_DRIVER
+              SERVICE_API_KEY: $SERVICE_API_KEY
+              AUTH_PROVIDER: $AUTH_PROVIDER
+              OIDC_ISSUER: $OIDC_ISSUER
+              OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
+              OIDC_AUDIENCE: $OIDC_AUDIENCE
+              OIDC_REQUIRED_SCOPE: $OIDC_REQUIRED_SCOPE
+              OIDC_SCOPES: $OIDC_SCOPES
+              MCP_PACKAGE_NAME: $MCP_PACKAGE_NAME
+            annotations:
+              require-adobe-auth: false
+              final: true
+              web-export: true
+              raw-http: true
+              web-custom-options: true
           # Retention purge (Increment 11, D44/D45): deletes expired experimental steps
-          # (and any recipe left with no approved/active steps) daily. Not a web action -
+          # (and any job left with no approved/active steps) daily. Not a web action -
           # invoked only by the alarm trigger/rule below. Shares lib/retention.js with the
           # on-demand purge_expired MCP tool.
           purge-scheduled:
@@ -194,6 +247,11 @@ application:
               memory: 256
             inputs:
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
           # Daily company CX Knowledge Graph refresh (Increment 14, D40/D53): recompiles the
           # cross-owner, approved-only graph. Not a web action - invoked only by the alarm
           # trigger/rule below. Shares lib/cx-graph.js with the on-demand rebuild_cx_graph tool.
@@ -206,6 +264,11 @@ application:
               memory: 256
             inputs:
               LOG_LEVEL: debug
+              # WHICH PERSISTENCE. Not optional here: the code defaults to `fs`,
+              # and on I/O Runtime that is the action container's own disk -
+              # empty on a cold start, discarded after. `aio` is Adobe I/O Files,
+              # which is the durable store this host provides.
+              STORAGE_DRIVER: $STORAGE_DRIVER
         triggers:
           daily-purge-trigger:
             feed: /whisk.system/alarms/alarm

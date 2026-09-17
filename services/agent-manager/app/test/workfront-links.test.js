@@ -73,7 +73,7 @@ describe('findWorkfrontRefs', () => {
     })
 
     test('ignores an id with no object code - it could be anything', () => {
-        expect(narrate.findWorkfrontRefs({ id: 'recipe-123', title: 'x' })).toEqual([])
+        expect(narrate.findWorkfrontRefs({ id: 'job-123', title: 'x' })).toEqual([])
     })
 
     test('ignores an object code it does not recognise', () => {

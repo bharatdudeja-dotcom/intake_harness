@@ -25,11 +25,18 @@ const { rebuildAndStore } = require('../../lib/cx-graph')
  * @returns {Promise<{statusCode: number, body: object}>}
  */
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     const logger = Core.Logger('cx-refresh-scheduled', { level: params.LOG_LEVEL || 'info' })
     try {
         const graph = await rebuildAndStore()
-        logger.info(`CX graph refreshed: ${graph.recipe_count} approved recipe(s), ${graph.node_count} node(s), ${graph.edge_count} edge(s) across ${graph.owners.length} owner(s)`)
-        return { statusCode: 200, body: { generated_at: graph.generated_at, recipe_count: graph.recipe_count, node_count: graph.node_count, edge_count: graph.edge_count } }
+        logger.info(`CX graph refreshed: ${graph.job_count} approved job(s), ${graph.node_count} node(s), ${graph.edge_count} edge(s) across ${graph.owners.length} owner(s)`)
+        return { statusCode: 200, body: { generated_at: graph.generated_at, job_count: graph.job_count, node_count: graph.node_count, edge_count: graph.edge_count } }
     } catch (error) {
         logger.error('CX graph refresh failed:', error)
         return { statusCode: 500, body: { error: error.message } }
