@@ -2506,7 +2506,9 @@ function renderSettings () {
         <b>Check</b> asks a system for that catalog, which is how you verify it answers before
         pointing an intake at it.</p>
       <p class="help">If an agentic AEP or AEM harness is needed tomorrow, it is a row here &mdash;
-        not a deploy.</p>
+        not a deploy. <b>Tools are not configured here:</b> a harness asks the gateway, and the gateway
+        holds every MCP server &mdash; so a server added once below is reachable by every harness, and
+        authenticated once rather than per harness.</p>
       ${(state.agentSystems || []).map(a => `
         <div class="mcp-row" data-sys-row="${esc(a.id)}">
           <div class="mcp-head">
@@ -2528,17 +2530,12 @@ function renderSettings () {
             <label class="flabel">Input key<input class="field mono" data-sys-field="input_key" value="${esc(a.input_key || '')}" placeholder="brief"></label>
             <label class="flabel">Input envelope<input class="field mono" data-sys-field="input_envelope" value="${esc(a.input_envelope || '')}" placeholder="input"></label>
             <label class="flabel">Authorization<input class="field mono" data-sys-field="auth" placeholder="\${HARNESS_TOKEN}"></label>
-            <label class="flabel" style="grid-column:1/-1">MCP endpoint it calls
-              <input class="field mono" data-sys-field="mcp_endpoint" value="${esc(a.mcp_endpoint || '')}"></label>
-            <label class="flabel" style="grid-column:1/-1">Backed by MCP server
-              <select class="field" data-sys-field="mcp_server_id">
-                <option value="">&mdash; not set &mdash;</option>
-                ${(state.mcpServers || []).map(m => `<option value="${esc(m.id)}"${m.id === a.mcp_server_id ? ' selected' : ''}>${esc(m.label || m.id)}</option>`).join('')}
-              </select></label>
           </div>
-          <p class="help">The harness calls its own MCP server-side, so <b>MCP endpoint it calls</b> is
-            what we know it reaches, not something we can force from here. Changing it records what is
-            true; it does not reconfigure the upstream.</p>
+          <p class="help">Its agents reach every tool through <b>the gateway</b>, not a server configured
+            on this row &mdash; so there is nothing about MCP to set here. Add each MCP server once, below,
+            and tick <b>to Claude</b> to put it in the gateway.${a.mcp_endpoint ? `
+            <br><span class="sub">Observed: this harness also calls <code>${esc(a.mcp_endpoint)}</code>
+            directly. Recorded because it is true, not because it is set from here.</span>` : ''}</p>
           <div class="rowbtns">
             <label class="chip"><input type="checkbox" data-sys-field="active" ${a.active ? 'checked' : ''}> Active</label>
             <button class="btn tiny sage" data-sys-save="${esc(a.id)}"><i data-lucide="save"></i> Save</button>
