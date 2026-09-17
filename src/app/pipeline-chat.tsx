@@ -351,7 +351,7 @@ export function PipelineChat() {
             <div className="flex gap-2">
               <input
                 type="text"
-                className="flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                className="min-w-0 flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                 placeholder="Describe the campaign / audience brief…"
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
@@ -361,15 +361,17 @@ export function PipelineChat() {
               <button
                 onClick={startRun}
                 disabled={busy || !brief.trim()}
-                className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
+                className="shrink-0 rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
               >
                 Send
               </button>
             </div>
-            <div className="flex gap-2">
+            {/* Stacked on mobile: side by side, each input's placeholder is
+                too long to be legible squeezed into half a phone screen. */}
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 type="text"
-                className="flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
                 placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
                 value={workfrontProjectId}
                 onChange={(e) => setWorkfrontProjectId(e.target.value)}
@@ -377,7 +379,7 @@ export function PipelineChat() {
               />
               <input
                 type="text"
-                className="flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
                 placeholder="Programme (optional — groups this run for the Programmes page)"
                 value={programme}
                 onChange={(e) => setProgramme(e.target.value)}

@@ -20,7 +20,7 @@ export default async function Home() {
 
   return (
     <div className="min-h-full bg-zinc-50 dark:bg-black">
-      <main className="flex max-w-5xl flex-col gap-8 px-8 py-10">
+      <main className="flex max-w-5xl flex-col gap-8 px-4 py-6 sm:px-8 sm:py-10">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
             Home
