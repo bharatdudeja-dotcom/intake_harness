@@ -1,0 +1,226 @@
+# MCP Server Template - Adobe I/O Runtime Application Configuration
+# 
+# This configuration file defines how your MCP server will be deployed to Adobe I/O Runtime.
+# You can customize the settings below to match your specific requirements.
+
+application:
+  actions: actions
+  web: web-src
+  runtimeManifest:
+    packages:
+      # Package name - determines the deploy URL segment .../web/<pkg>/mcp-server
+      tap-mcp-connector:
+        license: MIT
+        actions:
+          # Main MCP server action
+          mcp-server:
+            function: actions/mcp-server/index.js
+            web: 'yes'
+            runtime: 'nodejs:20'
+            limits:
+              # Timeout in milliseconds (5 minutes for complex operations)
+              timeout: 300000
+              # Memory limit in MB (adjust based on your needs)
+              memory: 512
+            inputs:
+              # Set log level (debug, info, warn, error)
+              LOG_LEVEL: debug
+              # Set to "none" to temporarily expose MCP without OAuth/API-key auth.
+              # Leave blank/default for normal OAuth + x-api-key dual auth.
+              MCP_AUTH_MODE: $MCP_AUTH_MODE
+              # Pluggable auth provider (D66): adobe-ims | auth0 | microsoft-entra. Selects the
+              # validation strategy + the authorization server the PRM advertises. Blank = derive
+              # from OIDC_ISSUER (back-compat).
+              AUTH_PROVIDER: $AUTH_PROVIDER
+              # Bootstrap admin/head-chef identities (D66) - comma or JSON list of owner ids seeded
+              # into the role model so the Team/Roles UI is reachable on day one.
+              BOOTSTRAP_ADMINS: $BOOTSTRAP_ADMINS
+              # Dual auth (D19/D21/D24): Authorization: Bearer -> OIDC provider below;
+              # x-api-key -> headless-agent path. Provider is config, not hardcoded -
+              # see .env.example for pointing this at a different OIDC provider.
+              OIDC_ISSUER: $OIDC_ISSUER
+              OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
+              OIDC_AUDIENCE: $OIDC_AUDIENCE
+              OAUTH_CLIENT_ID: $OAUTH_CLIENT_ID
+              OAUTH_CLIENT_SECRET: $OAUTH_CLIENT_SECRET
+              OIDC_REQUIRED_SCOPE: $OIDC_REQUIRED_SCOPE
+              OIDC_SCOPES: $OIDC_SCOPES
+              SERVICE_API_KEY: $SERVICE_API_KEY
+              # Multi-key -> owner mapping (D55): a second user's self-serve identity via
+              # their own x-api-key, without a full OAuth login. JSON object string,
+              # e.g. {"tap_bob_...":"bob@example.com"} - real value only in .env, never committed.
+              API_KEY_OWNERS: $API_KEY_OWNERS
+              # Optional explicit URL overrides (else derived from the request Host header)
+              MCP_RESOURCE_URL: $MCP_RESOURCE_URL
+              MCP_PRM_URL: $MCP_PRM_URL
+              MCP_PACKAGE_NAME: $MCP_PACKAGE_NAME
+            annotations:
+              # No Adobe authentication required for MCP servers
+              require-adobe-auth: false
+              # Final action (no further processing)
+              final: true
+              # Expose as web action
+              web-export: true
+              # Enable raw HTTP mode for MCP protocol
+              raw-http: true
+          # Control-plane dashboard proxy (Increment 6, D29): holds SERVICE_API_KEY
+          # server-side and forwards allowlisted JSON-RPC from the web-src SPA to
+          # the mcp-server action. The browser never receives the key.
+          dashboard-api:
+            function: actions/dashboard-api/index.js
+            web: 'yes'
+            runtime: 'nodejs:20'
+            limits:
+              timeout: 60000
+              memory: 256
+            inputs:
+              LOG_LEVEL: debug
+              SERVICE_API_KEY: $SERVICE_API_KEY
+              AUTH_PROVIDER: $AUTH_PROVIDER
+              OIDC_ISSUER: $OIDC_ISSUER
+              OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
+              OIDC_AUDIENCE: $OIDC_AUDIENCE
+              OIDC_REQUIRED_SCOPE: $OIDC_REQUIRED_SCOPE
+              OIDC_SCOPES: $OIDC_SCOPES
+              # Public SPA client id for the dashboard's own per-user IMS login (D65). Public,
+              # not a secret; when set, the dashboard requires per-user login and forwards the
+              # signed-in user's token instead of the shared service key.
+              DASHBOARD_OAUTH_CLIENT_ID: $DASHBOARD_OAUTH_CLIENT_ID
+              # Interim static-passcode lock (D65 stopgap) - enforced server-side here until
+              # per-user IMS login is live. Value lives only in .env, never committed.
+              DASHBOARD_PASSCODE: $DASHBOARD_PASSCODE
+              # D79: require every dashboard caller to identify themselves (IMS token or their own
+              # access key) so each person sees THEIR cookbook - never one shared service view.
+              # Defaults to true when unset; set to false only for a single-tenant demo.
+              DASHBOARD_REQUIRE_IDENTITY: 'true'
+              MCP_RESOURCE_URL: $MCP_RESOURCE_URL
+              MCP_PRM_URL: $MCP_PRM_URL
+              MCP_PACKAGE_NAME: $MCP_PACKAGE_NAME
+            annotations:
+              require-adobe-auth: false
+              final: true
+              web-export: true
+              raw-http: true
+              # Without this, OpenWhisk auto-injects its own default
+              # "Access-Control-Allow-Origin: *" into every response AND
+              # auto-handles OPTIONS itself, bypassing this action's code. When our
+              # own CORS header is also present, the platform concatenates both
+              # into one invalid multi-value header ("*,https://...") that browsers
+              # reject outright - this is the actual cause of the SPA's CORS
+              # failure (curl doesn't enforce single-value CORS headers, so curl
+              # verification alone missed it). web-custom-options hands CORS
+              # (including OPTIONS) entirely to the action - see corsHeadersFor()
+              # in actions/dashboard-api/index.js.
+              web-custom-options: true
+          # RFC 9728 Protected Resource Metadata - see actions/well-known/index.js
+          # NOTE: app.config.yaml's schema rejects a leading-dot action key
+          # (".well-known" is invalid here), so the deployed URL segment is
+          # "well-known" without the dot. This is fine because Claude (and any
+          # RFC 9728-compliant client) discovers the PRM URL via the
+          # WWW-Authenticate header on 401s (lib/auth/prm.js), not by assuming
+          # the literal "/.well-known/..." convention - see knowledge/OAUTH-SPIKE.md §2.
+          well-known:
+            function: actions/well-known/index.js
+            web: 'yes'
+            runtime: 'nodejs:20'
+            inputs:
+              LOG_LEVEL: debug
+              AUTH_PROVIDER: $AUTH_PROVIDER
+              OIDC_ISSUER: $OIDC_ISSUER
+              OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
+              OIDC_AUDIENCE: $OIDC_AUDIENCE
+              OIDC_REQUIRED_SCOPE: $OIDC_REQUIRED_SCOPE
+              OIDC_SCOPES: $OIDC_SCOPES
+              MCP_RESOURCE_URL: $MCP_RESOURCE_URL
+              MCP_PRM_URL: $MCP_PRM_URL
+              MCP_OAUTH_BRIDGE_URL: $MCP_OAUTH_BRIDGE_URL
+              # D78: the AS issuer the PRM advertises - an origin whose ROOT
+              # /.well-known/oauth-authorization-server is fetchable (MCP clients look only there).
+              # See lib/auth/urls.js#resolveOAuthIssuerUrl.
+              OAUTH_ISSUER_URL: $OAUTH_ISSUER_URL
+              MCP_PACKAGE_NAME: $MCP_PACKAGE_NAME
+            annotations:
+              require-adobe-auth: false
+              final: true
+              web-export: true
+              raw-http: true
+          # Login bridge (Increment 20, D68): makes this connector present as a full OAuth
+          # authorization server to mcp-remote so a keyless client config completes browser
+          # sign-in with no manual URL/port editing, while real auth happens against the
+          # configured provider server-side. See lib/auth/oauthBridge.js + AUTH-PROVIDER-SPIKE.md §6.
+          # Routes by path suffix (params.__ow_path): /.well-known/openid-configuration,
+          # /register, /authorize, /token, /callback (the HTTPS URL registered with the provider).
+          oauth-bridge:
+            function: actions/oauth-bridge/index.js
+            web: 'yes'
+            runtime: 'nodejs:20'
+            limits:
+              timeout: 60000
+              memory: 256
+            inputs:
+              LOG_LEVEL: debug
+              AUTH_PROVIDER: $AUTH_PROVIDER
+              OIDC_ISSUER: $OIDC_ISSUER
+              OIDC_DISCOVERY_URL: $OIDC_DISCOVERY_URL
+              OIDC_AUDIENCE: $OIDC_AUDIENCE
+              OAUTH_CLIENT_ID: $OAUTH_CLIENT_ID
+              # REQUIRED for a confidential provider credential (D78): the bridge does the
+              # code->token exchange server-side and must authenticate with this. Missing it made
+              # the action fall back to public/no-auth mode, and IMS answered
+              # "missing client_secret parameter" - the code supported it, the plumbing didn't.
+              OAUTH_CLIENT_SECRET: $OAUTH_CLIENT_SECRET
+              OIDC_REQUIRED_SCOPE: $OIDC_REQUIRED_SCOPE
+              OIDC_SCOPES: $OIDC_SCOPES
+              MCP_OAUTH_BRIDGE_URL: $MCP_OAUTH_BRIDGE_URL
+              MCP_PACKAGE_NAME: $MCP_PACKAGE_NAME
+            annotations:
+              require-adobe-auth: false
+              final: true
+              web-export: true
+              raw-http: true
+              # Own CORS entirely (see the identical D29 rationale on dashboard-api above) -
+              # needed here too since this action sets its own Access-Control-* headers.
+              web-custom-options: true
+          # Retention purge (Increment 11, D44/D45): deletes expired experimental steps
+          # (and any recipe left with no approved/active steps) daily. Not a web action -
+          # invoked only by the alarm trigger/rule below. Shares lib/retention.js with the
+          # on-demand purge_expired MCP tool.
+          purge-scheduled:
+            function: actions/purge-scheduled/index.js
+            web: 'no'
+            runtime: 'nodejs:20'
+            limits:
+              timeout: 120000
+              memory: 256
+            inputs:
+              LOG_LEVEL: debug
+          # Daily company CX Knowledge Graph refresh (Increment 14, D40/D53): recompiles the
+          # cross-owner, approved-only graph. Not a web action - invoked only by the alarm
+          # trigger/rule below. Shares lib/cx-graph.js with the on-demand rebuild_cx_graph tool.
+          cx-refresh-scheduled:
+            function: actions/cx-refresh-scheduled/index.js
+            web: 'no'
+            runtime: 'nodejs:20'
+            limits:
+              timeout: 120000
+              memory: 256
+            inputs:
+              LOG_LEVEL: debug
+        triggers:
+          daily-purge-trigger:
+            feed: /whisk.system/alarms/alarm
+            inputs:
+              cron: '0 3 * * *'
+              trigger_payload: '{"source":"daily-retention-purge"}'
+          daily-cx-refresh-trigger:
+            feed: /whisk.system/alarms/alarm
+            inputs:
+              cron: '0 4 * * *'
+              trigger_payload: '{"source":"daily-cx-refresh"}'
+        rules:
+          daily-purge-rule:
+            trigger: daily-purge-trigger
+            action: purge-scheduled
+          daily-cx-refresh-rule:
+            trigger: daily-cx-refresh-trigger
+            action: cx-refresh-scheduled

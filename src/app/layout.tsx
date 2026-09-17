@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Sidebar } from "./sidebar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,13 +18,23 @@ export const metadata: Metadata = {
   description: "3-agent audience-creation pipeline orchestrator",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+/*
+ * LayoutProps is a global Next generates only with typedRoutes enabled, which
+ * this project does not have - so the name did not exist and the build could
+ * not typecheck. Spelled out instead, which is what the generated type is.
+ */
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full">
+        <div className="flex min-h-full flex-col md:flex-row">
+          <Sidebar />
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+      </body>
     </html>
   );
 }

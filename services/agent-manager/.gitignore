@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.db
+.DS_Store
+
+# Working notes, not for the team. docs/BACKLOG.md is the committed version.
+TODO.md

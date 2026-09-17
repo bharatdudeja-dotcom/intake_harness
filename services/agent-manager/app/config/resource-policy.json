@@ -1,0 +1,123 @@
+[
+  {
+    "type": "architecture-diagram",
+    "title": "Architecture Diagram",
+    "description": "A system or component architecture diagram - SVG/PNG image or Mermaid diagram source.",
+    "schema": {
+      "fields": ["title", "content", "system", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["svg", "png", "mermaid"],
+    "storage": "Architecture/",
+    "capture_when": "Whenever you produce or substantially revise a system or component architecture diagram.",
+    "approval": "human-gate",
+    "tags": ["architecture"],
+    "retention": "indefinite"
+  },
+  {
+    "type": "handoff-prompt",
+    "title": "Handoff Prompt",
+    "description": "A prompt generated for another agent or coding tool - an active task brief tracked to completion (task_status: open / in_progress / done), distinct from a reusable skill.",
+    "schema": {
+      "fields": ["title", "content", "target_agent", "task_status", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["md"],
+    "storage": "Handoffs/",
+    "capture_when": "Whenever you produce a prompt intended to be executed by another agent or coding tool.",
+    "approval": "none",
+    "tags": ["handoff"],
+    "retention": "indefinite",
+    "target_agents": ["claude-code", "codex", "cursor", "other"]
+  },
+  {
+    "type": "architecture-doc",
+    "title": "Architecture Document",
+    "description": "A written architecture, design, or vision document in markdown - narrative system descriptions, spike write-ups, product/vision docs.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["md"],
+    "storage": "Architecture/",
+    "capture_when": "Whenever you produce or substantially revise a written architecture, design, spike, or vision document.",
+    "approval": "human-gate",
+    "tags": ["architecture"],
+    "retention": "indefinite"
+  },
+  {
+    "type": "decision",
+    "title": "Decision Record",
+    "description": "An architecture/engineering decision record (ADR) - what was decided, why, and the alternatives considered.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["md"],
+    "storage": "Decisions/",
+    "capture_when": "Whenever a substantive decision is made or revised during the conversation.",
+    "approval": "human-gate",
+    "tags": ["decision"],
+    "retention": "indefinite"
+  },
+  {
+    "type": "playbook",
+    "title": "Playbook",
+    "description": "A reusable playbook: a host-neutral YAML playbook (goal, allowed_tools, approval_gates, expected_outputs) or a markdown prompt/runbook another AI can execute.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["yaml", "md"],
+    "storage": "Playbooks/",
+    "capture_when": "Whenever a new or updated playbook is produced.",
+    "approval": "human-gate",
+    "tags": ["playbook"],
+    "retention": "indefinite"
+  },
+  {
+    "type": "configuration",
+    "title": "Configuration",
+    "description": "A connector, gateway, or dashboard configuration snapshot.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["json"],
+    "storage": "Config/",
+    "capture_when": "Whenever connector, gateway, or dashboard configuration is produced or changed.",
+    "approval": "human-gate",
+    "tags": ["configuration"],
+    "retention": "indefinite"
+  },
+  {
+    "type": "meeting-notes",
+    "title": "Meeting Notes",
+    "description": "Notes and action items from a meeting or working session.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["md"],
+    "storage": "Meeting-Notes/",
+    "capture_when": "At the end of a meeting or working session that produced notes or action items.",
+    "approval": "human-gate",
+    "tags": ["meeting-notes"],
+    "retention": "1-year"
+  },
+  {
+    "type": "code-snippet",
+    "title": "Code Snippet",
+    "description": "A reusable code snippet or example worth sharing across projects.",
+    "schema": {
+      "fields": ["title", "content", "tags"],
+      "required": ["title", "content"]
+    },
+    "format": ["md"],
+    "storage": "Code-Snippets/",
+    "capture_when": "Whenever you produce a reusable code snippet worth sharing across projects.",
+    "approval": "human-gate",
+    "tags": ["code"],
+    "retention": "indefinite"
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "levels": [
+    { "key": "project", "label": "Project" },
+    { "key": "epic", "label": "Epic" },
+    { "key": "story", "label": "Story" }
+  ]
+}

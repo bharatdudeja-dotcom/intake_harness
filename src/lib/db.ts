@@ -15,8 +15,6 @@ function getPool(): Pool {
   if (!pool) {
     let raw = process.env.DATABASE_URL;
     if (!raw) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
       throw new Error(
         "DATABASE_URL is not set. Copy .env.local.example to .env.local.",
       );
@@ -63,11 +61,6 @@ function getPool(): Pool {
       // For real hostname+CA verification, pass `ca: fs.readFileSync(...)`
       // here with the RDS combined CA bundle instead of rejectUnauthorized.
       ssl: wantsSsl ? { rejectUnauthorized: false } : undefined,
-    pool = new Pool({
-      connectionString,
-      ssl: connectionString.includes("sslmode=require") || connectionString.includes("ssl=true")
-        ? { rejectUnauthorized: false }
-        : undefined,
     });
   }
   return pool;
