@@ -1,26 +1,33 @@
 import { listAdmins } from "@/lib/admins";
 import { getRunStats } from "@/lib/pipeline/orchestrator";
+import { countPurgeable, getSettings } from "@/lib/settings";
+import { RetentionSettings } from "./retention-settings";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Settings — read-only visibility into the configuration this deployment
- * is actually running with. No editable form yet: ADMIN_NAMES is an env
- * var, not a DB-backed setting, so there's nothing here to save — this
- * page exists so "who can approve things" isn't invisible.
+ * Settings — ADMIN_NAMES is still read-only (an env var, not a DB-backed
+ * setting — nothing here to save), but retention/purge is now real: see
+ * retention-settings.tsx for the editable half.
  */
 export default async function SettingsPage() {
-  const admins = listAdmins();
-  const stats = await getRunStats();
+  const [admins, stats, settings, purgeableCount] = await Promise.all([
+    listAdmins(),
+    getRunStats(),
+    getSettings(),
+    countPurgeable(),
+  ]);
 
   return (
     <div className="flex max-w-2xl flex-col gap-6 px-8 py-10">
       <div>
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Settings</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          What this deployment is actually configured with — read-only for now.
+          What this deployment is actually configured with.
         </p>
       </div>
+
+      <RetentionSettings initialSettings={settings} initialPurgeableCount={purgeableCount} />
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-sm font-semibold text-black dark:text-zinc-50">Admins</h2>

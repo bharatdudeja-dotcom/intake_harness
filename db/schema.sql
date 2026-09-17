@@ -150,6 +150,22 @@ CREATE TABLE IF NOT EXISTS resources (
 CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
 CREATE INDEX IF NOT EXISTS idx_resources_promoted ON resources(promoted) WHERE promoted;
 
+-- Settings: a single editable row (id is always 1 — the CHECK enforces
+-- that, so there's exactly one config, never a second competing row).
+-- Ported from Agent Manager's settings override (D48): a retention window
+-- for unapproved Resources, plus manual purge rather than a cron this app
+-- has no scheduler to run. Deliberately does NOT cover Runs — those are
+-- this harness's own audit trail (B7's request age, B9's failure
+-- classification both read off them), not disposable draft content the
+-- way an unapproved Resource is.
+CREATE TABLE IF NOT EXISTS settings (
+    id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    retention_days  INTEGER NOT NULL DEFAULT 30 CHECK (retention_days > 0),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by      TEXT
+);
+INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.
