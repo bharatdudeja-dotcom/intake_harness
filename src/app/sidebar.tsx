@@ -6,9 +6,7 @@ import { usePathname } from "next/navigation";
 /**
  * The grouped-sidebar layout is the one piece of Bharat's Agent Manager
  * (services/agent-manager/ — never touched, only looked at) worth carrying
- * over as-is: a left nav grouped by what it's for, not a flat top bar. Only
- * groups/links for pages that actually exist here — no Playbooks/Settings/
- * Connections stubs pointing nowhere.
+ * over as-is: a left nav grouped by what it's for, not a flat top bar.
  */
 const GROUPS: { heading: string; links: { href: string; label: string }[] }[] = [
   {
@@ -16,11 +14,23 @@ const GROUPS: { heading: string; links: { href: string; label: string }[] }[] = 
     links: [
       { href: "/", label: "Home" },
       { href: "/runs", label: "Runs" },
+      { href: "/queue", label: "Live Queue" },
+      { href: "/programmes", label: "Programmes" },
     ],
   },
   {
     heading: "Knowledge",
-    links: [{ href: "/graph", label: "Shared Graph" }],
+    links: [
+      { href: "/resources", label: "Resources" },
+      { href: "/graph", label: "Shared Graph" },
+    ],
+  },
+  {
+    heading: "Admin",
+    links: [
+      { href: "/agents", label: "Agents" },
+      { href: "/settings", label: "Settings" },
+    ],
   },
 ];
 

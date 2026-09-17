@@ -34,6 +34,7 @@ type StepOutput = {
 export function PipelineChat() {
   const [brief, setBrief] = useState("");
   const [workfrontProjectId, setWorkfrontProjectId] = useState("");
+  const [programme, setProgramme] = useState("");
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -68,7 +69,7 @@ export function PipelineChat() {
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { brief: text, fields } }),
+        body: JSON.stringify({ input: { brief: text, fields, programme: programme.trim() || undefined } }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -365,14 +366,24 @@ export function PipelineChat() {
                 Send
               </button>
             </div>
-            <input
-              type="text"
-              className="rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-              placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
-              value={workfrontProjectId}
-              onChange={(e) => setWorkfrontProjectId(e.target.value)}
-              disabled={busy}
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+                placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
+                value={workfrontProjectId}
+                onChange={(e) => setWorkfrontProjectId(e.target.value)}
+                disabled={busy}
+              />
+              <input
+                type="text"
+                className="flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+                placeholder="Programme (optional — groups this run for the Programmes page)"
+                value={programme}
+                onChange={(e) => setProgramme(e.target.value)}
+                disabled={busy}
+              />
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-between">

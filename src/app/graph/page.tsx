@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 type GraphNode = {
   id: string;
+  kind: "run" | "resource";
   label: string;
   tags: string[];
   approved_by: string | null;
@@ -40,10 +41,14 @@ export default function GraphPage() {
       <div>
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Shared Graph</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Runs an admin has promoted as reusable examples, connected wherever two promoted runs share a tag. Approve
-          and promote a run from its{" "}
+          Runs and Resources an admin has promoted as reusable examples, connected wherever two share a tag. Approve
+          and promote from the{" "}
           <Link href="/runs" className="underline">
             Runs
+          </Link>{" "}
+          or{" "}
+          <Link href="/resources" className="underline">
+            Resources
           </Link>{" "}
           page.
         </p>
@@ -62,9 +67,15 @@ export default function GraphPage() {
             className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950"
           >
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/runs/${node.id}`} className="font-medium text-black underline dark:text-zinc-50">
+              <Link
+                href={node.kind === "run" ? `/runs/${node.id}` : `/resources/${node.id}`}
+                className="font-medium text-black underline dark:text-zinc-50"
+              >
                 {node.label}
               </Link>
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                {node.kind}
+              </span>
               <span className="font-mono text-xs text-zinc-400">{node.id.slice(0, 8)}</span>
             </div>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">

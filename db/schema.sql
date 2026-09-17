@@ -101,6 +101,55 @@ ALTER TABLE runs ADD CONSTRAINT runs_status_check
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
 ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
 
+-- Programmes: a named grouping a run can belong to (ported from Agent
+-- Manager's Project, minus its lifecycle machinery — just enough to group
+-- runs). upsert-by-name in src/lib/pipeline/programmes.ts, so submitting
+-- the same programme name twice reuses the row rather than duplicating it.
+CREATE TABLE IF NOT EXISTS programmes (
+    programme_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          TEXT NOT NULL UNIQUE,
+    note          TEXT,
+    owner         TEXT,
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS programme_id UUID REFERENCES programmes(programme_id);
+CREATE INDEX IF NOT EXISTS idx_runs_programme ON runs(programme_id);
+
+-- Resources: the generic knowledge-base entries ported from Agent Manager's
+-- resource-policy catalog (playbooks, decisions, architecture docs/diagrams,
+-- meeting notes, code snippets, configs, handoff-prompts) — content worth
+-- keeping that ISN'T a pipeline run. Single content blob per resource, not
+-- an ordered step log: Agent Manager needed steps because the same object
+-- doubled as both a run record and a doc; here `task_runs` already owns run
+-- history, so a resource only needs to be a doc. Same two-tier curation as
+-- `runs` (approved -> promoted into the Shared Graph), same admin model.
+CREATE TABLE IF NOT EXISTS resources (
+    resource_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type           TEXT NOT NULL CHECK (type IN (
+                       'playbook', 'decision', 'architecture-doc', 'architecture-diagram',
+                       'meeting-notes', 'code-snippet', 'configuration', 'handoff-prompt'
+                   )),
+    title          TEXT NOT NULL,
+    content        TEXT NOT NULL,
+    format         TEXT,
+    tags           TEXT[] NOT NULL DEFAULT '{}',
+    owner          TEXT,
+    programme_id   UUID REFERENCES programmes(programme_id),
+    approved       BOOLEAN NOT NULL DEFAULT false,
+    approved_by    TEXT,
+    approved_at    TIMESTAMPTZ,
+    approval_note  TEXT,
+    promoted       BOOLEAN NOT NULL DEFAULT false,
+    promoted_by    TEXT,
+    promoted_at    TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
+CREATE INDEX IF NOT EXISTS idx_resources_promoted ON resources(promoted) WHERE promoted;
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

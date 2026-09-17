@@ -155,9 +155,20 @@ export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> 
 
 /** Starts a run and executes only its first agent (Intake). */
 export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
+  // An optional `programme` name on the submission groups this run under
+  // that Programme, upserted by name (see lib/programmes.ts) so submitting
+  // the same name twice reuses the row rather than duplicating it.
+  const programmeName = (initialInput as { programme?: unknown } | null)?.programme;
+  let programmeId: string | null = null;
+  if (typeof programmeName === "string" && programmeName.trim()) {
+    const { upsertProgrammeByName } = await import("@/lib/programmes");
+    const { programme } = await upsertProgrammeByName({ name: programmeName.trim() });
+    programmeId = programme.programme_id;
+  }
+
   const [run] = await query<RunRow>(
-    `INSERT INTO runs (input) VALUES ($1::jsonb) RETURNING *`,
-    [JSON.stringify(initialInput)],
+    `INSERT INTO runs (input, programme_id) VALUES ($1::jsonb, $2) RETURNING *`,
+    [JSON.stringify(initialInput), programmeId],
   );
 
   return advanceOneStep(run, 0, initialInput, {}, baseUrl);
@@ -393,4 +404,39 @@ export async function getRunStats(): Promise<RunStats> {
     approved: row.approved,
     promoted: row.promoted,
   };
+}
+
+export interface TaskCounts {
+  total: number;
+  completed: number;
+  needsInput: number;
+  failed: number;
+}
+
+/** Per-task execution counts across every run — the Agents page's "how has each one done" row. */
+export async function getTaskCounts(): Promise<Record<string, TaskCounts>> {
+  const rows = await query<{ task_id: string; total: number; completed: number; needs_input: number; failed: number }>(`
+    SELECT
+      task_id,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE status = 'needs_input')::int AS needs_input,
+      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+    FROM task_runs
+    GROUP BY task_id
+  `);
+  const byTask: Record<string, TaskCounts> = {};
+  for (const row of rows) {
+    byTask[row.task_id] = { total: row.total, completed: row.completed, needsInput: row.needs_input, failed: row.failed };
+  }
+  return byTask;
+}
+
+/** Runs that need a human right now: paused, waiting on approval, or stuck — the Live Queue's "what needs attention." */
+export async function listActiveRuns(limit = 100): Promise<RunRow[]> {
+  return query<RunRow>(
+    `SELECT * FROM runs WHERE status IN ('needs_input', 'awaiting_approval', 'running')
+     ORDER BY updated_at ASC LIMIT $1`,
+    [limit],
+  );
 }

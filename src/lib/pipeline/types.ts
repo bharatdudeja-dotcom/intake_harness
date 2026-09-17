@@ -75,6 +75,8 @@ export interface RunRow {
   input: unknown;
   created_at: string;
   updated_at: string;
+  /** Optional grouping — see src/lib/programmes.ts. Set via an optional `programme` name on the submission. */
+  programme_id: string | null;
   /** Two-tier human curation — see src/app/api/runs/[runId]/{approve,promote}/route.ts. */
   tags: string[];
   approved: boolean;
