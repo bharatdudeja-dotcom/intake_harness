@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
 
   const response: AgentResponse<EscalationOutput> = {
     status: "completed",
+    message: output.summary,
     output,
   };
 

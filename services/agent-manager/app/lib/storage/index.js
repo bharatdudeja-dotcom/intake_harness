@@ -5,10 +5,11 @@
  * documents itself as a SWAP POINT. This module is that swap, made explicit:
  * the same four methods, over whichever backend the environment names.
  *
- *   STORAGE_DRIVER=fs    local disk           (the Docker default)
- *   STORAGE_DRIVER=s3    S3, MinIO, R2        (AWS, or anything S3-compatible)
- *   STORAGE_DRIVER=gcs   Google Cloud Storage (Cloud Run)
- *   STORAGE_DRIVER=aio   Adobe I/O Files      (the original host)
+ *   STORAGE_DRIVER=fs       local disk           (the Docker default)
+ *   STORAGE_DRIVER=s3       S3, MinIO, R2        (AWS, or anything S3-compatible)
+ *   STORAGE_DRIVER=gcs      Google Cloud Storage (Cloud Run)
+ *   STORAGE_DRIVER=aio      Adobe I/O Files      (the original host)
+ *   STORAGE_DRIVER=postgres Any reachable Postgres (one row per blob)
  *
  * The contract every driver implements, matching @adobe/aio-lib-files exactly
  * so `lib/store.js` did not have to change its call sites:
@@ -23,11 +24,11 @@
  *                           (store.js uses this as an existence check)
  *   - a path ending "/"  -> every object beneath that prefix
  *
- * Drivers for S3 and GCS require their SDK lazily, so neither is a dependency
- * of running this app on the other one.
+ * Drivers for S3, GCS, and Postgres require their SDK lazily, so none is a
+ * dependency of running this app on one of the others.
  */
 
-const DRIVERS = ['fs', 's3', 'gcs', 'aio']
+const DRIVERS = ['fs', 's3', 'gcs', 'aio', 'postgres']
 
 /**
  * Required eagerly, and deliberately so. A lazy `require` here binds to
@@ -41,7 +42,8 @@ const DRIVER_MODULES = {
   fs: require('./fs'),
   s3: require('./s3'),
   gcs: require('./gcs'),
-  aio: require('./aio')
+  aio: require('./aio'),
+  postgres: require('./postgres')
 }
 
 let cached = null
