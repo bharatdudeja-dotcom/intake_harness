@@ -4,183 +4,82 @@ import { decisionFor, gateFor, type GateDecision, type GateId } from "./gates";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
 /**
- * Runs the pipeline for a single submission: calls each agent's own API
- * route in order over real HTTP (not a direct function call), so every
- * agent stays an independently testable, independently deployable endpoint
- * - a dev can `curl localhost:3100/api/agents/audience-creation` on its own
- * without spinning up the rest of the pipeline.
+ * Runs exactly the NEXT agent for a run — never more than one — over real
+ * HTTP to that agent's own route (a dev can `curl
+ * localhost:3000/api/agents/audience-creation` on its own without spinning
+ * up the rest of the pipeline). Every call is recorded as a task_runs row.
  *
- * Every call is recorded as a task_runs row (run_id, task_id, step_index,
- * started_at/finished_at) - the traceability trail: what ran, per run, and
- * when. Stops at the first "needs_input" or "failed" step, matching the
- * doc's finding that most of the process is fine and the real problem is
- * silent waiting - a paused run is visible in `runs`, not a black box.
+ * The pipeline stops after every step, not just a failed/paused one: a
+ * step that completes with more agents left to run puts the run into
+ * "awaiting_approval" rather than calling the next agent automatically —
+ * the per-agent equivalent of a tool call waiting for permission before it
+ * runs. POST /api/runs/[runId]/continue is what actually advances it.
  *
- * Each agent also only ever receives the slice of `priorOutputs` its
- * registry entry declares via `contextAccess` - this function filters the
- * full accumulated history down to that allowlist before every HTTP call,
- * so an agent never receives a prior agent's output it isn't scoped to see
- * (paired with the tool allowlist enforced in lib/mcp-client.ts).
+ * Each agent only ever receives the slice of `priorOutputs` its registry
+ * entry declares via `contextAccess` — filtered from the full accumulated
+ * history before every HTTP call, so an agent never receives a prior
+ * agent's output it isn't scoped to see (paired with the tool allowlist
+ * enforced in lib/mcp-client.ts).
  *
- * A "failed" step additionally triggers Agent 4 - Escalation (B9 in the
- * requirements doc: "the process terminates without an audience, and
- * nothing is captured"). "needs_input" does NOT trigger it - that's an
- * expected, resumable pause, not a terminated run.
- *
- * AND IT STOPS AT GATES.
- *
- * The map has a decision at 1.5 ("Approved?") between phase 1 and phase 2,
- * and phase 3 is entered only from 2.7's Yes branch. This used to run all
- * three agents in one pass, ignoring both. The consequence was not cosmetic:
- * Agents 2 and 3 ran on unapproved briefs and reported `completed` having
- * respectively swallowed a failed comment read and built nothing at all.
- *
- * A gated agent is NOT CALLED and writes NO task_runs row. See gates.ts for
- * why that, rather than a "skipped" status, is the correct behaviour.
+ * A "failed" step additionally triggers Agent 4 — Escalation (B9: "the
+ * process terminates without an audience, and nothing is captured").
+ * "needs_input" does NOT trigger it — that's an expected, resumable pause.
  */
-export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
-  const [run] = await query<RunRow>(
-    `INSERT INTO runs (input) VALUES ($1::jsonb) RETURNING *`,
-    [JSON.stringify(initialInput)],
-  );
-
-  return advance(run.run_id, 0, initialInput, {}, baseUrl);
-}
-
-/**
- * Continue a run that was waiting at a gate.
- *
- * Rebuilds the accumulated state from task_runs rather than keeping it in
- * memory, because the thing that opens a gate is a human deciding, and that
- * can happen days after the request was raised and in a different process.
- * The database is the only honest place for that state to live.
- */
-export async function resumeRun(runId: string, baseUrl: string): Promise<RunRow> {
-  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
-  if (!run) throw new Error(`No run ${runId}`);
-
-  const rows = await query<TaskRunRow>(
-    `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index, task_run_id`,
-    [runId],
-  );
-
-  /*
-   * Rebuild priorOutputs from what actually ran.
-   *
-   * Only `completed` rows contribute. A needs_input row's output is a
-   * half-finished thing carrying questions, and feeding it forward as though
-   * it were a result is how a paused run turns into a wrong one.
-   */
-  const priorOutputs: Partial<Record<AgentName, unknown>> = {};
-  let lastOutput: unknown = run.input;
-  let resumeAt = 0;
-  for (const row of rows) {
-    if (row.task_id === "escalation") continue;
-    if (row.status !== "completed") continue;
-    priorOutputs[row.task_id] = row.output;
-    lastOutput = row.output;
-    const idx = PIPELINE.findIndex((a) => a.name === row.task_id);
-    if (idx >= 0) resumeAt = Math.max(resumeAt, idx + 1);
-  }
-
-  if (resumeAt >= PIPELINE.length) {
-    // Everything already ran. Nothing to resume; report the run as it stands.
-    return run;
-  }
-
-  return advance(runId, resumeAt, lastOutput, priorOutputs, baseUrl);
-}
-
-/**
- * Run the pipeline from `startStep` until it completes, pauses, fails or
- * reaches a closed gate. The one step loop both the initial run and every
- * resume go through, so the two cannot drift apart in what they enforce.
- */
-async function advance(
-  runId: string,
-  startStep: number,
-  initialInput: unknown,
-  initialPriorOutputs: Partial<Record<AgentName, unknown>>,
+async function advanceOneStep(
+  run: RunRow,
+  stepIndex: number,
+  currentInput: unknown,
+  priorOutputs: Partial<Record<AgentName, unknown>>,
   baseUrl: string,
 ): Promise<RunRow> {
-  let currentInput: unknown = initialInput;
-  const priorOutputs: Partial<Record<AgentName, unknown>> = { ...initialPriorOutputs };
+  const agent = PIPELINE[stepIndex];
+  const startedAt = new Date();
 
-  // Read once per advance: a gate decision cannot be made mid-pass, because
-  // nothing in this loop waits for a human.
-  const decisions = await listDecisions(runId);
-
-  for (let stepIndex = startStep; stepIndex < PIPELINE.length; stepIndex++) {
-    const agent = PIPELINE[stepIndex];
-
-    // --- The gate, before anything else ------------------------------------
-    const gate = gateFor(agent.name);
-    if (gate) {
-      const verdict = gate.check({ decisions, input: currentInput, priorOutputs });
-      if (!verdict.open) {
-        return block(runId, stepIndex, {
-          gate_id: gate.id,
-          map_step: gate.mapStep,
-          label: gate.label,
-          step_index: stepIndex,
-          agent: agent.name,
-          awaiting: verdict.awaiting,
-          needs: verdict.needs,
-          ref: verdict.ref,
-        });
-      }
+  const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
+  for (const visibleAgent of agent.contextAccess) {
+    if (visibleAgent in priorOutputs) {
+      scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
     }
+  }
 
-    const startedAt = new Date();
+  let response: AgentResponse;
+  try {
+    response = await callAgent(baseUrl, agent.path, {
+      runId: run.run_id,
+      input: currentInput,
+      priorOutputs: scopedPriorOutputs,
+    });
+  } catch (err) {
+    response = { status: "failed", message: (err as Error).message };
+  }
 
-    const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
-    for (const visibleAgent of agent.contextAccess) {
-      if (visibleAgent in priorOutputs) {
-        scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
-      }
-    }
+  const finishedAt = new Date();
+  const durationMs = finishedAt.getTime() - startedAt.getTime();
 
-    /*
-     * The gate decision travels WITH the input.
-     *
-     * Agent 2 has two jobs and the decision at 1.5 is what picks between them:
-     * approved goes to 2.1 (issue converted to project form), rejected goes to
-     * 1.5a and triages the rejection. Handing it the decision means it does not
-     * have to infer which it is, and - the part that matters - it does not have
-     * to go looking for the rejection reason in a Workfront comment stream it
-     * may not be able to read. B2 says nothing reads the rejection reason; the
-     * fix is to carry it, not to hunt for it.
-     */
-    const agentInput = withGateDecision(currentInput, gate?.id, decisions);
-
-    let response: AgentResponse;
-    try {
-      response = await callAgent(baseUrl, agent.path, {
-        runId,
-        input: agentInput,
-        priorOutputs: scopedPriorOutputs,
-      });
-    } catch (err) {
-      response = { status: "failed", message: (err as Error).message };
-    }
-
-    const finishedAt = new Date();
-    const durationMs = finishedAt.getTime() - startedAt.getTime();
-
+  // Everything from here on just RECORDS the outcome above; callAgent's own
+  // try/catch already turned an agent failure into an ordinary "failed"
+  // response. If recording itself throws (a dropped DB connection, a query
+  // timeout), the run must still not be left at "running" — that status
+  // accepts neither resumeRun nor continueRun, so a run stuck there has no
+  // way back in short of someone hand-editing the database (see the outer
+  // catch below).
+  try {
     await query<TaskRunRow>(
       `INSERT INTO task_runs
          (run_id, task_id, step_index, status, input, output, message, metadata,
-          started_at, finished_at, duration_ms)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+          tokens_used, model, started_at, finished_at, duration_ms)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
       [
-        runId,
+        run.run_id,
         agent.name,
         stepIndex,
         response.status,
-        JSON.stringify(agentInput),
+        JSON.stringify(currentInput),
         JSON.stringify(response.output ?? null),
         response.message ?? null,
         JSON.stringify(response.metadata ?? {}),
+        response.usage?.tokens ?? null,
+        response.usage?.model ?? null,
         startedAt.toISOString(),
         finishedAt.toISOString(),
         durationMs,
@@ -189,80 +88,168 @@ async function advance(
 
     if (response.status !== "completed") {
       if (response.status === "failed") {
-        await runEscalation(runId, baseUrl, {
+        await runEscalation(run.run_id, baseUrl, {
           failedTask: agent.name,
           failedStepIndex: stepIndex,
           message: response.message ?? null,
-          input: agentInput,
+          input: currentInput,
         }, priorOutputs, stepIndex + 1);
       }
 
       const [updated] = await query<RunRow>(
-        `UPDATE runs SET status = $2, current_step = $3, blocked_on = NULL, updated_at = NOW()
+        `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
          WHERE run_id = $1 RETURNING *`,
-        [runId, response.status, stepIndex],
+        [run.run_id, response.status, stepIndex],
       );
       return updated;
     }
 
-    priorOutputs[agent.name] = response.output;
-    currentInput = response.output;
+    const nextStepIndex = stepIndex + 1;
+    const isLastStep = nextStepIndex >= PIPELINE.length;
+    const [updated] = await query<RunRow>(
+      `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
+       WHERE run_id = $1 RETURNING *`,
+      [run.run_id, isLastStep ? "completed" : "awaiting_approval", nextStepIndex],
+    );
+    return updated;
+  } catch (err) {
+    const [failed] = await query<RunRow>(
+      `UPDATE runs SET status = 'failed', current_step = $2, updated_at = NOW()
+       WHERE run_id = $1 RETURNING *`,
+      [run.run_id, stepIndex],
+    );
+    await runEscalation(run.run_id, baseUrl, {
+      failedTask: agent.name,
+      failedStepIndex: stepIndex,
+      message: `Recording this step's result failed: ${(err as Error).message}`,
+      input: currentInput,
+    }, priorOutputs, stepIndex + 1).catch(() => {});
+    return failed;
   }
-
-  const [completed] = await query<RunRow>(
-    `UPDATE runs SET status = 'completed', current_step = $2, blocked_on = NULL, updated_at = NOW()
-     WHERE run_id = $1 RETURNING *`,
-    [runId, PIPELINE.length],
-  );
-  return completed;
 }
 
-/** Park the run at a gate. No task_runs row is written: nothing ran. */
-async function block(
+/**
+ * Recovers a run stuck at "running" — the state resumeRun/continueRun set
+ * just before calling advanceOneStep, meant to be transitional within a
+ * single request. If that request died before advanceOneStep resolved it
+ * (a hung downstream call outliving even AGENT_CALL_TIMEOUT_MS, a killed
+ * process), the row is left there with no way back in through either of
+ * those functions, since both require a different starting status. This
+ * re-attempts `current_step` from scratch using the same "what's already
+ * completed" reconstruction resumeRun/continueRun use, so retrying costs
+ * nothing but time — it is not a guess at what the dead attempt was doing.
+ */
+export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "running") {
+    throw new Error(`Run ${runId} is "${run.status}", not "running" — nothing to retry.`);
+  }
+
+  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const currentInput = lastCompleted ? lastCompleted.output : run.input;
+
+  return advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
+}
+
+/** Starts a run and executes only its first agent (Intake). */
+export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
+  // An optional `programme` name on the submission groups this run under
+  // that Programme, upserted by name (see lib/programmes.ts) so submitting
+  // the same name twice reuses the row rather than duplicating it.
+  const programmeName = (initialInput as { programme?: unknown } | null)?.programme;
+  let programmeId: string | null = null;
+  if (typeof programmeName === "string" && programmeName.trim()) {
+    const { upsertProgrammeByName } = await import("@/lib/programmes");
+    const { programme } = await upsertProgrammeByName({ name: programmeName.trim() });
+    programmeId = programme.programme_id;
+  }
+
+  const [run] = await query<RunRow>(
+    `INSERT INTO runs (input, programme_id) VALUES ($1::jsonb, $2) RETURNING *`,
+    [JSON.stringify(initialInput), programmeId],
+  );
+
+  return advanceOneStep(run, 0, initialInput, {}, baseUrl);
+}
+
+/**
+ * Answers a paused run's "needs_input" step and re-runs that SAME step —
+ * the "a human resolves it and the run is resumed" half of the needs_input
+ * contract (see types.ts). Re-enters at the exact step that paused
+ * (`run.current_step`), rebuilding `priorOutputs` from every already-
+ * completed task_run so a resumed run sees the same context a same-request
+ * run would have. If the answer resolves it, the run lands in
+ * "awaiting_approval" like any other completed step — answering a question
+ * is not the same act as approving the next agent.
+ */
+export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "needs_input") {
+    throw new Error(`Run ${runId} is "${run.status}", not "needs_input" — nothing to resume.`);
+  }
+
+  const { priorOutputs } = await completedTaskRunsFor(runId);
+
+  const [running] = await query<RunRow>(
+    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    [runId],
+  );
+
+  return advanceOneStep(running, running.current_step, resumedInput, priorOutputs, baseUrl);
+}
+
+
+/**
+ * The process gate, in front of the per-agent loop.
+ *
+ * Returns null when the next agent may run, or the blocked_on record when it
+ * may not. A blocked agent is NOT called and writes NO task_runs row, so an
+ * absent stage cannot be mistaken for a finished one.
+ */
+async function gateBlocking(
   runId: string,
   stepIndex: number,
-  blockedOn: NonNullable<RunRow["blocked_on"]>,
-): Promise<RunRow> {
+  currentInput: unknown,
+  priorOutputs: Partial<Record<AgentName, unknown>>,
+): Promise<NonNullable<RunRow["blocked_on"]> | null> {
+  const agent = PIPELINE[stepIndex];
+  if (!agent) return null;
+  const gate = gateFor(agent.name);
+  if (!gate) return null;
+
+  const verdict = gate.check({ decisions: await listDecisions(runId), input: currentInput, priorOutputs });
+  if (verdict.open) return null;
+
+  return {
+    gate_id: gate.id,
+    map_step: gate.mapStep,
+    label: gate.label,
+    step_index: stepIndex,
+    agent: agent.name,
+    awaiting: verdict.awaiting,
+    needs: verdict.needs,
+    ref: verdict.ref,
+  };
+}
+
+/** Park the run at a gate. Nothing ran, so nothing is recorded as having run. */
+async function block(runId: string, blockedOn: NonNullable<RunRow["blocked_on"]>): Promise<RunRow> {
   const [updated] = await query<RunRow>(
     `UPDATE runs SET status = 'awaiting_approval', current_step = $2,
             blocked_on = $3::jsonb, updated_at = NOW()
      WHERE run_id = $1 RETURNING *`,
-    [runId, stepIndex, JSON.stringify(blockedOn)],
+    [runId, blockedOn.step_index, JSON.stringify(blockedOn)],
   );
   return updated;
 }
 
-/**
- * Attach the decision that opened this agent's gate to its input.
- *
- * Returns the input untouched when there is no gate or no decision, so an
- * agent without a gate sees exactly what it saw before this change.
- */
-function withGateDecision(input: unknown, gateId: GateId | undefined, decisions: GateDecision[]): unknown {
-  if (!gateId) return input;
-  const decided = decisionFor(decisions, gateId);
-  if (!decided) return input;
-  if (input == null || typeof input !== "object" || Array.isArray(input)) return input;
-
-  const base = input as Record<string, unknown>;
-  return {
-    ...base,
-    gateDecision: {
-      gate_id: decided.gate_id,
-      decision: decided.decision,
-      decided_by: decided.decided_by,
-      reason: decided.reason,
-      decided_at: decided.decided_at,
-    },
-    // The rejection reason, under the name Agent 2's triage already reads. A
-    // rejection recorded at the gate needs no comment-stream lookup.
-    ...(decided.decision === "rejected" && decided.reason
-      ? { rejectionReason: decided.reason }
-      : {}),
-  };
-}
-
-/** Every decision recorded against this run, oldest first. */
+/** Every decision recorded for this run, oldest first. */
 export async function listDecisions(runId: string): Promise<GateDecision[]> {
   return query<GateDecision>(
     `SELECT gate_id, step_index, decision, decided_by, reason, evidence, decided_at
@@ -272,12 +259,37 @@ export async function listDecisions(runId: string): Promise<GateDecision[]> {
 }
 
 /**
- * Record a decision at a gate, then carry on.
+ * Attach the decision that opened a gate to the agent's input.
  *
- * The decision is written BEFORE the pipeline advances, and written whether or
- * not the advance then succeeds. A decision a human made is a fact about the
- * process; losing it because the next agent threw would be losing the one piece
- * of this the blockers doc says is not captured anywhere structured today.
+ * Agent 2 has two jobs and the decision picks between them: approved goes to
+ * the conversion, rejected goes to triage. Carrying the reason means it does
+ * not have to hunt for the rejection in a comment stream it may not be able to
+ * read - which the blockers doc calls the largest unclaimed gap in the map.
+ */
+function withGateDecision(input: unknown, gateId: GateId | undefined, decisions: GateDecision[]): unknown {
+  if (!gateId) return input;
+  const decided = decisionFor(decisions, gateId);
+  if (!decided) return input;
+  if (input == null || typeof input !== "object" || Array.isArray(input)) return input;
+  return {
+    ...(input as Record<string, unknown>),
+    gateDecision: {
+      gate_id: decided.gate_id,
+      decision: decided.decision,
+      decided_by: decided.decided_by,
+      reason: decided.reason,
+      decided_at: decided.decided_at,
+    },
+    ...(decided.decision === "rejected" && decided.reason ? { rejectionReason: decided.reason } : {}),
+  };
+}
+
+/**
+ * Record a decision at a gate, then let the run continue by ONE step.
+ *
+ * Decided once: two approvals thirty seconds apart, from a client abort and a
+ * retry, each advanced the pipeline, and Agent 3 ran twice. Since the agents
+ * write to Workfront, a non-idempotent approve is a duplicate-record generator.
  */
 export async function decideGate(
   runId: string,
@@ -293,54 +305,24 @@ export async function decideGate(
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) throw new Error(`No run ${runId}`);
 
-  /*
-   * Which gate is being decided.
-   *
-   * Defaulting to the gate the run is actually waiting at means a caller does
-   * not have to know the gate vocabulary to approve something - which matters,
-   * because the caller is an assistant relaying a human. An explicit gateId
-   * still wins, and a decision on a run that is not waiting is refused rather
-   * than recorded against a guess.
-   */
   const gateId = input.gateId || run.blocked_on?.gate_id;
   if (!gateId) {
     throw new Error(
-      `Run ${runId} is not waiting at a gate (status "${run.status}"), so there is nothing to decide. ` +
-      "Pass gateId explicitly if you mean to record a decision anyway.",
+      `Run ${runId} is not waiting at a gate (status "${run.status}"), so there is nothing to decide.`,
     );
   }
 
-  /*
-   * A GATE IS DECIDED ONCE.
-   *
-   * Two approvals arrived about thirty seconds apart - a client-side abort and
-   * a retry - and each one recorded a decision and then advanced the pipeline.
-   * Agent 3 therefore ran twice on the same brief, produced the same
-   * needs_input twice, and the run carried two identical stages. Nothing
-   * errored, so nothing showed it had happened twice except the duplicate rows.
-   *
-   * That is not just untidy. Downstream of this the agents WRITE - 2.1 creates
-   * a Workfront project - so a non-idempotent approve is a duplicate-record
-   * generator waiting for a flaky connection. Re-deciding is refused rather
-   * than silently ignored, because a caller sending a second, DIFFERENT answer
-   * (approve then reject) needs to be told it did not take effect.
-   */
   const already = decisionFor(await listDecisions(runId), gateId as GateId);
   if (already) {
     if (already.decision !== input.decision) {
       throw new Error(
-        `Gate ${gateId} on run ${runId} was already ${already.decision} by ${already.decided_by} ` +
-        `at ${already.decided_at}. It cannot now be ${input.decision}: the pipeline has already acted ` +
-        "on the first decision. Start a new run if the request has changed.",
+        `Gate ${gateId} was already ${already.decision} by ${already.decided_by} at ${already.decided_at}. ` +
+        "The pipeline has acted on that; start a new run if the request has changed.",
       );
     }
-    // Same answer again - an abort and a retry. Report the run as it stands
-    // WITHOUT advancing it a second time.
     const [current] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
     return { run: current, decision: already };
   }
-
-  const stepIndex = run.blocked_on?.step_index ?? run.current_step;
 
   const [decision] = await query<GateDecision>(
     `INSERT INTO run_gates (run_id, gate_id, step_index, decision, decided_by, reason, evidence)
@@ -349,7 +331,7 @@ export async function decideGate(
     [
       runId,
       gateId,
-      stepIndex,
+      run.blocked_on?.step_index ?? run.current_step,
       input.decision,
       input.decidedBy,
       input.reason ?? null,
@@ -357,14 +339,79 @@ export async function decideGate(
     ],
   );
 
-  const resumedRun = await resumeRun(runId, baseUrl);
-  return { run: resumedRun, decision };
+  /*
+   * Clear the block, then advance exactly ONE step.
+   *
+   * The gate is a precondition on Continue, not a replacement for it - so a
+   * decision does not run the pipeline to completion, it unlocks the next
+   * agent and stops again like every other step.
+   */
+  await query(`UPDATE runs SET blocked_on = NULL WHERE run_id = $1`, [runId]);
+  const resumed = await continueRun(runId, baseUrl);
+  return { run: resumed, decision };
+}
+
+/**
+ * Approves an "awaiting_approval" run and runs the next agent — the actual
+ * "yes, go ahead" action behind the per-agent approval gate. `current_step`
+ * already points at the next agent to run (advanceOneStep advanced it past
+ * the one that just completed), and its input is that prior agent's output.
+ */
+export async function continueRun(runId: string, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "awaiting_approval") {
+    throw new Error(`Run ${runId} is "${run.status}", not "awaiting_approval" — nothing to approve.`);
+  }
+
+  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const currentInput = lastCompleted ? lastCompleted.output : run.input;
+
+  /*
+   * A CLICK IS NOT AN APPROVAL.
+   *
+   * Continue means "yes, run the next agent". It does not mean the review queue
+   * approved the request - only Workfront knows that - and conflating the two
+   * is what let Agent 2 run on an unapproved brief and report completed. If a
+   * process gate is shut, the run goes back to awaiting_approval with
+   * blocked_on set and no agent is called.
+   */
+  const blocked = await gateBlocking(runId, run.current_step, currentInput, priorOutputs);
+  if (blocked) return block(runId, blocked);
+
+  const [running] = await query<RunRow>(
+    `UPDATE runs SET status = 'running', blocked_on = NULL, updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    [runId],
+  );
+
+  // The decision that opened the gate travels with the input.
+  const gate = gateFor(PIPELINE[running.current_step]?.name);
+  const input = withGateDecision(currentInput, gate?.id, await listDecisions(runId));
+
+  return advanceOneStep(running, running.current_step, input, priorOutputs, baseUrl);
+}
+
+/** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
+async function completedTaskRunsFor(
+  runId: string,
+): Promise<{ priorOutputs: Partial<Record<AgentName, unknown>>; lastCompleted: TaskRunRow | undefined }> {
+  const completedTaskRuns = await query<TaskRunRow>(
+    `SELECT * FROM task_runs WHERE run_id = $1 AND status = 'completed' ORDER BY step_index`,
+    [runId],
+  );
+  const priorOutputs: Partial<Record<AgentName, unknown>> = {};
+  for (const taskRun of completedTaskRuns) {
+    priorOutputs[taskRun.task_id] = taskRun.output;
+  }
+  return { priorOutputs, lastCompleted: completedTaskRuns[completedTaskRuns.length - 1] };
 }
 
 /**
  * Best-effort call to the Escalation agent when a run fails. Never throws:
  * a broken escalation path must not mask the original failure, but it IS
- * still recorded as its own task_run - even escalation failing is
+ * still recorded as its own task_run — even escalation failing is
  * something B9 says must be captured, not silently dropped.
  */
 async function runEscalation(
@@ -397,8 +444,8 @@ async function runEscalation(
   await query<TaskRunRow>(
     `INSERT INTO task_runs
        (run_id, task_id, step_index, status, input, output, message, metadata,
-        started_at, finished_at, duration_ms)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+        tokens_used, model, started_at, finished_at, duration_ms)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
     [
       runId,
       ESCALATION.name,
@@ -408,6 +455,8 @@ async function runEscalation(
       JSON.stringify(response.output ?? null),
       response.message ?? null,
       JSON.stringify(response.metadata ?? {}),
+      response.usage?.tokens ?? null,
+      response.usage?.model ?? null,
       startedAt.toISOString(),
       finishedAt.toISOString(),
       finishedAt.getTime() - startedAt.getTime(),
@@ -415,12 +464,37 @@ async function runEscalation(
   );
 }
 
+/**
+ * Past this, give up rather than hang. Without a bound here, an agent
+ * whose own MCP call hangs (an unresponsive Workfront/AEP endpoint, a
+ * dead TCP connection nothing ever times out) leaves this fetch pending
+ * indefinitely — and with it, the run stuck at "running" forever, since
+ * neither resumeRun nor continueRun accept that status to try again. A
+ * bounded timeout turns that into an ordinary caught error instead, which
+ * the caller already converts into a normal "failed" task_run.
+ */
+const AGENT_CALL_TIMEOUT_MS = 60_000;
+
 async function callAgent(baseUrl: string, path: string, body: AgentRequest): Promise<AgentResponse> {
-  const res = await fetch(new URL(path, baseUrl), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AGENT_CALL_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL(path, baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`Agent at ${path} did not respond within ${AGENT_CALL_TIMEOUT_MS / 1000}s.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -430,27 +504,17 @@ async function callAgent(baseUrl: string, path: string, body: AgentRequest): Pro
   return (await res.json()) as AgentResponse;
 }
 
-/**
- * A single run plus every task_runs row recorded for it, in step order, plus
- * the gate decisions and what it is waiting for.
- *
- * `gates` and `blocked_on` are part of the run's state, not decoration: a
- * reader who sees one stage and no second needs to be told the second is
- * waiting on an approval, otherwise an absent stage reads as a lost one.
- */
-export async function getRun(runId: string): Promise<{
-  run: RunRow;
-  taskRuns: TaskRunRow[];
-  gates: GateDecision[];
-} | null> {
+/** A single run plus every task_runs row recorded for it, in step order. */
+export async function getRun(runId: string): Promise<{ run: RunRow; taskRuns: TaskRunRow[]; gates: GateDecision[] } | null> {
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) return null;
   const taskRuns = await query<TaskRunRow>(
     `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index`,
     [runId],
   );
-  const gates = await listDecisions(runId);
-  return { run, taskRuns, gates };
+  // The decisions too: a reader who sees one stage and no second needs
+  // to be told the second is behind a gate, or absent reads as lost.
+  return { run, taskRuns, gates: await listDecisions(runId) };
 }
 
 /** Most recent runs, for a status/observability listing. */
@@ -458,15 +522,87 @@ export async function listRuns(limit = 50): Promise<RunRow[]> {
   return query<RunRow>(`SELECT * FROM runs ORDER BY created_at DESC LIMIT $1`, [limit]);
 }
 
-/** The static task catalog (see db/schema.sql - kept in sync with registry.ts). */
+/** The static task catalog (see db/schema.sql — kept in sync with registry.ts). */
 export async function listTasks(): Promise<TaskRow[]> {
   return query<TaskRow>(`SELECT * FROM tasks ORDER BY task_id`);
 }
 
-/** Every execution of a single task across all runs - "when did audience_creation run, and how did it go each time." */
+/** Every execution of a single task across all runs — "when did audience_creation run, and how did it go each time." */
 export async function listTaskRuns(taskId: string, limit = 50): Promise<TaskRunRow[]> {
   return query<TaskRunRow>(
     `SELECT * FROM task_runs WHERE task_id = $1 ORDER BY started_at DESC LIMIT $2`,
     [taskId, limit],
+  );
+}
+
+export interface RunStats {
+  total: number;
+  running: number;
+  needsInput: number;
+  completed: number;
+  failed: number;
+  approved: number;
+  promoted: number;
+}
+
+/** Dashboard tile counts. Cast to ::int so the pg driver returns numbers, not bigint strings. */
+export async function getRunStats(): Promise<RunStats> {
+  const [row] = await query<{
+    total: number; running: number; needs_input: number;
+    completed: number; failed: number; approved: number; promoted: number;
+  }>(`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+      COUNT(*) FILTER (WHERE status = 'needs_input')::int AS needs_input,
+      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+      COUNT(*) FILTER (WHERE approved)::int AS approved,
+      COUNT(*) FILTER (WHERE promoted)::int AS promoted
+    FROM runs
+  `);
+  return {
+    total: row.total,
+    running: row.running,
+    needsInput: row.needs_input,
+    completed: row.completed,
+    failed: row.failed,
+    approved: row.approved,
+    promoted: row.promoted,
+  };
+}
+
+export interface TaskCounts {
+  total: number;
+  completed: number;
+  needsInput: number;
+  failed: number;
+}
+
+/** Per-task execution counts across every run — the Agents page's "how has each one done" row. */
+export async function getTaskCounts(): Promise<Record<string, TaskCounts>> {
+  const rows = await query<{ task_id: string; total: number; completed: number; needs_input: number; failed: number }>(`
+    SELECT
+      task_id,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE status = 'needs_input')::int AS needs_input,
+      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+    FROM task_runs
+    GROUP BY task_id
+  `);
+  const byTask: Record<string, TaskCounts> = {};
+  for (const row of rows) {
+    byTask[row.task_id] = { total: row.total, completed: row.completed, needsInput: row.needs_input, failed: row.failed };
+  }
+  return byTask;
+}
+
+/** Runs that need a human right now: paused, waiting on approval, or stuck — the Live Queue's "what needs attention." */
+export async function listActiveRuns(limit = 100): Promise<RunRow[]> {
+  return query<RunRow>(
+    `SELECT * FROM runs WHERE status IN ('needs_input', 'awaiting_approval', 'running')
+     ORDER BY updated_at ASC LIMIT $1`,
+    [limit],
   );
 }

@@ -129,7 +129,7 @@ describe('per-conversation project (D39)', () => {
 })
 
 describe('update-not-duplicate: version, history, reapprove-on-change (D38/D39)', () => {
-    test('a material change to an approved recipe bumps version, keeps history, and reverts to experimental', async () => {
+    test('a material change to an approved job bumps version, keeps history, and reverts to experimental', async () => {
         const saved = parseResult(await callTool('save_resource', { type: 'decision', title: 'evolving', content: 'v1', id: 'decision-evolving', project: 'P' }))
         await callTool('certify', { id: saved.id })
         const approved = parseResult(await callTool('get_resource', { id: saved.id }))
@@ -189,7 +189,7 @@ describe('owner (D40)', () => {
 })
 
 describe('find_similar (D39)', () => {
-    test('surfaces an existing recipe so the AI updates instead of duplicating', async () => {
+    test('surfaces an existing job so the AI updates instead of duplicating', async () => {
         const saved = parseResult(await callTool('save_resource', { type: 'decision', title: 'Use Auth0 for OIDC', content: 'chose auth0', project: 'P' }))
         const matches = parseResult(await callTool('find_similar', { query: 'Auth0' }))
         expect(matches.map(m => m.id)).toContain(saved.id)

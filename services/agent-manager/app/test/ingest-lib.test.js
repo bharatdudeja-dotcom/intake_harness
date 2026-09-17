@@ -83,7 +83,7 @@ describe('parseDecisionLog', () => {
         expect(parsed.length).toBeGreaterThanOrEqual(33)
         expect(parsed[0].anchor).toBe('D1')
         const anchors = parsed.map(d => d.anchor)
-        expect(new Set(anchors).size).toBe(anchors.length) // unique - one recipe per decision
+        expect(new Set(anchors).size).toBe(anchors.length) // unique - one job per decision
         expect(anchors).toContain('D28')
         expect(anchors).toContain('D33')
     })

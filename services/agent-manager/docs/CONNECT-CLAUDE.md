@@ -66,8 +66,8 @@ While we work:
   is there. When refining earlier work, save_resource with its existing id —
   never create a near-duplicate.
 
-When I am happy with a run, approve it. That hands it to the Hero Agent, which
-reads it against every earlier run and proposes what should be learned. The Hero
+When I am happy with a run, approve it. That hands it to the Oracle, which
+reads it against every earlier run and proposes what should be learned. The Oracle
 Agent only proposes; a named person decides what is promoted.
 
 Do this quietly as we work. Do not ask me each time.
@@ -96,7 +96,7 @@ correction is the thing worth keeping.
 
 > **You:** that looks right, approve it
 
-Claude approves the run. It goes to the Hero Agent, which proposes what should
+Claude approves the run. It goes to the Oracle, which proposes what should
 be learned. You promote it, and your name is on it.
 
 ---

@@ -96,37 +96,52 @@ async function writeCatalog (files, catalog) {
 function toMetadata (resource) {
   const {
     id, title, type, format, project, tags, author, created, updated, status, approved,
-    epic, story, task, target_agent: targetAgent, task_status: taskStatus, linked_recipes: linkedRecipes,
+    epic, story, task, target_agent: targetAgent, task_status: taskStatus, linked_jobs: linkedJobs,
     // Increment 9 (D42) model fields:
     segments, owner, version, updated_at: updatedAt,
     approved_by: approvedBy, approved_at: approvedAt, approval_note: approvalNote,
     tokens_used: tokensUsed, tokens_last: tokensLast,
-    // Increment 11/12 (D45/D47/D48): step-model recipe-level projections + cross-tool linkage
-    recipe_id: recipeId, baked, baked_at: bakedAt, baked_by: bakedBy,
+    // Increment 11/12 (D45/D47/D48): step-model job-level projections + cross-tool linkage
+    job_id: jobId, baked, baked_at: bakedAt, baked_by: bakedBy,
     models_used: modelsUsed, step_count: stepCount, expires_at: expiresAt,
     // Which agents touched the run, and which of them reported success while failing.
-    // Rolled up by projectRecipe; projected here so every list view can draw the
-    // journey without loading each recipe's steps.
+    // Rolled up by projectJob; projected here so every list view can draw the
+    // journey without loading each job's steps.
     agents, agent_faults: agentFaults,
-    // Increment 18 (D64): Head Chef CX-graph gate - a baked recipe is only a CANDIDATE for the
+    // Every Workfront object the run created. Projected because a person
+    // approves a ticket in Workfront and then refers to this run by the id on
+    // THAT ticket - so approve_intake has to be able to find a run by one
+    // without loading every document in the store.
+    workfront_refs: workfrontRefs,
+    // The marketer's own words, kept so runs can be compared on what was
+    // actually asked for rather than on a truncated title.
+    brief,
+    // Set by start_intake and by nothing else. Its presence is what makes a
+    // record an agent run rather than something a person captured by hand, and
+    // without it in the catalog the two are indistinguishable in a list.
+    upstream,
+    // Increment 18 (D64): Head Chef CX-graph gate - a baked job is only a CANDIDATE for the
     // Company CX Graph; cx_approved flips true when a Head Chef admits it. Projected into the
     // catalog so list_cx_pending and the CX compiler can read it without loading every full doc.
     cx_approved: cxApproved, cx_approved_by: cxApprovedBy, cx_approved_at: cxApprovedAt,
     // Practice/capability group (D79) - projected so list/search can filter without loading docs.
     practice,
-    // Who this recipe has been handed to on one of its ingredients (D86). Projected for the same
+    // Who this job has been handed to on one of its ingredients (D86). Projected for the same
     // reason: visibility must be decidable without reading every document.
     assigned_to: assignedTo
   } = resource
   return {
     id, title, type, format, project, tags, author, created, updated, status, approved,
-    epic, story, task, target_agent: targetAgent, task_status: taskStatus, linked_recipes: linkedRecipes,
+    epic, story, task, target_agent: targetAgent, task_status: taskStatus, linked_jobs: linkedJobs,
     segments, owner, version, updated_at: updatedAt,
     approved_by: approvedBy, approved_at: approvedAt, approval_note: approvalNote,
     tokens_used: tokensUsed, tokens_last: tokensLast,
-    recipe_id: recipeId, baked, baked_at: bakedAt, baked_by: bakedBy,
+    job_id: jobId, baked, baked_at: bakedAt, baked_by: bakedBy,
     models_used: modelsUsed, step_count: stepCount, expires_at: expiresAt,
     agents, agent_faults: agentFaults,
+    workfront_refs: workfrontRefs,
+    brief,
+    upstream,
     cx_approved: cxApproved, cx_approved_by: cxApprovedBy, cx_approved_at: cxApprovedAt,
     practice,
     assigned_to: assignedTo
@@ -171,7 +186,7 @@ async function getResource (id) {
 
 /**
  * Delete a resource (its full JSON and its catalog entry) - used by the retention purge
- * (D45) to remove a recipe left with no approved/active steps. Never called on approved
+ * (D45) to remove a job left with no approved/active steps. Never called on approved
  * content by design (callers check that first). Idempotent: deleting an already-gone id
  * is a silent no-op.
  * @param {string} id
@@ -258,7 +273,7 @@ function matchesFilter (entry, filter) {
   if (filter.tag && !(entry.tags || []).includes(filter.tag)) return false
   // Practice / capability group (D79): the delivery discipline this work belongs to (aem, aep,
   // braze, campaign...). Lets an AEM consultant find AEM knowledge without wading through every
-  // other practice's work, while the recipe stays visible cross-practice when approved.
+  // other practice's work, while the job stays visible cross-practice when approved.
   if (filter.practice && entry.practice !== filter.practice) return false
   // status is alias-aware: "active"=="approved", "pending"=="experimental" (D42)
   if (filter.status && !statusMatches(entry.status, filter.status)) return false
@@ -267,7 +282,7 @@ function matchesFilter (entry, filter) {
    * Multi-tenant isolation (D40/D53, tightened in D86).
    *
    * The old rule shared anything whose status canonicalised to "approved", and because approving a
-   * single ingredient auto-promotes its recipe, a consultant's working draft became visible to the
+   * single ingredient auto-promotes its job, a consultant's working draft became visible to the
    * whole company the moment they approved one ingredient of it. That is not what anyone
    * approving an ingredient believes they are doing.
    *
@@ -329,7 +344,7 @@ function searchTerms (query) {
 
 /**
  * Does a term appear in the haystack, tolerating the plural/singular mismatch that dominates real
- * queries? Someone searching "abandoned carts" or "phishing templates" must find a recipe written
+ * queries? Someone searching "abandoned carts" or "phishing templates" must find a job written
  * about a "cart" and a "template". Deliberately crude - a full stemmer is not worth the dependency
  * or the surprising matches it brings; this covers the -s/-es case that actually occurs.
  * @param {string} haystack lowercased searchable text
@@ -397,7 +412,7 @@ async function searchResources (query, filter = {}) {
 
   // Prefer precision: if anything matches EVERY term, only those are returned. Otherwise relax
   // to near-misses rather than returning nothing, because a real question like "how do we handle
-  // the abandoned cart" carries incidental words ("handle") that appear in no recipe - and an
+  // the abandoned cart" carries incidental words ("handle") that appear in no job - and an
   // empty result tells the agent to rebuild work that exists. The floor stays high enough that a
   // single incidental overlap never counts as a match.
   const best = Math.max(...scored.map(s => s.coverage), 0)
@@ -587,15 +602,15 @@ async function saveUsers (users) {
 }
 
 /**
- * Reset the store to a blank slate (D51/D52): delete every recipe/ingredient, the catalog
+ * Reset the store to a blank slate (D51/D52): delete every job/ingredient, the catalog
  * index, all project records, the work-context, and any manifests/assets - leaving the
  * editable settings override (config) intact. Enumerates by prefix so nothing is missed.
- * @returns {Promise<{deleted: number, recipes: number, assets: number}>}
+ * @returns {Promise<{deleted: number, jobs: number, assets: number}>}
  */
 async function resetAll () {
   const files = await getFiles()
   const special = new Set([CATALOG_PATH, PROJECTS_PATH, WORK_CONTEXT_PATH])
-  let deleted = 0; let recipes = 0; let assets = 0
+  let deleted = 0; let jobs = 0; let assets = 0
   for (const dir of [RESOURCES_DIR, ASSETS_DIR]) {
     let entries = []
     try { entries = await files.list(`${dir}/`) } catch (e) { entries = [] }
@@ -606,10 +621,10 @@ async function resetAll () {
       try { await files.delete(name) } catch (err) { /* already gone */ }
       deleted++
       if (name.startsWith(`${ASSETS_DIR}/`)) assets++
-      else if (name.endsWith('.json') && !special.has(name)) recipes++
+      else if (name.endsWith('.json') && !special.has(name)) jobs++
     }
   }
-  return { deleted, recipes, assets }
+  return { deleted, jobs, assets }
 }
 
 /**

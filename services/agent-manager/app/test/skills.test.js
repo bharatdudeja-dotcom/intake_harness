@@ -11,14 +11,14 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Tests for lib/skills (Increment 8, D31): recipe -> skill export, both the
+ * Tests for lib/skills (Increment 8, D31): job -> skill export, both the
  * generic "prompt" format and the "claude-skill" vendor adapter, plus the
- * house-recipe-only gate.
+ * house-job-only gate.
  */
 
 const skills = require('../lib/skills')
 
-function approvedRecipe (overrides = {}) {
+function approvedJob (overrides = {}) {
     return {
         id: 'decision-example-1',
         type: 'decision',
@@ -47,25 +47,25 @@ describe('lib/skills - format registry', () => {
     })
 })
 
-describe('lib/skills - the house-recipe-only gate', () => {
-    test('rejects an experimental (pending) recipe with a clear message', () => {
-        const pending = approvedRecipe({ status: 'pending' })
-        expect(() => skills.exportRecipe(pending)).toThrow(/experimental/i)
-        expect(() => skills.exportRecipe(pending)).toThrow(/certify/i)
+describe('lib/skills - the house-job-only gate', () => {
+    test('rejects an experimental (pending) job with a clear message', () => {
+        const pending = approvedJob({ status: 'pending' })
+        expect(() => skills.exportJob(pending)).toThrow(/experimental/i)
+        expect(() => skills.exportJob(pending)).toThrow(/certify/i)
     })
 
-    test('accepts a recipe with no status field as active (legacy resources default to active)', () => {
-        const legacy = approvedRecipe({ status: undefined })
-        expect(() => skills.exportRecipe(legacy)).not.toThrow()
+    test('accepts a job with no status field as active (legacy resources default to active)', () => {
+        const legacy = approvedJob({ status: undefined })
+        expect(() => skills.exportJob(legacy)).not.toThrow()
     })
 
     test('rejects an unknown export format', () => {
-        expect(() => skills.exportRecipe(approvedRecipe(), 'docx')).toThrow(/unknown export format/i)
+        expect(() => skills.exportJob(approvedJob(), 'docx')).toThrow(/unknown export format/i)
     })
 })
 
 describe('lib/skills - "prompt" export (generic, any AI)', () => {
-    const exported = skills.exportRecipe(approvedRecipe(), 'prompt')
+    const exported = skills.exportJob(approvedJob(), 'prompt')
 
     test('returns a filename, markdown mimeType, and framed content', () => {
         expect(exported.format).toBe('prompt')
@@ -73,7 +73,7 @@ describe('lib/skills - "prompt" export (generic, any AI)', () => {
         expect(exported.mimeType).toBe('text/markdown')
     })
 
-    test('content includes provenance and the original recipe content verbatim', () => {
+    test('content includes provenance and the original job content verbatim', () => {
         expect(exported.content).toContain('Use Auth0 as the reference IdP')
         expect(exported.content).toContain('resource://company/decision/decision-example-1')
         expect(exported.content).toContain('Tap Portability Layer > Auth')
@@ -82,13 +82,13 @@ describe('lib/skills - "prompt" export (generic, any AI)', () => {
     })
 
     test('defaults to "prompt" when no format is given', () => {
-        const defaulted = skills.exportRecipe(approvedRecipe())
+        const defaulted = skills.exportJob(approvedJob())
         expect(defaulted.format).toBe('prompt')
     })
 })
 
 describe('lib/skills - "claude-skill" export (SKILL.md)', () => {
-    const exported = skills.exportRecipe(approvedRecipe(), 'claude-skill')
+    const exported = skills.exportJob(approvedJob(), 'claude-skill')
 
     test('returns SKILL.md with markdown mimeType', () => {
         expect(exported.filename).toBe('SKILL.md')
@@ -105,7 +105,7 @@ describe('lib/skills - "claude-skill" export (SKILL.md)', () => {
         expect(name).toMatch(/^[a-z0-9-]+$/)
     })
 
-    test('body includes the recipe title, URI, work item, and content', () => {
+    test('body includes the job title, URI, work item, and content', () => {
         expect(exported.content).toContain('# Use Auth0 as the reference IdP')
         expect(exported.content).toContain('resource://company/decision/decision-example-1')
         expect(exported.content).toContain('Tap Portability Layer > Auth')
@@ -113,8 +113,8 @@ describe('lib/skills - "claude-skill" export (SKILL.md)', () => {
     })
 
     test('description frontmatter is a single line even if the title were multi-line-ish', () => {
-        const withNewline = approvedRecipe({ title: 'Title' })
-        const out = skills.exportRecipe(withNewline, 'claude-skill')
+        const withNewline = approvedJob({ title: 'Title' })
+        const out = skills.exportJob(withNewline, 'claude-skill')
         const descLine = out.content.split('\n')[2]
         expect(descLine.startsWith('description:')).toBe(true)
     })

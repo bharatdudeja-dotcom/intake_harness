@@ -14,44 +14,56 @@ const wrap = (v) => ({ content: [{ type: 'text', text: JSON.stringify(v) }] })
 
 const RUNS = [
   {
-    id: 'recipe-live', title: 'Q4 HSD Upsell', type: 'recipe', owner: 'bharat.dudeja@tapcxm.com',
+    id: 'job-live', title: 'Q4 HSD Upsell', type: 'job', owner: 'bharat.dudeja@tapcxm.com',
     author: 'bharat.dudeja@tapcxm.com', project: 'Comcast Intake', segments: { project: 'Comcast Intake' },
     status: 'experimental', step_count: 5, version: 1, created: '2026-09-16T00:00:00Z',
     updated: '2026-09-16T01:00:00Z', updated_at: '2026-09-16T01:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 4200,
     baked: false, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-1' },
     agents: ['intake'], agent_faults: ['intake']
   },
   {
-    id: 'recipe-done', title: 'Xfinity Mobile Winback', type: 'recipe', owner: 'bharat.dudeja@tapcxm.com',
+    id: 'job-done', title: 'Xfinity Mobile Winback', type: 'job', owner: 'bharat.dudeja@tapcxm.com',
     author: 'bharat.dudeja@tapcxm.com', project: 'Comcast Intake', segments: { project: 'Comcast Intake' },
     status: 'approved', step_count: 7, version: 2, created: '2026-09-15T00:00:00Z',
     updated: '2026-09-15T09:00:00Z', updated_at: '2026-09-15T09:00:00Z',
     practice: 'workfront', models_used: ['claude-opus-5'], tokens_used: 9100,
     baked: true, cx_approved: false,
+    upstream: { system_id: 'agentic-harness', run_id: 'r-0' },
     agents: ['intake', 'review', 'audience_creation'], agent_faults: []
+  }
+  ,
+  {
+    id: 'job-handmade', title: 'As-built architecture, verified 16 Sep', type: 'job',
+    owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com',
+    project: 'Comcast Intake', segments: { project: 'Comcast Intake' },
+    status: 'experimental', step_count: 2, version: 1,
+    created: '2026-09-16T02:00:00Z', updated: '2026-09-16T02:00:00Z', updated_at: '2026-09-16T02:00:00Z',
+    models_used: ['opus-5'], tokens_used: 1200, baked: false, cx_approved: false
+    // deliberately NO upstream and NO agents: nothing here ever touched an agent
   }
 ]
 
 const STEPS = [
-  { id: 's1', recipe_id: 'recipe-live', order: 1, kind: 'message', content: '### The brief', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['brief'] },
-  { id: 's2', recipe_id: 'recipe-live', order: 2, kind: 'doc', content: '### Intake', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['agent', 'intake', 'silent-failure'], provenance: { duration_ms: 1200, upstream_payload: { agent: 'intake', upstream_status: 'completed' } } },
-  { id: 's3', recipe_id: 'recipe-live', order: 3, kind: 'decision', content: '### Time ledger', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['ledger'] },
-  { id: 's4', recipe_id: 'recipe-live', order: 4, kind: 'steering', signal: 'correct', content: 'Wrong audience', status: 'approved', source: 'ide-agent', tags: [] }
+  { id: 's1', job_id: 'job-live', order: 1, kind: 'message', content: '### The brief', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['brief'] },
+  { id: 's2', job_id: 'job-live', order: 2, kind: 'doc', content: '### Intake', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['agent', 'intake', 'silent-failure'], provenance: { duration_ms: 1200, upstream_payload: { agent: 'intake', upstream_status: 'completed' } } },
+  { id: 's3', job_id: 'job-live', order: 3, kind: 'decision', content: '### Time ledger', format: 'md', status: 'experimental', source: 'agent-manager', tags: ['ledger'] },
+  { id: 's4', job_id: 'job-live', order: 4, kind: 'steering', signal: 'correct', content: 'Wrong audience', status: 'approved', source: 'ide-agent', tags: [] }
 ]
 
 const TOOLS = {
-  list_recipes: RUNS,
+  list_jobs: RUNS,
   list_resources: RUNS,
   list_projects: [{ name: 'Comcast Intake', status: 'active' }],
   list_steps: STEPS,
-  get_recipe: { ...RUNS[0], view: 'full', steps: STEPS },
-  list_active_tasks: [{ id: 't1', title: 'Hand to AEP', task_status: 'open', target_agent: 'aep', recipe_id: 'recipe-live' }],
+  get_job: { ...RUNS[0], view: 'full', steps: STEPS },
+  list_active_tasks: [{ id: 't1', title: 'Hand to AEP', task_status: 'open', target_agent: 'aep', job_id: 'job-live' }],
   get_settings: { retention_days: 30, segmentation_levels: [{ key: 'project', label: 'Programme', default_label: 'Project' }, { key: 'epic', label: 'Epic', default_label: 'Epic' }, { key: 'story', label: 'Story', default_label: 'Story' }], kind_labels: {}, kinds: [{ type: 'decision', label: 'Decision', approval: 'auto' }], head_chefs: ['bharat.dudeja@tapcxm.com'], practices: [{ id: 'workfront', label: 'Workfront' }] },
   get_role: { role: 'head-chef', roles: ['head-chef', 'chef'], owner: 'bharat.dudeja@tapcxm.com', head_chefs: ['bharat.dudeja@tapcxm.com'] },
   list_cx_pending: [RUNS[1]],
   list_practices: { practices: [{ id: 'workfront', label: 'Workfront' }], my_practices: ['workfront'], my_default_practice: 'workfront' },
-  get_cx_graph: { built: true, generated_at: '2026-09-16T01:00:00Z', recipe_count: 1, node_count: 3, edge_count: 2, owners: ['bharat.dudeja@tapcxm.com'], practices: ['workfront'], projects: ['Comcast Intake'], nodes: [{ id: 'recipe-done', node: 'recipe', label: 'Xfinity Mobile Winback', owner: 'bharat.dudeja@tapcxm.com', project: 'Comcast Intake', practice: 'workfront' }, { id: 'x1', node: 'ingredient', recipe: 'recipe-done', kind: 'doc', label: 'a', tags: ['agent', 'review'] }, { id: 'x2', node: 'ingredient', recipe: 'recipe-done', kind: 'message', label: 'b', tags: ['brief'] }], edges: [{ from: 'recipe-done', to: 'x1', rel: 'artifact' }, { from: 'recipe-done', to: 'x2', rel: 'artifact' }] },
+  get_cx_graph: { built: true, generated_at: '2026-09-16T01:00:00Z', job_count: 1, node_count: 3, edge_count: 2, owners: ['bharat.dudeja@tapcxm.com'], practices: ['workfront'], projects: ['Comcast Intake'], nodes: [{ id: 'job-done', node: 'job', label: 'Xfinity Mobile Winback', owner: 'bharat.dudeja@tapcxm.com', project: 'Comcast Intake', practice: 'workfront' }, { id: 'x1', node: 'ingredient', job: 'job-done', kind: 'doc', label: 'a', tags: ['agent', 'review'] }, { id: 'x2', node: 'ingredient', job: 'job-done', kind: 'message', label: 'b', tags: ['brief'] }], edges: [{ from: 'job-done', to: 'x1', rel: 'artifact' }, { from: 'job-done', to: 'x2', rel: 'artifact' }] },
   list_agent_systems: [{ id: 'agentic-harness', label: 'Xfinity Creative Intake', practice: 'workfront', active: true, base_url: 'http://34.203.238.63:3000', agents_path: '/api/tasks', start_path: '/api/runs', run_path: '/api/runs/{run_id}', input_key: 'brief', input_envelope: 'input', mcp_endpoint: 'https://cryuy4x9n5.execute-api.us-east-1.amazonaws.com/mcp', mcp_server_id: 'adobe-aec', auth_configured: false, notes: ['Polled, not intercepted.'] }],
   list_system_agents: { system: 'agentic-harness', agents: [
     { id: 'intake', label: 'Intake', owner: 'Uday' },
@@ -118,7 +130,7 @@ w.auth.cred = { userKey: 'x' }
 try { await w.loadAll() } catch (e) { errors.push('loadAll: ' + e.stack) }
 
 const PANELS = ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks',
-  'renderCookbook', 'renderHeadChef', 'renderAgents', 'renderSettings', 'renderConnections']
+  'renderCookbook', 'renderAgents', 'renderSettings', 'renderConnections']
 for (const fn of PANELS) {
   try { if (typeof w[fn] === 'function') w[fn](); else errors.push(fn + ': not defined') }
   catch (e) { errors.push(fn + ': ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
@@ -126,8 +138,8 @@ for (const fn of PANELS) {
 for (const fn of ['buildGraph', 'buildCx']) {
   try { await w[fn]() } catch (e) { errors.push(fn + ': ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
 }
-try { await w.openWorklog('recipe-live') } catch (e) { errors.push('openWorklog: ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
-try { await w.openDetail('recipe-live') } catch (e) { errors.push('openDetail: ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
+try { await w.openWorklog('job-live') } catch (e) { errors.push('openWorklog: ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
+try { await w.openDetail('job-live') } catch (e) { errors.push('openDetail: ' + e.stack.split('\n').slice(0, 3).join(' | ')) }
 await sleep(200)
 
 // The View JSON button, clicked, in the drawer - the exact thing that was broken.
@@ -154,29 +166,39 @@ report('home', '#panel-home')
 report('programmes', '#panel-projects')
 report('live queue', '#panel-tasks')
 report('playbooks', '#panel-cookbook')
-report('approvals', '#panel-headchef')
-report('agents', '#panel-agents', 'Hero Agent')
+report('agents', '#panel-agents', 'Oracle')
 report('settings', '#panel-settings', 'MCP servers')
 report('connections', '#panel-connections')
 
 console.log('\n--- specifics ---')
 const q = (s) => D.querySelectorAll(s).length
-console.log('hero face in Agents      :', q('#panel-agents .hero-face'))
+console.log('oracle face in Agents      :', q('#panel-agents .oracle-face'))
 console.log('agent tiles              :', q('#panel-agents .agent-tile'))
 console.log('progress bars rendered   :', q('.jrn-bar'))
 console.log('progress segments        :', q('.jrn-seg'))
 console.log('segments marked faulted  :', q('.jrn-seg.fault'))
+// A run no agent ever touched must get NO journey bar. It was getting one, with
+// an invented current stage, which is the precise failure this product exists to
+// catch - so it is asserted here rather than left to a screenshot.
+const handmade = [...D.querySelectorAll('[data-open-worklog],[data-open-job]')]
+  .map(b => b.closest('.card')).filter(Boolean)
+  .filter(c => /As-built architecture/.test(c.textContent))
+const bogus = handmade.filter(c => c.querySelector('.jrn-bar'))
+console.log('bar on a non-agent run   :', bogus.length === 0 ? 'none (correct)' : 'STILL SHOWN x' + bogus.length)
+if (bogus.length) errors.push('journey bar drawn on a run no agent touched')
 console.log('MCP rows in Settings     :', q('#panel-settings .mcp-row'))
-console.log('Approvals nav entry      :', q('nav button[data-panel="headchef"]'))
+// Approvals moved into the Oracle card, so the check moved with them.
+console.log('approvals in oracle card   :', q('#panel-agents .oracle-queue'))
+console.log('no separate approvals nav:', q('nav button[data-panel="headchef"]') === 0 ? 'correct' : 'STILL THERE')
 console.log('drawer ledger            :', q('#drawer .ledger, #drawer .jrn-bar'))
 console.log('drawer approve button    :', q('#drawer [data-submit-run]'))
-const M = { id: 'recipe-live', owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com', status: 'experimental', baked: false, cx_approved: false }
-console.log('  recipeStage            :', typeof w.recipeStage === 'function' ? w.recipeStage(M) : 'n/a')
+const M = { id: 'job-live', owner: 'bharat.dudeja@tapcxm.com', author: 'bharat.dudeja@tapcxm.com', status: 'experimental', baked: false, cx_approved: false }
+console.log('  jobStage            :', typeof w.jobStage === 'function' ? w.jobStage(M) : 'n/a')
 console.log('  isMine                 :', typeof w.isMine === 'function' ? w.isMine(M) : 'n/a')
 console.log('  needsBaking            :', typeof w.needsBaking === 'function' ? w.needsBaking(M) : 'n/a')
 const dr = D.querySelector('#drawer')
 console.log('  drawer head            :', (dr.innerHTML.match(/<div class="rowbtns"[\s\S]{0,160}/) || ['(none)'])[0].replace(/\s+/g, ' '))
-console.log('cookbook words left      :', (D.body.textContent.match(/\brecipe|ingredient|cookbook|head chef|bake\b/gi) || []).length)
+console.log('cookbook words left      :', (D.body.textContent.match(/\bjob|ingredient|cookbook|head chef|bake\b/gi) || []).length)
 
 console.log('\n--- errors ---')
 if (!errors.length) console.log('none')

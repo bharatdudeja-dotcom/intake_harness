@@ -11,14 +11,14 @@ trail this connector was built against (referenced by `D<n>` below).
 
 ## What it is
 
-- **Recipe = task, Step = ingredient (D45/D47).** `start_recipe` opens an ordered thread for
+- **Job = task, Step = ingredient (D45/D47).** `start_job` opens an ordered thread for
   a task; `append_step` appends each output as you produce it (message/code/diagram/image/
   decision/doc/handoff/config/steering), tagged with `source`, `model`, and `tokens_used`.
   Steps are never reordered. A human `approve_step`s the ones worth keeping; only approved
-  steps join the cookbook. `bake_recipe` finalizes a recipe once the task is done.
-- **Projects → Recipes → Work Log → Cookbook.** Project records are the source of truth
+  steps join the cookbook. `bake_job` finalizes a job once the task is done.
+- **Projects → Jobs → Work Log → Cookbook.** Project records are the source of truth
   (`start_project`); the Cookbook is the approved-steps-only, followable view across a
-  project's recipes.
+  project's jobs.
 - **Steering capture (D41/D47).** A human's allow/deny/edit is captured as its own
   `kind:"steering"` step (`affirm`/`reject`/`correct`) — deterministically for Claude Code via
   the hook kit in [`hooks/`](hooks/) (or `npx @tap/cookbook-connect`, see
@@ -28,7 +28,7 @@ trail this connector was built against (referenced by `D<n>` below).
   dashboard.
 - **Multi-tenant by owner**, `x-api-key`-mapped today (`API_KEY_OWNERS`); full per-user OAuth
   identity is future work (org rollout).
-- **Replay as a skill.** `export_as_skill` on a baked recipe emits the ordered, approved
+- **Replay as a skill.** `export_as_skill` on a baked job emits the ordered, approved
   end-to-end walkthrough (prompts/decisions/code/diagrams) as a portable prompt / `SKILL.md`
   — any AI can redo the task from it.
 - **Infra-/IdP-/AI-agnostic core (D21).** `lib/**` and `actions/mcp-server/tools.js` have no
@@ -47,15 +47,15 @@ Cookbook: `get_resource_policy`, `list_resource_types`, `save_resource`, `approv
 `certify`, `find_similar`, `list_resources`, `search_resources`, `get_resource`,
 `export_as_skill`.
 
-Recipe/Step model: `start_recipe`, `append_step`, `approve_step`, `approve_steps`,
-`discard_step`, `get_recipe`, `list_recipes`, `list_steps`, `get_active_recipe`, `bake_recipe`.
+Job/Step model: `start_job`, `append_step`, `approve_step`, `approve_steps`,
+`discard_step`, `get_job`, `list_jobs`, `list_steps`, `get_active_job`, `bake_job`.
 
 Projects: `start_project`, `set_work_context`, `bake_project`, `set_project_status`,
 `list_projects`, `get_segmentation_config`.
 
-Tasks/handoffs: `list_active_tasks`, `set_task_status`, `link_recipes`.
+Tasks/handoffs: `list_active_tasks`, `set_task_status`, `link_jobs`.
 
-Settings/admin: `get_settings`, `update_settings`, `purge_expired`, `admin_list_recipes`,
+Settings/admin: `get_settings`, `update_settings`, `purge_expired`, `admin_list_jobs`,
 `admin_list_projects`, `admin_reset_data` (guarded, not exposed on the dashboard proxy).
 
 CX Graph: `get_cx_graph`, `rebuild_cx_graph`.
@@ -67,7 +67,7 @@ source of truth for that policy.
 ## Dashboard
 
 `web-src/index.html` — Home / Projects / Work Log / Cookbook / Active Tasks / Settings /
-Company CX Graph. Client-side PDF export per recipe. Diagrams (mermaid or exact captured SVG)
+Company CX Graph. Client-side PDF export per job. Diagrams (mermaid or exact captured SVG)
 and images render inline; see `D57/D58/D60/D61` for the diagram-capture and rendering fixes.
 
 ## Authentication

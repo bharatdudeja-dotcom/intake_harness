@@ -1,7 +1,7 @@
 # Getting started — TAP Company Cookbook
 
 The Cookbook is a shared, cross-AI knowledge store: your AI assistant captures its work
-(recipes = tasks, ingredients = steps), you approve what's worth keeping, and approved work can
+(jobs = tasks, ingredients = steps), you approve what's worth keeping, and approved work can
 be admitted into a company-wide Knowledge Graph everyone can reuse. This guide shows how to
 **connect your AI client** and **use the dashboard**.
 
@@ -71,16 +71,16 @@ provider app whose **loopback** callback (`http://localhost:<port>/oauth/callbac
 
 ## 4. The capture → approve → cookbook → CX-graph flow
 
-1. **Work with your AI** — it calls `start_project` / `start_recipe` and `append_step`s its outputs
+1. **Work with your AI** — it calls `start_project` / `start_job` and `append_step`s its outputs
    (messages, code, decisions, diagrams). Everything is **experimental** by default and expires
    unless kept.
 2. **Approve** the ingredients worth keeping (Work Log → per-ingredient approve/reject).
-3. **Bake** a recipe (from Active Tasks) once it has ≥1 approved ingredient → it enters the
+3. **Bake** a job (from Active Tasks) once it has ≥1 approved ingredient → it enters the
    **Cookbook** (approved-only, in order).
-4. A **Head Chef** admits a baked recipe into the **Company CX Graph** (cross-owner, visible to
+4. A **Head Chef** admits a baked job into the **Company CX Graph** (cross-owner, visible to
    all). Baking alone doesn't publish it — a Head Chef gates it.
 
-**Privacy:** your experimental work is private to you; only approved + Head-Chef-admitted recipes
+**Privacy:** your experimental work is private to you; only approved + Head-Chef-admitted jobs
 become visible company-wide. (Real per-user privacy is live once you sign in per-user; on the
 shared key everyone is the one `service-account`.)
 
@@ -90,8 +90,8 @@ shared key everyone is the one `service-account`.)
 
 | Role | Can |
 |---|---|
-| **chef** (everyone) | capture, approve/bake their own recipes |
-| **head-chef** | admit baked recipes into the Company CX Graph |
+| **chef** (everyone) | capture, approve/bake their own jobs |
+| **head-chef** | admit baked jobs into the Company CX Graph |
 | **admin** | manage roles (Settings → Team/Roles), admin/all-owner views, edit settings, reset |
 
 Admins assign roles in **Settings → Team / Roles** (multi-select chips per user). Roles bind to

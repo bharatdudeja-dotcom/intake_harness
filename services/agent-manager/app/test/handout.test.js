@@ -97,7 +97,7 @@ describe('the new-user onboarding kit (D83)', () => {
         expect(kit).toMatch(/~\/\.claude\/CLAUDE\.md/)
         expect(kit).toMatch(/Claude Desktop/)
         expect(kit).toMatch(/copy from here/)
-        // The rule that stops one task becoming several recipes must survive any rewrite.
+        // The rule that stops one task becoming several jobs must survive any rewrite.
         // Whitespace-tolerant: the copy is hard-wrapped, so the phrase can straddle a line break.
         expect(kit).toMatch(/One\s+run per intake/i)
     })
@@ -113,7 +113,7 @@ describe('the new-user onboarding kit (D83)', () => {
 
     test('explains the privacy model, which is the whole product promise', () => {
         expect(kit).toMatch(/PRIVATE to you/i)
-        expect(kit).toMatch(/Hero Agent/i)
+        expect(kit).toMatch(/Oracle/i)
         expect(kit).toMatch(/Shared Knowledge Graph/)
     })
 

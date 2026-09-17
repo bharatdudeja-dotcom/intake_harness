@@ -15,14 +15,14 @@ governing permissions and limitations under the License.
  * the cookbook. Consent (certify/bake) is the gate - experimental content is a personal,
  * owner-scoped thing and never enters this graph.
  *
- * D64 (two-tier flow): baking is no longer sufficient. A baked recipe is only a CANDIDATE;
+ * D64 (two-tier flow): baking is no longer sufficient. A baked job is only a CANDIDATE;
  * it enters this graph ONLY once a Head Chef admits it (cx_approved === true). Ingredients
- * shown are still approved-only. So the graph is the intersection of "consented recipe" and
- * "Head Chef-admitted" - never a recipe a chef merely baked for themselves.
+ * shown are still approved-only. So the graph is the intersection of "consented job" and
+ * "Head Chef-admitted" - never a job a chef merely baked for themselves.
  *
- * Nodes: approved recipes (+ their approved ingredients) and any handoff-prompt that
- * produced one of them. Edges: recipe→ingredient (composition), handoff→produced-recipe
- * (lineage), and recipe↔recipe links inferred from shared tag / shared segment (e.g.
+ * Nodes: approved jobs (+ their approved ingredients) and any handoff-prompt that
+ * produced one of them. Edges: job→ingredient (composition), handoff→produced-job
+ * (lineage), and job↔job links inferred from shared tag / shared segment (e.g.
  * project) / shared kind. `generated_at` stamps the compile. Compiled on demand
  * (rebuild_cx_graph) and daily (the scheduled action); the result is cached in the store
  * (get_cx_graph reads it) so the read path is cheap.
@@ -54,7 +54,7 @@ function projectOf (r) {
  */
 async function buildCxGraph (now = new Date().toISOString()) {
     // Cross-owner: NO visibleTo filter - approved is the consented, shareable layer. D64: on
-    // top of consent, a Head Chef must have admitted the recipe (cx_approved === true) - baking
+    // top of consent, a Head Chef must have admitted the job (cx_approved === true) - baking
     // alone no longer admits it.
     const approved = (await store.listResources({ status: 'approved' }))
         .filter(r => r.type !== 'handoff-prompt' && r.cx_approved === true)
@@ -77,7 +77,7 @@ async function buildCxGraph (now = new Date().toISOString()) {
         if (project) projects.add(project)
         if (r.practice) practices.add(r.practice)
         nodes.push({
-            id: r.id, node: 'recipe', label: r.title, kind: r.type,
+            id: r.id, node: 'job', label: r.title, kind: r.type,
             project, owner: r.owner || null, tags: r.tags || [],
             practice: r.practice || null,
             models: r.models_used || [], version: r.version || 1,
@@ -86,12 +86,12 @@ async function buildCxGraph (now = new Date().toISOString()) {
             tokens_used: typeof r.tokens_used === 'number' ? r.tokens_used : null
         })
 
-        // Approved ingredients as child nodes (approved recipes are few - reading is bounded).
+        // Approved ingredients as child nodes (approved jobs are few - reading is bounded).
         let ingredients = []
         try { ingredients = stepsLib.ensureSteps(await store.getResource(r.id)) } catch (e) { ingredients = [] }
         for (const s of ingredients) {
             if (s.status === 'discarded' || !statusLib.isApproved(s.status)) continue
-            nodes.push({ id: s.id, node: 'ingredient', label: `${r.title} · #${s.order} ${s.kind}`, recipe: r.id, kind: s.kind, signal: s.signal || null, source: s.source || null, owner: r.owner || null,
+            nodes.push({ id: s.id, node: 'ingredient', label: `${r.title} · #${s.order} ${s.kind}`, job: r.id, kind: s.kind, signal: s.signal || null, source: s.source || null, owner: r.owner || null,
                 // The artifact's tags carry which agent produced it (['agent', <id>]) and
                 // whether that agent reported success while failing. The graph is where
                 // that is most legible, so it has to survive the projection.
@@ -115,14 +115,14 @@ async function buildCxGraph (now = new Date().toISOString()) {
     relEdges(bySegment, 'shared-segment', 'segment')
     relEdges(byKind, 'shared-kind', 'kind')
 
-    // Lineage: handoff-prompts -> the recipe(s) they produced (D54). A handoff auto-approves
+    // Lineage: handoff-prompts -> the job(s) they produced (D54). A handoff auto-approves
     // on capture (policy approval:"none") - it is not consented cookbook content, so it
-    // never counts toward recipe_count; it is shown only as a structural provenance link
-    // when it points at a recipe that IS in the approved, consented set.
+    // never counts toward job_count; it is shown only as a structural provenance link
+    // when it points at a job that IS in the approved, consented set.
     const approvedIds = new Set(approved.map(r => r.id))
     const handoffs = await store.listResources({ type: 'handoff-prompt' })
     for (const h of handoffs) {
-        const deps = (h.linked_recipes || []).filter(id => approvedIds.has(id))
+        const deps = (h.linked_jobs || []).filter(id => approvedIds.has(id))
         if (!deps.length) continue
         nodes.push({ id: h.id, node: 'handoff', label: h.title, project: projectOf(h), owner: h.owner || null })
         for (const dep of deps) edges.push({ from: h.id, to: dep, rel: 'lineage' })
@@ -135,7 +135,7 @@ async function buildCxGraph (now = new Date().toISOString()) {
         owners: [...owners],
         projects: [...projects],
         practices: [...practices],
-        recipe_count: approved.length,
+        job_count: approved.length,
         node_count: nodes.length,
         edge_count: edges.length,
         nodes,

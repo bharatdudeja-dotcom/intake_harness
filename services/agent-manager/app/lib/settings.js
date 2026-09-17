@@ -109,7 +109,7 @@ function kindLabelOverrides () {
 }
 
 /**
- * The Head Chef roster (D64): owner identities allowed to gate recipes into the Company CX
+ * The Head Chef roster (D64): owner identities allowed to gate jobs into the Company CX
  * Graph. Config-driven for now (an editable override on top of the bundled default) - real
  * per-user enforcement needs the OAuth/RBAC org rollout. The override, when present, REPLACES
  * the default (a roster is a full list, not additive labels). Everyone not on it is a plain
@@ -174,7 +174,7 @@ function hasRole (owner, role, seedRoles = []) {
  * knowledge. Practices are DATA, not code: editable via set_practices, so adding "Analytics" or
  * "Target" later is a settings change, never a deploy.
  *
- * Deliberately a flat, single-value label on each recipe (not a hierarchy and not overloaded onto
+ * Deliberately a flat, single-value label on each job (not a hierarchy and not overloaded onto
  * `tags`, which stay free-form): it has to be reliably filterable and it answers exactly one
  * question - "which discipline owns this knowledge?".
  * @returns {Array<{id: string, label: string}>}
@@ -213,6 +213,28 @@ function mcpServers () {
  * admin changed, merged by id.
  * @returns {object[]}
  */
+/**
+ * What may be captured here.
+ *
+ *   'agent-runs-only'  (default) only work an AGENT did, plus a human's
+ *                      steering of it. A normal conversation with Claude, and
+ *                      anything Claude produced in one, is NOT recorded.
+ *   'open'             the general capture the cookbook engine came with.
+ *
+ * Closed by default, and that default is the whole point. This service inherited
+ * a store whose purpose was to capture everything a connected AI produced, and
+ * the result was predictable once a client was pointed at it: architecture
+ * diagrams and chat summaries from unrelated conversations filed themselves into
+ * the agent record. Rewriting the server instructions stopped Claude being ASKED
+ * to do it; this stops it being ABLE to.
+ *
+ * @returns {'agent-runs-only'|'open'}
+ */
+function captureMode () {
+    const raw = String((cache && cache.capture_mode) || process.env.CAPTURE_MODE || '').trim()
+    return raw === 'open' ? 'open' : 'agent-runs-only'
+}
+
 function agentSystems () {
     const override = cache && cache.agent_systems
     return Array.isArray(override) ? override : []
@@ -225,7 +247,7 @@ function practiceIds () {
 
 /**
  * The owner -> practices map (D79): which discipline(s) a consultant works in. Editable by a
- * head-chef/admin via set_user_practices. Used to DEFAULT a new recipe's practice so capture
+ * head-chef/admin via set_user_practices. Used to DEFAULT a new job's practice so capture
  * stays zero-effort - an AEM consultant's work lands in AEM without them tagging anything.
  * @returns {Record<string,string[]>}
  */
@@ -247,8 +269,8 @@ function practicesForOwner (owner) {
 
 /**
  * @param {string} owner
- * @returns {string|null} the practice a new recipe by this owner defaults to (their first), or
- *   null when they have none configured - in which case the recipe simply has no practice, which
+ * @returns {string|null} the practice a new job by this owner defaults to (their first), or
+ *   null when they have none configured - in which case the job simply has no practice, which
  *   is valid (it just won't show up in a practice-filtered view).
  */
 function defaultPracticeFor (owner) {
@@ -292,6 +314,7 @@ module.exports = {
     practiceIds,
     mcpServers,
     agentSystems,
+    captureMode,
     userPracticesMap,
     practicesForOwner,
     defaultPracticeFor,

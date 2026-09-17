@@ -13,7 +13,7 @@ steering deterministically where a client gives us a hook, and best-effort elsew
 
 ## Tier 1 — Claude Code hooks (deterministic, coding-agent side)
 `steering-capture.mjs` is wired to `PreToolUse` / `PostToolUse` / `Notification` and POSTs
-**every** event to `append_step(kind:"steering")` on the active recipe:
+**every** event to `append_step(kind:"steering")` on the active job:
 
 - permission **allow / approve** → `signal: "affirm"` (green)
 - permission **deny / block** → `signal: "reject"` (red)
@@ -27,11 +27,11 @@ Because it fires on every event, no steering decision is dropped on the coding-a
    ```
    export TAP_MCP_URL="https://<ns>.adobeioruntime.net/api/v1/web/tap-mcp-connector/mcp-server"
    export TAP_API_KEY="<SERVICE_API_KEY>"
-   export TAP_PROJECT="My Engagement"        # or TAP_RECIPE_ID="recipe-…"
+   export TAP_PROJECT="My Engagement"        # or TAP_JOB_ID="job-…"
    export TAP_SOURCE="cli-agent"             # optional label
    export TAP_MODEL="opus-4.8"               # optional label
    ```
-   The hook resolves the task thread via `TAP_RECIPE_ID`, else `get_active_recipe(TAP_PROJECT)`.
+   The hook resolves the task thread via `TAP_JOB_ID`, else `get_active_job(TAP_PROJECT)`.
    It never blocks Claude Code — any failure is swallowed and it exits 0.
 
 ## Tier 2 — MCP elicitation (deterministic, connector's own approvals)

@@ -18,7 +18,6 @@
     "${ENV_VAR} is resolved from the environment at call time, so this file stays",
     "safe to commit."
   ],
-
   "servers": [
     {
       "id": "adobe-aec",
@@ -45,11 +44,13 @@
       "active": false,
       "verified": "2026-09-16",
       "notes": [
-        "INACTIVE: the routes return HTTP 404 at this gateway. template.yaml in",
-        "chaunceyplum/mcp declares all eight (core, users, documents, time-approval,",
-        "metadata, search, comments, planning), so the deployed stack is behind the repo",
-        "or they sit behind another API. Flip active to true when they answer.",
-        "Tools: wf_core_*, wf_comments_*, wf_docs_*, wf_metadata_*, wf_search_*, wf_planning_*."
+        "NOT DEPLOYED. /mcp/workfront/core, /comments, /search, /metadata and every",
+        "/mcp/fusion/* route return HTTP 404 at this gateway - re-verified 16 Sep 2026.",
+        "template.yaml in chaunceyplum/mcp declares all of them, so the deployed stack",
+        "is behind the repo or they live behind another API.",
+        "",
+        "Use workfront-adobe instead. The harness picks its tool names from",
+        "WORKFRONT_MCP_FLAVOUR; set it to 'inhouse' only once these answer."
       ]
     },
     {
@@ -57,14 +58,23 @@
       "label": "Workfront MCP (Adobe official)",
       "practice": "workfront",
       "endpoint": "https://mcp.workfront.adobe.com/mcp/v1/workfront",
-      "auth": "${WORKFRONT_TOKEN}",
+      "auth": null,
       "instance": "taplondonptrsd.my.workfront.com",
       "active": false,
       "notes": [
-        "Adobe's own connector. OAuth 2.0 as the signed-in user, or a service-to-service",
-        "token from the Developer Console. Needs the `wf-url` header to pick the instance.",
-        "Write tools are OFF by default on a tenant - a Workfront admin enables them.",
-        "Set WORKFRONT_TOKEN in the environment and flip active to true."
+        "Adobe's own connector, and the one the agents should use: every in-house",
+        "Workfront route (/mcp/workfront/*) returns HTTP 404 at the deployed gateway,",
+        "verified 16 Sep 2026. Nothing the agents asked of Workfront has ever arrived.",
+        "",
+        "Sign in with Authenticate in Settings - it advertises RFC 9728 discovery,",
+        "PKCE S256, refresh tokens and dynamic client registration, so no token needs",
+        "minting in the Developer Console. The token is stored server-side and is never",
+        "sent to the dashboard.",
+        "",
+        "Needs the wf-url header to pick the tenant (instance, below).",
+        "WRITE TOOLS ARE OFF BY DEFAULT on a tenant - 44 of its 94 tools are writes, and",
+        "a Workfront admin has to enable them in System Preferences before a create or",
+        "update will work. Reads work as soon as you are signed in."
       ]
     },
     {
@@ -74,7 +84,9 @@
       "endpoint": "",
       "auth": null,
       "active": false,
-      "notes": ["Declared so the domain has a home. No endpoint yet."]
+      "notes": [
+        "Declared so the domain has a home. No endpoint yet."
+      ]
     }
   ]
 }

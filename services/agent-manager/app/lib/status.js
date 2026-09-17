@@ -11,14 +11,14 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Recipe approval status - canonical names + backward-compatible aliases (D38/D42).
+ * Job approval status - canonical names + backward-compatible aliases (D38/D42).
  *
  * Increment 9 renamed the two statuses to match the cookbook/consent vocabulary:
  *   experimental  (was "pending")  - captured, not yet consented/approved
  *   approved      (was "active")   - a human has certified it into the cookbook
  *
  * The OLD values keep working as aliases so nothing already stored or already
- * deployed breaks: the 50 migrated recipes stay "active", the deployed Increment-8
+ * deployed breaks: the 50 migrated jobs stay "active", the deployed Increment-8
  * dashboard still filters on "active"/"pending", and MCP Resources exposure still
  * asks for "active". `canonical()` collapses each pair to one value so a filter for
  * either spelling matches data written in either spelling.

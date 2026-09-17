@@ -78,7 +78,7 @@ async function registerGatewayTools (server) {
         try {
             server.registerTool(
                 t.name,
-                { description: t.description, inputSchema: t.inputSchema },
+                { description: t.description, inputSchema: t.zodShape },
                 async (args) => {
                     const result = await mcpGateway.callProxied(t.name, args, settings.mcpServers())
                     return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }] }
@@ -196,13 +196,13 @@ function defaultToolAnnotations (name) {
         'list_resources',
         'search_resources',
         'get_resource',
-        'get_recipe',
-        'list_recipes',
+        'get_job',
+        'list_jobs',
         'list_steps',
-        'get_active_recipe',
+        'get_active_job',
         'list_projects',
         'get_settings',
-        'admin_list_recipes',
+        'admin_list_jobs',
         'admin_list_projects',
         'get_cx_graph',
         'export_as_skill'
@@ -213,7 +213,7 @@ function defaultToolAnnotations (name) {
         'admin_reset_data'
     ])
     const openWorldTools = new Set([
-        'admin_list_recipes',
+        'admin_list_jobs',
         'admin_list_projects',
         'get_cx_graph'
     ])
@@ -616,6 +616,13 @@ async function handleMcpRequest (params) {
  * Main function for Adobe I/O Runtime
  */
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     try {
         console.log('=== MCP SERVER (CLEAN SDK IMPLEMENTATION) ===')
         console.log('Method:', params.__ow_method)

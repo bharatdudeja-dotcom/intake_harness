@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Recipe -> skill export (D31): turns an approved (house) recipe into a
+ * Job -> skill export (D31): turns an approved (house) job into a
  * capability any AI can consume.
  *
  * Vendor-neutral core + per-vendor export adapters, same pattern as D21:
@@ -21,7 +21,7 @@ governing permissions and limitations under the License.
  * there, never here). Adding an export format for a new AI vendor is a new
  * adapter entry, not a core change.
  *
- * Only approved recipes are exportable - an experimental (pending) recipe is
+ * Only approved jobs are exportable - an experimental (pending) job is
  * not yet certified company knowledge and is rejected with a clear message.
  */
 
@@ -29,7 +29,7 @@ const vendorAdapters = require('./vendor-adapters')
 const { isApproved } = require('../status')
 
 /**
- * @param {object} resource full recipe
+ * @param {object} resource full job
  * @returns {string} the work-item breadcrumb, or ''
  */
 function workItem (resource) {
@@ -44,8 +44,8 @@ function workItem (resource) {
 function provenanceLines (resource) {
     const f = resource.fields || {}
     const lines = [
-        `Recipe: ${resource.title}`,
-        `Kind: ${resource.type} | Status: certified house recipe`,
+        `Job: ${resource.title}`,
+        `Kind: ${resource.type} | Status: certified house job`,
         `URI: resource://company/${resource.type}/${resource.id}`
     ]
     const work = workItem(resource)
@@ -64,7 +64,7 @@ function provenanceLines (resource) {
  */
 function buildPromptExport (resource) {
     const content = [
-        'You are being handed a certified recipe from our company cookbook - reusable know-how captured from prior AI-assisted work.',
+        'You are being handed a certified job from our company cookbook - reusable know-how captured from prior AI-assisted work.',
         '',
         ...provenanceLines(resource),
         '',
@@ -96,16 +96,16 @@ function describeFormats () {
 }
 
 /**
- * Export an approved recipe in the requested format.
- * @param {object} resource full recipe (from lib/store.getResource)
+ * Export an approved job in the requested format.
+ * @param {object} resource full job (from lib/store.getResource)
  * @param {string} [format] one of listFormats(); defaults to 'prompt'
  * @returns {{format: string, filename: string, mimeType: string, content: string}}
- * @throws {Error} if the recipe isn't approved or the format is unknown
+ * @throws {Error} if the job isn't approved or the format is unknown
  */
-function exportRecipe (resource, format = 'prompt') {
-    if (!resource) throw new Error('No recipe to export')
+function exportJob (resource, format = 'prompt') {
+    if (!resource) throw new Error('No job to export')
     if (!isApproved(resource.status)) {
-        throw new Error(`Recipe '${resource.id}' is still experimental (status: ${resource.status}) - only certified house recipes can be exported as skills. Certify it first (approve_resource).`)
+        throw new Error(`Job '${resource.id}' is still experimental (status: ${resource.status}) - only certified house jobs can be exported as skills. Certify it first (approve_resource).`)
     }
     const adapter = FORMATS[format]
     if (!adapter) {
@@ -114,4 +114,4 @@ function exportRecipe (resource, format = 'prompt') {
     return { format, ...adapter.build(resource) }
 }
 
-module.exports = { exportRecipe, listFormats, describeFormats, provenanceLines, workItem }
+module.exports = { exportJob, listFormats, describeFormats, provenanceLines, workItem }

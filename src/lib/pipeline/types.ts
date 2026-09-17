@@ -36,7 +36,13 @@ export interface AgentResponse<TOutput = unknown> {
   status: AgentStatus;
   /** Present when status is "completed"; becomes the next agent's `input`. */
   output?: TOutput;
-  /** Present when status is "failed" or "needs_input". */
+  /**
+   * A plain-English explanation of what this step did, for a human reading
+   * the run — not just for "failed"/"needs_input" anymore. Every current
+   * agent already computes something like this internally (Audience
+   * Creation's statusMessage, Escalation's summary); the fix was surfacing
+   * it here on success too, not adding a new field.
+   */
   message?: string;
   /**
    * Free-form health/observability data, persisted alongside the task run
@@ -45,28 +51,40 @@ export interface AgentResponse<TOutput = unknown> {
    * { predictedCount, identityGap } for B3/B6, { requestAgeSeconds } for B7.
    */
   metadata?: Record<string, unknown>;
+  /**
+   * Only set this when an agent genuinely called a model — none of the
+   * four today do (they're deterministic parsers and MCP/tool calls), so
+   * this is deliberately never fabricated. It exists so a future agent
+   * that does call one has somewhere real to report it, and the UI shows
+   * it only when present rather than a permanent fake "0 tokens".
+   */
+  usage?: { tokens: number; model?: string };
 }
 
-/**
- * One row in `runs` — a single pipeline invocation.
- *
- * "awaiting_approval" is NOT "needs_input", and the difference is the whole
- * point of lib/pipeline/gates.ts:
- *
- *   needs_input        the agent ran, and wants something from the marketer.
- *   awaiting_approval  the agent has NOT run, and will not until a gate opens.
- *                      There is no task_runs row for it, because nothing
- *                      happened.
- *
- * Collapsing them would put the pipeline back where it started: unable to tell
- * "Agent 3 looked and could not build" from "Agent 3 was never asked".
- */
+/** One row in `runs` — a single pipeline invocation. */
 export interface RunRow {
   run_id: string;
+  /**
+   * "awaiting_approval" — a step just completed and there's a next agent to
+   * run, but the orchestrator stops and waits for
+   * POST /api/runs/[runId]/continue rather than calling it automatically.
+   * The per-agent equivalent of a tool-use permission prompt.
+   */
   status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
   current_step: number;
   input: unknown;
-  /** What this run is waiting for, when it is waiting. Null otherwise. */
+  /**
+   * What the run is waiting FOR, when the wait is a gate rather than a pause.
+   *
+   * Two different reasons a run sits at "awaiting_approval":
+   *   - a step finished and the next one wants a click (the per-agent loop);
+   *   - a PROCESS gate is shut, e.g. the request has not been approved in
+   *     Workfront, so the next agent must not run at all.
+   *
+   * Only the second sets this. It carries the explanation the marketer sees
+   * and the record they have to go and act on - being told to approve
+   * something without being told where is what stops approvals happening.
+   */
   blocked_on: {
     gate_id: string;
     map_step: string;
@@ -75,11 +93,22 @@ export interface RunRow {
     agent: AgentName;
     awaiting: string;
     needs: "approval" | "upstream";
-    /** The Workfront record to go and look at, when the wait is on a person. */
     ref?: { objCode: string; objId: string };
   } | null;
   created_at: string;
   updated_at: string;
+  /** Optional grouping — see src/lib/programmes.ts. Set via an optional `programme` name on the submission. */
+  programme_id: string | null;
+  /** Two-tier human curation — see src/app/api/runs/[runId]/{approve,promote}/route.ts. */
+  tags: string[];
+  approved: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
+  approval_note: string | null;
+  /** Admitted into the cross-run Shared Graph (GET /api/graph). Requires `approved` first. */
+  promoted: boolean;
+  promoted_by: string | null;
+  promoted_at: string | null;
 }
 
 /** One row in `tasks` — the static catalog of task/agent types (seeded from registry.ts). */
@@ -101,6 +130,9 @@ export interface TaskRunRow {
   output: unknown;
   message: string | null;
   metadata: Record<string, unknown>;
+  /** Null on every agent today — see AgentResponse.usage. */
+  tokens_used: number | null;
+  model: string | null;
   started_at: string;
   finished_at: string;
   duration_ms: number;

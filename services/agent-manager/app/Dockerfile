@@ -31,6 +31,10 @@ COPY --chown=app:app actions ./actions
 COPY --chown=app:app lib ./lib
 COPY --chown=app:app config ./config
 COPY --chown=app:app web-src ./web-src
+# Migrations and checks have to be runnable WHERE THE DATA IS. Leaving them
+# out meant a projection change could not be backfilled against a running
+# deployment - the catalog stayed stale and every list view read wrong.
+COPY --chown=app:app scripts ./scripts
 
 USER app
 EXPOSE 8080

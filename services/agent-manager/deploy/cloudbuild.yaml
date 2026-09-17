@@ -1,0 +1,23 @@
+# Build the Agent Manager image for Google Cloud.
+#
+# `gcloud builds submit --tag` cannot pass a build arg, and this image needs
+# one: STORAGE_SDK installs @google-cloud/storage, without which
+# STORAGE_DRIVER=gcs throws on boot. Hence a build file rather than a flag.
+
+substitutions:
+  _IMAGE: image-not-set
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=STORAGE_SDK=@google-cloud/storage
+      - -t
+      - ${_IMAGE}
+      - ./app
+
+images:
+  - ${_IMAGE}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

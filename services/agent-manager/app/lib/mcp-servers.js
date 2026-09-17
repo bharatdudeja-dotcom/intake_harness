@@ -86,7 +86,14 @@ function listSafe (overrides) {
         gateway: !!s.gateway,
         // Enough to know whether it will work, without printing the token.
         auth_configured: !!resolveSecret(s.auth),
-        auth_source: typeof s.auth === 'string' && s.auth.startsWith('${') ? s.auth : (s.auth ? 'inline' : null),
+        auth_source: typeof s.auth === 'string' && s.auth.startsWith('${')
+            ? s.auth
+            : (s.oauth && s.oauth.connected_at ? 'oauth' : (s.auth ? 'inline' : null)),
+        // The connection, never the credential. No branch below returns the token.
+        oauth_connected: !!(s.oauth && s.oauth.connected_at),
+        oauth_connected_at: (s.oauth && s.oauth.connected_at) || null,
+        oauth_expires_at: (s.oauth && s.oauth.expires_at) || null,
+        oauth_can_refresh: !!(s.oauth && s.oauth.refresh_token),
         notes: s.notes || []
     }))
 }
@@ -118,6 +125,60 @@ function headersFor (server) {
     return h
 }
 
+/**
+ * Read an MCP response body, whichever way the server chose to frame it.
+ *
+ * MCP's streamable HTTP transport lets a server reply with plain JSON OR with
+ * Server-Sent Events, and Adobe's Workfront connector chooses SSE. We sent
+ * `Accept: application/json, text/event-stream` - so we ASKED for that
+ * possibility - and then called JSON.parse on the raw body, which fails on the
+ * very first character of the framing:
+ *
+ *   event: message
+ *   data: {"jsonrpc":"2.0","result":{...}}
+ *
+ * The user saw `Unexpected token 'd', "data: {"js"... is not valid JSON` from a
+ * connector that had authenticated perfectly and was answering correctly. The
+ * failure was entirely ours.
+ *
+ * An SSE body can carry several events; the JSON-RPC reply is the last `data:`
+ * payload that parses, so take that.
+ *
+ * @param {string} text raw response body
+ * @param {string} [contentType]
+ * @returns {object} the parsed JSON-RPC envelope
+ */
+function parseMcpBody (text, contentType = '') {
+    const body = String(text || '')
+    const isSse = /text\/event-stream/i.test(contentType) || /^\s*(event|data|id|retry):/m.test(body)
+
+    if (!isSse) return JSON.parse(body)
+
+    // Continuation lines are part of the preceding data field, per the SSE spec.
+    const payloads = []
+    let current = null
+    for (const raw of body.split(/\r?\n/)) {
+        if (/^data:/i.test(raw)) {
+            const chunk = raw.replace(/^data:\s?/i, '')
+            current = current == null ? chunk : current + '\n' + chunk
+        } else if (raw.trim() === '') {
+            if (current != null) { payloads.push(current); current = null }
+        }
+    }
+    if (current != null) payloads.push(current)
+
+    for (let i = payloads.length - 1; i >= 0; i--) {
+        try {
+            const parsed = JSON.parse(payloads[i])
+            // The reply we want is a JSON-RPC envelope, not a progress notification.
+            if (parsed && (parsed.result !== undefined || parsed.error !== undefined)) return parsed
+        } catch (e) { /* try the one before */ }
+    }
+    // Nothing usable. Say what arrived rather than a parse error about a
+    // character, which is what made this so slow to recognise.
+    throw new Error(`the server replied with an event stream carrying no JSON-RPC result (${body.slice(0, 120).replace(/\s+/g, ' ')})`)
+}
+
 let rpcId = 0
 
 /**
@@ -144,7 +205,7 @@ async function callTool (server, name, args = {}, timeoutMs = 45000) {
         })
         const text = await res.text()
         if (!res.ok) throw new Error(`${server.id} returned HTTP ${res.status} for ${name}`)
-        const body = JSON.parse(text)
+        const body = parseMcpBody(text, res.headers && res.headers.get('content-type'))
         if (body.error) throw new Error(`${name}: ${body.error.message || 'unknown MCP error'}`)
         const result = body.result || {}
         if (result.isError) {
@@ -175,7 +236,7 @@ async function listTools (server, timeoutMs = 30000) {
             signal: controller.signal
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const body = JSON.parse(await res.text())
+        const body = parseMcpBody(await res.text(), res.headers && res.headers.get('content-type'))
         if (body.error) throw new Error(body.error.message || 'unknown MCP error')
         return (body.result && body.result.tools) || []
     } finally {
@@ -183,4 +244,4 @@ async function listTools (server, timeoutMs = 30000) {
     }
 }
 
-module.exports = { FIELDS, list, listSafe, get, readiness, callTool, listTools, resolveSecret, reset }
+module.exports = { FIELDS, list, listSafe, get, readiness, callTool, listTools, resolveSecret, reset, parseMcpBody }

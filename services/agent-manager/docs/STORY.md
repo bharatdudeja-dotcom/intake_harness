@@ -1,9 +1,9 @@
 # STORY.md
 
-The Agentic Hero's Journey, as Josh Smith actually wrote it, and how Agent
+The Agentic Oracle's Journey, as Josh Smith actually wrote it, and how Agent
 Manager uses it.
 
-**Source:** *Agentic Hero's Journey Master Presentation*, TAP CXM (Josh Smith).
+**Source:** *Agentic Oracle's Journey Master Presentation*, TAP CXM (Josh Smith).
 Read directly. This file replaces the beats I previously inferred — see
 `docs/BRAIN-GAP.md` §3 for what was wrong and why.
 
@@ -15,21 +15,21 @@ this file, they win.
 
 ## Who is who
 
-Josh's deck lists Hero, Ally and Trickster as the three agentic roles, with
+Josh's deck lists Oracle, Ally and Trickster as the three agentic roles, with
 seven human mentor roles around them. Josh and Bharat then sharpened it, and
 this is what the product uses:
 
 | Role | Who | Where it lives |
 |---|---|---|
-| **Hero** | **The data.** Not a person, not an agent. What accumulates. | The append-only event log |
+| **Oracle** | **The data.** Not a person, not an agent. What accumulates. | The append-only event log |
 | **Author** | **The humans, collectively.** They edit and approve the artifacts. | `users.is_human`, gate decisions, `promoted_by` |
-| **Hero Agent** | Carries what earlier runs learned and hands it over when needed. **Proposes only.** | Where the cookbook let a head chef approve |
-| **Ally** | Extends what the hero can do — prep, enrichment | Intake, Audience Creation |
+| **Oracle** | Carries what earlier runs learned and hands it over when needed. **Proposes only.** | Where the cookbook let a head chef approve |
+| **Ally** | Extends what the oracle can do — prep, enrichment | Intake, Audience Creation |
 | **Trickster** | Introduces friction deliberately — adversarial checks | Review/Triage, Escalation |
 
-Deck principle 3 states it outright: *"The data is the hero; the team is the
-author."* That is why the curating agent is the **Hero Agent** and not a mentor:
-"hero" has to mean one thing everywhere, and the deck already decided what.
+Deck principle 3 states it outright: *"The data is the oracle; the team is the
+author."* That is why the curating agent is the **Oracle** and not a mentor:
+"oracle" has to mean one thing everywhere, and the deck already decided what.
 
 The seven human mentor roles — visionary, governor, steward, driver, informer,
 gate keeper, facilitator — are the `AUTHOR_ROLES`. Gate Keeper is the default:
@@ -120,7 +120,7 @@ Josh's beats against David Ross's numbered process, with the plain UI label.
 | Act 2 | Ultimate Boon | 3.2 activation to channels | **Activation** | — |
 | Act 3 | Magic Flight | 4.1–4.4 reconciliation (B7, B8) | **Reconciliation** | — |
 | Act 3 | Crossing the Return Threshold | 4.6 escalation classified (B9) | **Escalation** | Escalation |
-| Act 3 | Master of the Two Worlds | promotion into the shared graph | **Promotion** | Hero Agent proposes; a human decides |
+| Act 3 | Master of the Two Worlds | promotion into the shared graph | **Promotion** | Oracle proposes; a human decides |
 
 Two things this mapping makes visible:
 
@@ -137,9 +137,9 @@ Two things this mapping makes visible:
    its own table; every figure derives from events at read time.
 2. **Diversity of tests drives performance.** The registry is dynamic and the
    process is data, so adding an agent or a stage needs no deploy.
-3. **The data is the hero; the team is the author.** The log is append-only; the
+3. **The data is the oracle; the team is the author.** The log is append-only; the
    humans decide.
 4. **Governance-through-transparency is the precondition.** *"No agent gets more
    autonomy than the organization can see, explain, and correct."* This is why
-   the Hero Agent has no promotion code path, and why a stage badge is derived
+   the Oracle has no promotion code path, and why a stage badge is derived
    from evidence rather than from an upstream status field.

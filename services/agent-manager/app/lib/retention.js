@@ -13,7 +13,7 @@ governing permissions and limitations under the License.
 /**
  * Retention purge (D44/D45): experimental steps expire after the configured retention
  * window (lib/settings.js); a daily job deletes expired experimental steps, and any
- * recipe left with no approved/active steps as a result. Approved content is never
+ * job left with no approved/active steps as a result. Approved content is never
  * touched - a step is only ever purged while it is still `experimental` AND past its
  * `expires_at`.
  *
@@ -24,16 +24,16 @@ governing permissions and limitations under the License.
 
 const store = require('./store')
 const statusLib = require('./status')
-const { ensureSteps, composeContent, recipeStatusFromSteps, aggregateTokens, aggregateModels, earliestExpiry } = require('./steps')
+const { ensureSteps, composeContent, jobStatusFromSteps, aggregateTokens, aggregateModels, earliestExpiry } = require('./steps')
 
 /**
  * @param {string} [now] ISO timestamp to purge as-of (defaults to the real current time)
- * @returns {Promise<{checked: number, purged_steps: number, purged_recipes: number}>}
+ * @returns {Promise<{checked: number, purged_steps: number, purged_jobs: number}>}
  */
 async function purgeExpired (now = new Date().toISOString()) {
     const catalog = await store.listResources({})
     let purgedSteps = 0
-    let purgedRecipes = 0
+    let purgedJobs = 0
     let checked = 0
 
     for (const entry of catalog) {
@@ -59,14 +59,14 @@ async function purgeExpired (now = new Date().toISOString()) {
         const remaining = kept.filter(s => s.status !== 'discarded')
         if (remaining.length === 0) {
             await store.deleteResource(resource.id)
-            purgedRecipes++
+            purgedJobs++
             continue
         }
 
         if (kept.length !== steps.length) {
             resource.steps = kept
-            // A baked recipe stays baked even if a stray experimental step expired (D47).
-            resource.status = resource.baked ? 'baked' : recipeStatusFromSteps(kept)
+            // A baked job stays baked even if a stray experimental step expired (D47).
+            resource.status = resource.baked ? 'baked' : jobStatusFromSteps(kept)
             resource.content = composeContent(kept)
             const tokens = aggregateTokens(kept)
             resource.tokens_used = tokens.total
@@ -79,7 +79,7 @@ async function purgeExpired (now = new Date().toISOString()) {
         }
     }
 
-    return { checked, purged_steps: purgedSteps, purged_recipes: purgedRecipes }
+    return { checked, purged_steps: purgedSteps, purged_jobs: purgedJobs }
 }
 
 module.exports = { purgeExpired }

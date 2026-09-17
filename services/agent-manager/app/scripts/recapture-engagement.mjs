@@ -14,7 +14,7 @@ governing permissions and limitations under the License.
 /**
  * Faithful re-capture of the Tap Portability Layer engagement (D51/D52) onto the CORRECTED
  * model: a real project record "Tap Portability Layer" holding a handful of EXPERIMENTAL
- * recipes (one per increment/theme), each an ORDERED, source-tagged set of ingredients:
+ * jobs (one per increment/theme), each an ORDERED, source-tagged set of ingredients:
  *
  *   claude-desktop     -> the Cowork planning: knowledge/*.md decisions & docs + the
  *                         prompts/*.md handoff prompts (kinds: doc / decision / handoff)
@@ -24,9 +24,9 @@ governing permissions and limitations under the License.
  * Everything is experimental (Bharat curates in the dashboard). Provenance marks each
  * ingredient as a one-time historical backfill (session "recapture"); real capture from
  * here on is live via the Claude Desktop Local-MCP connection (D50). A final composite
- * recipe links the per-increment recipes in order — the complete followable story.
+ * job links the per-increment jobs in order — the complete followable story.
  *
- * Idempotent: scripts/recapture-manifest.json records the recipe id per theme; a re-run
+ * Idempotent: scripts/recapture-manifest.json records the job id per theme; a re-run
  * skips any theme already captured (0 duplicates). reset-data.mjs clears the manifest.
  *
  * Run: node scripts/recapture-engagement.mjs
@@ -80,7 +80,7 @@ async function callTool (mcpUrl, apiKey, name, args) {
 }
 
 /**
- * The engagement, one theme per recipe. `desktopDocs`/`desktopPrompts` are repo-relative
+ * The engagement, one theme per job. `desktopDocs`/`desktopPrompts` are repo-relative
  * paths; `desktopDecisions`/`vscodeDecisions` are decision-log anchors; `vscodeCode` are
  * connector-relative source paths. `model` (where known from the prompt files) tags the
  * vscode build ingredients.
@@ -150,10 +150,10 @@ async function main () {
     const prov = (file) => ({ session: 'recapture', backfill: true, historical: true, file })
     let created = 0; let skipped = 0; let ingredientCount = 0
 
-    async function ingr (recipeId, source, kind, title, content, opts = {}) {
+    async function ingr (jobId, source, kind, title, content, opts = {}) {
         if (!content) return
         await call('append_step', {
-            recipe_id: recipeId, source, kind,
+            job_id: jobId, source, kind,
             content: `# ${title}\n\n${content}`,
             ...(opts.model ? { model: opts.model } : {}),
             ...(opts.language ? { language: opts.language } : {}),
@@ -165,7 +165,7 @@ async function main () {
 
     for (const theme of THEMES) {
         if (manifest.themes[theme.key]) { console.log(`  = ${theme.title}  (already captured — skip)`); skipped++; continue }
-        const rec = await call('start_recipe', { project: PROJECT, title: theme.title })
+        const rec = await call('start_job', { project: PROJECT, title: theme.title })
         // Desktop planning: docs → decisions → handoff prompts
         for (const rel of theme.desktopDocs) await ingr(rec.id, DESKTOP, 'doc', rel.split('/').pop(), readIf(rel), { file: rel })
         for (const anc of theme.desktopDecisions) if (decisions[anc]) await ingr(rec.id, DESKTOP, 'decision', decisions[anc].title, decisions[anc].content, { file: `knowledge/DECISION-LOG.md#${anc}` })
@@ -179,25 +179,25 @@ async function main () {
         console.log(`  + ${theme.title}  -> ${rec.id}`)
     }
 
-    // Composite end-to-end recipe (links the per-increment recipes in order)
+    // Composite end-to-end job (links the per-increment jobs in order)
     if (!manifest.composite) {
-        const comp = await call('start_recipe', { project: PROJECT, title: 'Building the Tap Portability Layer (end-to-end)' })
+        const comp = await call('start_job', { project: PROJECT, title: 'Building the Tap Portability Layer (end-to-end)' })
         let n = 0
         for (const theme of THEMES) {
             n++
             const rid = manifest.themes[theme.key] || '(this run)'
             await call('append_step', {
-                recipe_id: comp.id, source: DESKTOP, kind: 'doc',
-                content: `# Chapter ${n} — ${theme.title}\n\nRecipe: \`${rid}\`\n\nThe ${theme.title.toLowerCase()} phase of building the Tap Portability Layer. Open that recipe for its ordered ingredients (planning on Claude Desktop → build in VS Code / Claude Code).`,
+                job_id: comp.id, source: DESKTOP, kind: 'doc',
+                content: `# Chapter ${n} — ${theme.title}\n\nJob: \`${rid}\`\n\nThe ${theme.title.toLowerCase()} phase of building the Tap Portability Layer. Open that job for its ordered ingredients (planning on Claude Desktop → build in VS Code / Claude Code).`,
                 tags: ['recapture', 'composite'], provenance: { session: 'recapture', backfill: true, composite: true, links: manifest.themes[theme.key] }
             })
         }
         manifest.composite = comp.id
-        console.log(`  + Composite end-to-end recipe -> ${comp.id}`)
-    } else { console.log('  = Composite recipe (already captured — skip)') }
+        console.log(`  + Composite end-to-end job -> ${comp.id}`)
+    } else { console.log('  = Composite job (already captured — skip)') }
 
     writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
-    console.log(`\n=== Summary ===\ncreated: ${created} theme recipe(s) + ${manifest.composite ? 1 : 0} composite; skipped: ${skipped}; ingredients appended: ${ingredientCount}`)
+    console.log(`\n=== Summary ===\ncreated: ${created} theme job(s) + ${manifest.composite ? 1 : 0} composite; skipped: ${skipped}; ingredients appended: ${ingredientCount}`)
     console.log(`manifest: ${MANIFEST_PATH}`)
 }
 

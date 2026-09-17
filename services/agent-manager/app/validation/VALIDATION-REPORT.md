@@ -32,17 +32,17 @@ Not "the endpoint responded" — these are behavioural claims, each with a live 
 key is refused with 401. `bharat` holds chef + head-chef + admin; `viewer` resolves to exactly
 `["viewer"]` and never widens.
 
-**Privacy holds.** alice cannot see bob's un-approved recipe and bob cannot see alice's — proved
+**Privacy holds.** alice cannot see bob's un-approved job and bob cannot see alice's — proved
 from both directions, because one-directional isolation is a coin flip, not a guarantee. The
-moment alice's recipe is baked and approved, bob sees it. This is the whole product promise:
+moment alice's job is baked and approved, bob sees it. This is the whole product promise:
 private until you choose otherwise.
 
-**The bake gate is not decorative.** Baking a recipe with zero approved ingredients is refused
+**The bake gate is not decorative.** Baking a job with zero approved ingredients is refused
 with an explanation of what to do instead. It succeeds once an ingredient is certified.
 
-**The CX graph is approved-only, and cross-user.** A baked-but-unadmitted recipe is absent from
+**The CX graph is approved-only, and cross-user.** A baked-but-unadmitted job is absent from
 the graph. A plain chef cannot admit anything. After the head chef admits it, it appears (8
-nodes). bob's private work is *not* in the graph. `headchef_reject` refuses recipes that never
+nodes). bob's private work is *not* in the graph. `headchef_reject` refuses jobs that never
 reached the queue.
 
 **Capture is complete.** All 12 ingredient kinds were appended and read back: message, code,
@@ -50,13 +50,13 @@ diagram (mermaid *and* raw SVG), image, decision, doc, handoff, config, and the 
 kinds (affirm / reject / correct), with model and token counts recorded.
 
 **Reuse works, duplication doesn't.** `search_resources` finds captured work; calling
-`save_resource` again with an existing id updates in place (1 → 1 recipe), rather than spawning a
+`save_resource` again with an existing id updates in place (1 → 1 job), rather than spawning a
 near-duplicate.
 
-**Practices partition knowledge.** alice's recipe inherits `practice=aem` and bob's inherits
+**Practices partition knowledge.** alice's job inherits `practice=aem` and bob's inherits
 `braze` with no extra effort, and the AEM filter returns only AEM work.
 
-**Read-only means read-only.** The viewer identity reads recipes and the CX graph but is refused
+**Read-only means read-only.** The viewer identity reads jobs and the CX graph but is refused
 every write, with an error that explains how to get access.
 
 ## 3. Ranked issue log
@@ -66,22 +66,22 @@ re-verified live** in this pass.
 
 ### P0 — silent data loss
 
-**1. `save_resource` evicted recipes from the Company CX Graph.** Updating a recipe in place
+**1. `save_resource` evicted jobs from the Company CX Graph.** Updating a job in place
 rebuilt it from a literal that omitted `cx_approved`, `cx_approved_by`, `cx_approved_at`. So the
-normal, encouraged act of refining a recipe *after* the head chef admitted it silently removed it
+normal, encouraged act of refining a job *after* the head chef admitted it silently removed it
 from the shared graph — no error, no log, and the head chef would have to notice its absence to
-know. Same bug dropped `practice`, so the recipe also disappeared from its own discipline's
+know. Same bug dropped `practice`, so the job also disappeared from its own discipline's
 filter. A pre-existing D64 integrity bug, found only because the E2E ran
 `save → approve → admit → save again` in one sequence. **Fixed**: both preserved across update,
 with regression tests that reproduce the exact sequence.
 
 ### P1 — permission boundary
 
-**2. `headchef_reject` had no candidate gate.** `headchef_approve` checked that a recipe was baked
+**2. `headchef_reject` had no candidate gate.** `headchef_approve` checked that a job was baked
 before touching it; its opposite did not. A head chef could therefore write rejection metadata onto
 another owner's private, un-baked draft — work that was never submitted for review and that the
 head chef should not have been able to affect at all. **Fixed**: refuses anything not baked, with a
-message explaining that only baked recipes reach the queue. Live-asserted.
+message explaining that only baked jobs reach the queue. Live-asserted.
 
 **3. The dashboard showed one shared cookbook to everyone.** The proxy fell back to the server-side
 `SERVICE_API_KEY` whenever no IMS token was present. Since browser IMS login is not provisioned
@@ -89,14 +89,14 @@ yet, that fallback *was* the normal path — so every user opened the service id
 (in practice, mine), which contradicts the product's core privacy claim. **Fixed**: the dashboard
 asks for the viewer's own access key and forwards it upstream; requiring identity is now the
 default, and a deployment must explicitly opt out to get the old shared behaviour. Verified live:
-alice and bob open the same URL and see 2 and 3 recipes respectively.
+alice and bob open the same URL and see 2 and 3 jobs respectively.
 
 ### P2 — ergonomics that block a correct workflow
 
-**4. `certify` hard-errored on the documented happy path.** Approving any step promotes its recipe
+**4. `certify` hard-errored on the documented happy path.** Approving any step promotes its job
 to `approved`. So a user who followed the instructions — capture, approve the good ingredients,
-then certify the recipe — got `Recipe '…' is already approved`, an error for requesting a state the
-recipe was already in. An agent seeing `isError` reasonably concludes something went wrong and
+then certify the job — got `Job '…' is already approved`, an error for requesting a state the
+job was already in. An agent seeing `isError` reasonably concludes something went wrong and
 retries or reports failure. **Fixed**: idempotent, returning `already_approved: true` and naming
 who recorded the original consent, so nothing is reported as a fresh approval.
 
@@ -122,11 +122,11 @@ are served; dashboard users are not. Tracked for the UI pass.
 
 ### Non-issues (investigated, correct as designed)
 
-- `approve_resource` on a baked recipe reports "already approved" — correct; bake is downstream of
+- `approve_resource` on a baked job reports "already approved" — correct; bake is downstream of
   approval, so there is nothing to consent to.
 - `find_similar` requires `query`, not `title` — correct; my first harness call was wrong, not the
   tool.
-- Recipes appear in bob's list once alice bakes and approves them — correct; that is the sharing
+- Jobs appear in bob's list once alice bakes and approves them — correct; that is the sharing
   model working.
 
 ## 4. What I changed, in one place

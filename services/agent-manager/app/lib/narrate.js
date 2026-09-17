@@ -20,6 +20,79 @@
  * failure the record exists to catch.
  */
 
+/* ---------------------------------------------------------------------------
+ * Linking back to Workfront.
+ *
+ * An artifact that says an agent created an issue, without saying WHICH issue,
+ * is not reviewable. The reviewer's next action is always the same - open the
+ * thing and look at it - and making them search Workfront by name for a record
+ * an agent just created is the kind of small friction that stops review
+ * happening at all.
+ *
+ * Workfront's object URLs are stable and predictable per object code, so the id
+ * an agent reports is enough to build one.
+ * ------------------------------------------------------------------------- */
+
+/** objCode -> the path Workfront serves that object at. */
+const WORKFRONT_PATHS = {
+    OPTASK: 'issue',
+    TASK: 'task',
+    PROJ: 'project',
+    PORT: 'portfolio',
+    PRGM: 'program',
+    TMPL: 'template',
+    DOCU: 'document',
+    USER: 'user'
+}
+
+/**
+ * A deep link to one Workfront object.
+ *
+ * @param {string} objCode e.g. OPTASK
+ * @param {string} objId Workfront's own id
+ * @param {string} instance the tenant host, e.g. acme.my.workfront.com
+ * @returns {string|null} null when we cannot build a trustworthy URL
+ */
+function workfrontUrl (objCode, objId, instance) {
+    if (!objId || !instance) return null
+    const path = WORKFRONT_PATHS[String(objCode || '').toUpperCase()]
+    // An unknown object code would produce a URL that 404s. A missing link is
+    // better than a broken one: the reader trusts the next link less either way.
+    if (!path) return null
+    const host = String(instance).replace(/^https?:\/\//, '').replace(/\/+$/, '')
+    // Workfront's own responses link as /issue/<id>, not /issue/view?ID=<id>.
+    // Both resolve, but matching what the platform itself emits means a link
+    // pasted from here and one copied from Workfront are the same link.
+    return `https://${host}/${path}/${encodeURIComponent(objId)}`
+}
+
+/**
+ * Anything in a step's output that names a Workfront object.
+ *
+ * Agents report this inconsistently - `workfront: {objId, objCode}` from the
+ * intake agent, a bare `ID` from a raw connector response - so this looks for
+ * the shapes that actually occur rather than insisting on one.
+ *
+ * @returns {{objCode: string, objId: string}[]}
+ */
+function findWorkfrontRefs (value, depth = 0, out = []) {
+    if (depth > 6 || value == null || typeof value !== 'object') return out
+    if (Array.isArray(value)) {
+        for (const v of value) findWorkfrontRefs(v, depth + 1, out)
+        return out
+    }
+    const objId = value.objId || value.objID || value.ID || value.id
+    const objCode = value.objCode || value.objectCode
+    if (objId && objCode && WORKFRONT_PATHS[String(objCode).toUpperCase()]) {
+        const key = `${objCode}:${objId}`
+        if (!out.some(r => `${r.objCode}:${r.objId}` === key)) {
+            out.push({ objCode: String(objCode), objId: String(objId) })
+        }
+    }
+    for (const v of Object.values(value)) findWorkfrontRefs(v, depth + 1, out)
+    return out
+}
+
 /** Values that are answers in form but not in substance. */
 const AMBIGUOUS = ['not sure', 'unknown', 'n/a', 'tbc', 'tbd', 'none', '']
 
@@ -52,9 +125,31 @@ function rows (output) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) return []
     return Object.entries(output).map(([key, value]) => {
         let note = 'stated by the agent'
-        if (value == null) note = '**not set**'
+
+        /*
+         * An EMPTY LIST IS NOT A MISSING VALUE.
+         *
+         * isAmbiguous stringifies its input, so [] became '' and was flagged as
+         * "ambiguous - does not identify anything". The field most often
+         * affected is called `missing`, so a run where nothing was missing
+         * printed "1 of 10 fields is unset, ambiguous or failed: missing" -
+         * reporting the best possible outcome as a defect.
+         *
+         * That matters beyond tidiness: this line is how a reader decides
+         * whether to look closer, and a flag that fires on good news trains
+         * them to ignore it, which is the one thing it cannot afford.
+         */
+        const emptyList = Array.isArray(value) && value.length === 0
+        const emptyObject = value && typeof value === 'object' && !Array.isArray(value) &&
+            Object.keys(value).length === 0
+
+        if (emptyList || emptyObject) note = 'none'
+        else if (value == null) note = '**not set**'
         else if (isAmbiguous(value)) note = '**ambiguous** — does not identify anything'
         else if (typeof value === 'object' && value && (value.error || value.err)) note = '**failed**'
+        // A value the agent openly reports as undetermined is honest, not broken.
+        else if (String(value).toLowerCase() === 'undetermined') note = 'undetermined, and says so'
+
         return { key, value: cell(value), note }
     })
 }
@@ -66,7 +161,7 @@ function rows (output) {
  * @param {string} label the agent's display name, from the upstream registry
  * @returns {string} markdown
  */
-function narrateStep (step, label) {
+function narrateStep (step, label, opts = {}) {
     const faulted = !!step.embedded_error
     const heading = faulted
         ? `### ${label} — reported success, but its tool call failed`
@@ -91,6 +186,33 @@ function narrateStep (step, label) {
             'pipeline carried on and the run reads as a success. Nothing downstream was ' +
             'told, and because the status never became `failed`, the escalation agent was ' +
             'never invoked.',
+            ''
+        )
+    }
+
+    /*
+     * The link goes ABOVE the field table, not in it.
+     *
+     * It is the one thing a reviewer acts on, and a URL buried in a row of a
+     * table of eleven fields is a URL nobody clicks.
+     */
+    const refs = findWorkfrontRefs(step.output)
+    const links = refs
+        .map(r => ({ ...r, url: workfrontUrl(r.objCode, r.objId, opts.workfrontInstance) }))
+        .filter(r => r.url)
+    if (links.length) {
+        lines.push('**In Workfront**', '')
+        for (const l of links) {
+            lines.push(`- [${l.objCode} ${l.objId}](${l.url}) — open it to review what the agent actually wrote.`)
+        }
+        lines.push('')
+    } else if (refs.length) {
+        // We know what it touched and cannot link to it. Say which, rather than
+        // leaving the reviewer to wonder whether anything was created at all.
+        lines.push(
+            `**In Workfront:** ${refs.map(r => `${r.objCode} ${r.objId}`).join(', ')} ` +
+            '(no tenant configured, so no direct link — set the instance on the Workfront ' +
+            'MCP server in Settings).',
             ''
         )
     }
@@ -187,4 +309,4 @@ function narrateLedger (steps, opts = {}) {
     return lines.join('\n')
 }
 
-module.exports = { narrateStep, narrateBrief, narrateLedger, seconds }
+module.exports = { narrateStep, narrateBrief, narrateLedger, seconds, workfrontUrl, findWorkfrontRefs }

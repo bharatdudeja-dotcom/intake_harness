@@ -61,6 +61,123 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_task_runs_run ON task_runs(run_id, step_index);
 CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, started_at);
 
+-- Two-tier human curation, added on top of the CREATE TABLE above via ALTER
+-- so this stays safe to re-run against an already-populated `runs` table
+-- (CREATE TABLE IF NOT EXISTS is a no-op on an existing table's columns).
+--
+-- Tier 1, "approved": a named admin marks a completed run worth keeping as
+-- an example. Tier 2, "promoted": that same run is additionally admitted
+-- into the cross-run Shared Graph (see GET /api/graph). Both always carry
+-- who and when — an approval or promotion with no admin behind it isn't a
+-- record of anything. Promotion requires prior approval, enforced in
+-- src/app/api/runs/[runId]/promote/route.ts rather than a CHECK constraint,
+-- to keep this file plain ALTERs.
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS approval_note TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted_by TEXT;
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_runs_promoted ON runs(promoted) WHERE promoted;
+
+-- Per-agent human approval gate, mirroring how a tool call waits for
+-- permission before it runs. A run now stops after EVERY successfully
+-- completed step (not just a "needs_input"/"failed" one) and sits in
+-- "awaiting_approval" until POST /api/runs/[runId]/continue advances it to
+-- the next agent. Widens the CHECK constraint the original CREATE TABLE
+-- shipped with — DROP + re-ADD is the only idempotent way to change a CHECK
+-- in place, so this stays safe to re-run.
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
+ALTER TABLE runs ADD CONSTRAINT runs_status_check
+    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
+
+-- Model usage, when an agent genuinely reports it. NULL on every agent
+-- today — none of the four call a model, they're deterministic parsers and
+-- MCP/tool calls — so this stays empty rather than holding a fabricated 0.
+-- It exists for the day an agent does call one, via AgentResponse.usage.
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
+
+-- Programmes: a named grouping a run can belong to (ported from Agent
+-- Manager's Project, minus its lifecycle machinery — just enough to group
+-- runs). upsert-by-name in src/lib/pipeline/programmes.ts, so submitting
+-- the same programme name twice reuses the row rather than duplicating it.
+CREATE TABLE IF NOT EXISTS programmes (
+    programme_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          TEXT NOT NULL UNIQUE,
+    note          TEXT,
+    owner         TEXT,
+    status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS programme_id UUID REFERENCES programmes(programme_id);
+CREATE INDEX IF NOT EXISTS idx_runs_programme ON runs(programme_id);
+
+-- Resources: the generic knowledge-base entries ported from Agent Manager's
+-- resource-policy catalog (playbooks, decisions, architecture docs/diagrams,
+-- meeting notes, code snippets, configs, handoff-prompts) — content worth
+-- keeping that ISN'T a pipeline run. Single content blob per resource, not
+-- an ordered step log: Agent Manager needed steps because the same object
+-- doubled as both a run record and a doc; here `task_runs` already owns run
+-- history, so a resource only needs to be a doc. Same two-tier curation as
+-- `runs` (approved -> promoted into the Shared Graph), same admin model.
+CREATE TABLE IF NOT EXISTS resources (
+    resource_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type           TEXT NOT NULL CHECK (type IN (
+                       'playbook', 'decision', 'architecture-doc', 'architecture-diagram',
+                       'meeting-notes', 'code-snippet', 'configuration', 'handoff-prompt'
+                   )),
+    title          TEXT NOT NULL,
+    content        TEXT NOT NULL,
+    format         TEXT,
+    tags           TEXT[] NOT NULL DEFAULT '{}',
+    owner          TEXT,
+    programme_id   UUID REFERENCES programmes(programme_id),
+    approved       BOOLEAN NOT NULL DEFAULT false,
+    approved_by    TEXT,
+    approved_at    TIMESTAMPTZ,
+    approval_note  TEXT,
+    promoted       BOOLEAN NOT NULL DEFAULT false,
+    promoted_by    TEXT,
+    promoted_at    TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_resources_type ON resources(type);
+CREATE INDEX IF NOT EXISTS idx_resources_promoted ON resources(promoted) WHERE promoted;
+
+-- Settings: a single editable row (id is always 1 — the CHECK enforces
+-- that, so there's exactly one config, never a second competing row).
+-- Ported from Agent Manager's settings override (D48): a retention window
+-- for unapproved Resources, plus manual purge rather than a cron this app
+-- has no scheduler to run. Deliberately does NOT cover Runs — those are
+-- this harness's own audit trail (B7's request age, B9's failure
+-- classification both read off them), not disposable draft content the
+-- way an unapproved Resource is.
+CREATE TABLE IF NOT EXISTS settings (
+    id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    retention_days  INTEGER NOT NULL DEFAULT 30 CHECK (retention_days > 0),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by      TEXT
+);
+INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Parity with Agent Manager's settings override (D48) beyond retention:
+-- segmentation_labels/kind_labels rename what things are CALLED (internal
+-- keys — "programme", each resources.type value — never change, only their
+-- display label, so relabeling never breaks stored data or filters, same
+-- principle as that D48 override). promote_admins is the "Hero Agents"
+-- roster (D64): the subset of ADMIN_NAMES allowed to promote into the
+-- Shared Graph. NULL/empty means "any admin may promote" — today's
+-- behavior — so this is purely additive until an admin actually sets one.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS segmentation_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS kind_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS promote_admins TEXT[];
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

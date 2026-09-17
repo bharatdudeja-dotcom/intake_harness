@@ -14,15 +14,15 @@ mirror only; every change lands in the PR.
 | # | Item | Where |
 |---|---|---|
 | D1 | Fork the cookbook rather than build fresh | `app/`, `docs/LINEAGE.md` |
-| D2 | Rename everything a person sees — Programme, Run, Event, Marketer, Hero Agent, Agent, Live Queue, Playbooks, Shared Knowledge Graph | SPA |
+| D2 | Rename everything a person sees — Programme, Run, Event, Marketer, Oracle, Agent, Live Queue, Playbooks, Shared Knowledge Graph | SPA |
 | D3 | Drop the Cook-off | SPA |
-| D4 | **Hero Agent** is the only name. No "mentor" anywhere | SPA, docs |
+| D4 | **Oracle** is the only name. No "mentor" anywhere | SPA, docs |
 | D5 | Agent marks (inbox, magnifier, target, siren, person), decorating registry ids only | `AGENT_MARK` |
 | D6 | Host-neutral: Docker, storage drivers (fs/s3/gcs/aio), runs on Cloud Run, ECS, a VM or a laptop | `server.js`, `lib/storage/` |
 | D7 | One **Approve** button replacing per-artifact approve + bake; same action available from Claude | SPA |
 | D8 | ingredient → **artifact**, domain-neutral for AEM and Campaign later | SPA |
 | D9 | Two themes, light and dark. Green one gone | SPA |
-| D10 | **Agents** tab, always visible, artifacts segregated per agent, Hero Agent queue folded in | `renderAgents()` |
+| D10 | **Agents** tab, always visible, artifacts segregated per agent, Oracle queue folded in | `renderAgents()` |
 | D11 | **Data flow fixed** — three stacked Adobe assumptions (API origin, config-as-params, proxy URL) | `server.js`, SPA |
 | D12 | Read David's blockers map and Josh's deck; B1–B9 documented | `docs/BRAIN-GAP.md` |
 | D13 | Story beats corrected from Josh's actual deck | `docs/STORY.md` |
@@ -66,11 +66,11 @@ Today it logs nothing useful.
 
 ### 5 · Remaining cookbook wording
 Visible in the screenshots and still wrong.
-- [ ] "0 recipe(s) visible · 0 in the cookbook" → runs / playbooks
-- [ ] Stat tiles: "my recipes", "drafts", "in the cookbook"
-- [ ] "Select a recipe to open its Work Log"
+- [ ] "0 job(s) visible · 0 in the cookbook" → runs / playbooks
+- [ ] Stat tiles: "my jobs", "drafts", "in the cookbook"
+- [ ] "Select a job to open its Work Log"
 - [ ] "Nothing on your bench yet…"
-- [ ] Sign-in copy: "the Cookbook shows your work", "Approved recipes and the
+- [ ] Sign-in copy: "the Cookbook shows your work", "Approved jobs and the
       Company CX Graph"
 - [ ] "Projects are created from your AI client (start_project)" → Programmes
 

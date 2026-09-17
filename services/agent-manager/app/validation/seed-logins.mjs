@@ -153,10 +153,10 @@ check('an unknown login is refused', ghost.status === 401, `HTTP ${ghost.status}
 
 console.log('\nVerifying each person sees THEIR OWN cookbook:')
 for (const p of PEOPLE) {
-    const mine = await asLogin(p.id, p.password, 'list_recipes')
+    const mine = await asLogin(p.id, p.password, 'list_jobs')
     const list = Array.isArray(mine.payload) ? mine.payload : []
     const own = list.filter(r => r.author === p.email).length
-    check(`${p.name} view`, !mine.isError, `${list.length} recipe(s) visible, ${own} authored by them`)
+    check(`${p.name} view`, !mine.isError, `${list.length} job(s) visible, ${own} authored by them`)
 }
 
 console.log('\nVerifying roles differ by person:')
@@ -165,7 +165,7 @@ const viewer = PEOPLE.find(p => p.roles.includes('viewer'))
 const chef = PEOPLE.find(p => p.roles.length === 1 && p.roles[0] === 'chef') || PEOPLE[0]
 const headChefQueue = await asLogin(admin.id, admin.password, 'list_cx_pending')
 check(admin.name + ' (head chef) can read the CX queue', !headChefQueue.isError, `${Array.isArray(headChefQueue.payload) ? headChefQueue.payload.length : 0} pending`)
-const guestWrite = viewer ? await asLogin(viewer.id, viewer.password, 'start_recipe', { project: 'x', title: 'y' }) : { isError: true, payload: '(no viewer configured)' }
+const guestWrite = viewer ? await asLogin(viewer.id, viewer.password, 'start_job', { project: 'x', title: 'y' }) : { isError: true, payload: '(no viewer configured)' }
 check('viewer cannot write', guestWrite.isError, String(guestWrite.payload).slice(0, 70))
 const chefAdmin = await asLogin(chef.id, chef.password, 'create_user', { id: 'sneaky', password: 'long-enough-1' })
 check('a plain chef cannot create logins', chefAdmin.isError, String(chefAdmin.payload).slice(0, 60))
@@ -213,7 +213,7 @@ Swap the id:password pair for whichever consultant you want to be.
 - **Walter White** is the Head Chef + admin — use him to show curation and the Team panel.
 - **Mike Ehrmantraut** is a *second* head chef, so curation isn't a single point of control.
 - **Guest** is read-only: it reads the shared CX graph and is refused every write.
-- Each consultant has a **private, un-baked work-in-progress recipe**. Sign in as Saul and you
+- Each consultant has a **private, un-baked work-in-progress job**. Sign in as Saul and you
   cannot see Jesse's rough thinking — that's the privacy model, live.
 - These are demo credentials. Rotate them after the event with \`set_user_password\`.
 `)

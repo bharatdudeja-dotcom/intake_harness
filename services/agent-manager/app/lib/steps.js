@@ -11,17 +11,17 @@ governing permissions and limitations under the License.
 */
 
 /**
- * The ordered Step/Recipe model (D45) - pure, portable helpers shared by the MCP tools
+ * The ordered Step/Job model (D45) - pure, portable helpers shared by the MCP tools
  * (actions/mcp-server/tools.js) and the retention purge (lib/retention.js).
  *
- * The key idea: a Recipe is an ORDERED container of Steps. The experimental recipe is
+ * The key idea: a Job is an ORDERED container of Steps. The experimental job is
  * the full ordered step log as captured; the cookbook (approved) view is just the
- * approved steps, in their original order - a standalone, followable how-to. A recipe's
+ * approved steps, in their original order - a standalone, followable how-to. A job's
  * legacy flat fields (content/status/tokens_used/...), kept for back-compat with every
  * tool and the dashboard built before this increment, are a COMPOSED PROJECTION of its
  * steps - computed here, not stored as independent truth.
  *
- * Back-compat: a recipe saved before this increment (or via the save_resource wrapper,
+ * Back-compat: a job saved before this increment (or via the save_resource wrapper,
  * which always targets step order 0) has no `steps` array on disk. ensureSteps()
  * synthesizes a single wrapped step from its legacy flat fields so every step-model tool
  * works uniformly whether or not the migration script (scripts/migrate-to-steps.mjs) has
@@ -33,7 +33,7 @@ const { getRetentionDays } = require('./settings')
 
 const STEP_SEPARATOR = '\n\n---\n\n'
 
-/** Policy `type` -> default step `kind`, for wrapping legacy flat recipes (D45 migration). */
+/** Policy `type` -> default step `kind`, for wrapping legacy flat jobs (D45 migration). */
 const TYPE_TO_KIND = {
     'architecture-diagram': 'diagram',
     decision: 'decision',
@@ -50,23 +50,23 @@ function kindForType (type) {
     return TYPE_TO_KIND[type] || 'message'
 }
 
-/** @param {string} recipeId @param {number} order @returns {string} a stable, parseable step id */
-function makeStepId (recipeId, order) {
-    return `${recipeId}::s${order}`
+/** @param {string} jobId @param {number} order @returns {string} a stable, parseable step id */
+function makeStepId (jobId, order) {
+    return `${jobId}::s${order}`
 }
 
 /**
  * @param {string} stepId as returned by makeStepId
- * @returns {{recipeId: string, order: number}|null} null if not a well-formed step id
+ * @returns {{jobId: string, order: number}|null} null if not a well-formed step id
  */
 function parseStepId (stepId) {
     const marker = '::s'
     const idx = String(stepId || '').lastIndexOf(marker)
     if (idx === -1) return null
-    const recipeId = stepId.slice(0, idx)
+    const jobId = stepId.slice(0, idx)
     const order = Number(stepId.slice(idx + marker.length))
-    if (!recipeId || !Number.isInteger(order) || order < 0) return null
-    return { recipeId, order }
+    if (!jobId || !Number.isInteger(order) || order < 0) return null
+    return { jobId, order }
 }
 
 /** @param {string} fromIso @returns {string} fromIso + the configured retention window */
@@ -75,15 +75,15 @@ function computeExpiry (fromIso) {
 }
 
 /**
- * Synthesize the single step a pre-Increment-11 flat recipe implicitly has, from its
+ * Synthesize the single step a pre-Increment-11 flat job implicitly has, from its
  * legacy top-level fields. Source is unknown - the flat model never tracked it.
- * @param {object} resource a full recipe as read from the store
+ * @param {object} resource a full job as read from the store
  * @returns {object} a step object at order 0
  */
 function wrapLegacyStep (resource) {
     return {
         id: makeStepId(resource.id, 0),
-        recipe_id: resource.id,
+        job_id: resource.id,
         order: 0,
         source: 'unknown',
         model: resource.model,
@@ -105,9 +105,9 @@ function wrapLegacyStep (resource) {
 }
 
 /**
- * @param {object} resource a full recipe as read from the store
+ * @param {object} resource a full job as read from the store
  * @returns {object[]} its steps - real ones if present (even an empty array, e.g. a
- *   freshly start_recipe'd container), else a synthesized single legacy step
+ *   freshly start_job'd container), else a synthesized single legacy step
  */
 function ensureSteps (resource) {
     if (Array.isArray(resource.steps)) return resource.steps
@@ -120,7 +120,7 @@ function nextOrder (steps) {
 }
 
 /**
- * The composed, followable content of a recipe: its non-discarded steps' content,
+ * The composed, followable content of a job: its non-discarded steps' content,
  * in order. Pass approvedOnly to get just the cookbook (certified) view.
  * @param {object[]} steps
  * @param {{approvedOnly?: boolean}} [opts]
@@ -136,11 +136,11 @@ function composeContent (steps, opts = {}) {
 }
 
 /**
- * A recipe is in the Cookbook once it has at least one approved step (D45).
+ * A job is in the Cookbook once it has at least one approved step (D45).
  * @param {object[]} steps
  * @returns {'experimental'|'approved'}
  */
-function recipeStatusFromSteps (steps) {
+function jobStatusFromSteps (steps) {
     return steps.some(s => statusLib.isApproved(s.status)) ? statusLib.APPROVED : statusLib.EXPERIMENTAL
 }
 
@@ -162,8 +162,8 @@ function aggregateTokens (steps) {
 }
 
 /**
- * Distinct model names used across a recipe's steps, in first-appearance order (D47) -
- * stored on the recipe projection so the dashboard's Home summary can show "which models"
+ * Distinct model names used across a job's steps, in first-appearance order (D47) -
+ * stored on the job projection so the dashboard's Home summary can show "which models"
  * without fetching every step. Model is free text (vendor-neutral, D21).
  * @param {object[]} steps
  * @returns {string[]|undefined} undefined if no step declared a model
@@ -177,8 +177,8 @@ function aggregateModels (steps) {
 }
 
 /**
- * The earliest upcoming expiry among a recipe's still-experimental steps (D48) - surfaced
- * on the recipe projection so the dashboard's Home/Work Log "expiring soon" lens works off
+ * The earliest upcoming expiry among a job's still-experimental steps (D48) - surfaced
+ * on the job projection so the dashboard's Home/Work Log "expiring soon" lens works off
  * list metadata without fetching every step.
  * @param {object[]} steps
  * @returns {string|undefined} ISO timestamp, or undefined if nothing is expiring
@@ -206,7 +206,7 @@ const KIND_LABEL = {
 }
 
 /**
- * Compose the end-to-end "replay" walkthrough of a recipe (D47): its steps in order,
+ * Compose the end-to-end "replay" walkthrough of a job (D47): its steps in order,
  * each with a heading carrying kind/source/model, code fenced by language, asset steps
  * referenced (bytes aren't inlined into a prompt). This is the source-of-truth an AI can
  * follow to redo the task. Pass approvedOnly for the certified how-to (the export path).
@@ -255,7 +255,7 @@ module.exports = {
     nextOrder,
     composeContent,
     composeReplay,
-    recipeStatusFromSteps,
+    jobStatusFromSteps,
     aggregateTokens,
     aggregateModels,
     earliestExpiry

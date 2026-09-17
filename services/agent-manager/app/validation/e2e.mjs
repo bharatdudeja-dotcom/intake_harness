@@ -116,9 +116,9 @@ await call('bharat', 'set_practices', { practices: [
 console.log('\n[1] alice (chef, AEM practice) captures a real task')
 await call('alice', 'start_project', { name: 'ACME AEM Migration' })
 await call('alice', 'set_work_context', { project: 'ACME AEM Migration', epic: 'Content Migration' })
-const aRec = await call('alice', 'start_recipe', { project: 'ACME AEM Migration', title: 'Migrate WKND templates to editable templates' })
+const aRec = await call('alice', 'start_job', { project: 'ACME AEM Migration', title: 'Migrate WKND templates to editable templates' })
 const aId = aRec.data?.id
-check('alice recipe inherits practice=aem', aRec.data?.practice === 'aem', String(aRec.data?.practice))
+check('alice job inherits practice=aem', aRec.data?.practice === 'aem', String(aRec.data?.practice))
 
 const KINDS = [
     { kind: 'message', content: 'Client wants WKND static templates migrated to editable templates.', format: 'md' },
@@ -128,8 +128,8 @@ const KINDS = [
     { kind: 'diagram', content: 'flowchart LR\n  Static[Static Template] --> Editable[Editable Template]\n  Editable --> Policy[Content Policy]', format: 'mermaid' },
     { kind: 'diagram', content: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#C96442"/><text x="10" y="25" fill="#fff">AEM</text></svg>', format: 'svg' },
     { kind: 'image', asset: { data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', mime_type: 'image/png' } },
-    { kind: 'config', content: '{"templateType":"editable","policy":"wknd/policies/hero"}', format: 'json' },
-    { kind: 'handoff', content: 'Hand to the dev agent: convert the hero component policy.', format: 'md' },
+    { kind: 'config', content: '{"templateType":"editable","policy":"wknd/policies/oracle"}', format: 'json' },
+    { kind: 'handoff', content: 'Hand to the dev agent: convert the oracle component policy.', format: 'md' },
     { kind: 'steering', signal: 'affirm', content: 'Confirmed: editable templates is the right call.' },
     { kind: 'steering', signal: 'correct', content: 'Correction: keep the existing breadcrumb component, do not replace it.' },
     { kind: 'steering', signal: 'reject', content: 'Rejected: do not migrate the legacy campaign pages in this phase.' }
@@ -137,16 +137,16 @@ const KINDS = [
 const stepIds = []
 for (const [i, k] of KINDS.entries()) {
     const r = await call('alice', 'append_step', {
-        recipe_id: aId, source: 'desktop-ai', model: 'opus-4.8', tokens_used: 900 + i * 25, ...k
+        job_id: aId, source: 'desktop-ai', model: 'opus-4.8', tokens_used: 900 + i * 25, ...k
     })
     if (r.data?.id) stepIds.push({ id: r.data.id, kind: k.kind, signal: k.signal })
 }
 check(`all ${KINDS.length} ingredient kinds captured`, stepIds.length === KINDS.length, `${stepIds.length}/${KINDS.length}`)
 
-await call('alice', 'list_steps', { recipe_id: aId })
-await call('alice', 'get_recipe', { id: aId, view: 'full' })
-await call('alice', 'get_active_recipe', { project: 'ACME AEM Migration' })
-await call('alice', 'list_recipes', {})
+await call('alice', 'list_steps', { job_id: aId })
+await call('alice', 'get_job', { id: aId, view: 'full' })
+await call('alice', 'get_active_job', { project: 'ACME AEM Migration' })
+await call('alice', 'list_jobs', {})
 await call('alice', 'list_projects')
 await call('alice', 'list_resources', {})
 const searchHit = await call('alice', 'search_resources', { query: 'editable templates' })
@@ -160,73 +160,73 @@ const after = (await call('alice', 'list_resources', {})).data?.length || 0
 check('save_resource with an existing id UPDATES, does not duplicate', after === before, `${before} -> ${after}`)
 
 // handoff task lifecycle
-const ho = await call('alice', 'save_resource', { type: 'handoff-prompt', title: 'Convert hero policy', content: 'Convert the hero component policy to editable template', project: 'ACME AEM Migration', target_agent: 'claude-code' })
+const ho = await call('alice', 'save_resource', { type: 'handoff-prompt', title: 'Convert oracle policy', content: 'Convert the oracle component policy to editable template', project: 'ACME AEM Migration', target_agent: 'claude-code' })
 await call('alice', 'list_active_tasks')
 if (ho.data?.id) {
     await call('alice', 'set_task_status', { id: ho.data.id, status: 'in_progress' })
-    await call('alice', 'link_recipes', { handoff_id: ho.data.id, recipe_ids: [aId] })
+    await call('alice', 'link_jobs', { handoff_id: ho.data.id, job_ids: [aId] })
     await call('alice', 'set_task_status', { id: ho.data.id, status: 'done' })
 }
 
 // ---------------------------------------------------------------- 2. bob (Braze) + isolation
 console.log('\n[2] bob (chef, Braze practice) - separate tenant, isolation check')
 await call('bob', 'start_project', { name: 'BETA Braze Onboarding' })
-const bRec = await call('bob', 'start_recipe', { project: 'BETA Braze Onboarding', title: 'Braze content block strategy' })
+const bRec = await call('bob', 'start_job', { project: 'BETA Braze Onboarding', title: 'Braze content block strategy' })
 const bId = bRec.data?.id
-check('bob recipe inherits practice=braze', bRec.data?.practice === 'braze', String(bRec.data?.practice))
-await call('bob', 'append_step', { recipe_id: bId, kind: 'message', content: 'Braze content blocks for onboarding journey.', source: 'desktop-ai', model: 'opus-4.8', tokens_used: 400 })
+check('bob job inherits practice=braze', bRec.data?.practice === 'braze', String(bRec.data?.practice))
+await call('bob', 'append_step', { job_id: bId, kind: 'message', content: 'Braze content blocks for onboarding journey.', source: 'desktop-ai', model: 'opus-4.8', tokens_used: 400 })
 
-const bobSees = (await call('bob', 'list_recipes', {})).data || []
-check('ISOLATION: bob cannot see alice\'s un-approved recipe', !bobSees.some(r => r.id === aId), `bob sees ${bobSees.length}`)
-const aliceSees = (await call('alice', 'list_recipes', {})).data || []
-check('ISOLATION: alice cannot see bob\'s un-approved recipe', !aliceSees.some(r => r.id === bId), `alice sees ${aliceSees.length}`)
+const bobSees = (await call('bob', 'list_jobs', {})).data || []
+check('ISOLATION: bob cannot see alice\'s un-approved job', !bobSees.some(r => r.id === aId), `bob sees ${bobSees.length}`)
+const aliceSees = (await call('alice', 'list_jobs', {})).data || []
+check('ISOLATION: alice cannot see bob\'s un-approved job', !aliceSees.some(r => r.id === bId), `alice sees ${aliceSees.length}`)
 
-const aemOnly = (await call('alice', 'list_recipes', { practice: 'aem' })).data || []
-check('PRACTICE FILTER: aem filter returns only aem work', aemOnly.length > 0 && aemOnly.every(r => r.practice === 'aem'), `${aemOnly.length} aem recipe(s)`)
+const aemOnly = (await call('alice', 'list_jobs', { practice: 'aem' })).data || []
+check('PRACTICE FILTER: aem filter returns only aem work', aemOnly.length > 0 && aemOnly.every(r => r.practice === 'aem'), `${aemOnly.length} aem job(s)`)
 
 // ---------------------------------------------------------------- 3. curate + bake gates
 console.log('\n[3] Curate: approve / discard, then the bake gate')
-const bakeTooEarly = await call('alice', 'bake_recipe', { id: aId }, { expectError: true, note: 'bake blocked with 0 approved' })
+const bakeTooEarly = await call('alice', 'bake_job', { id: aId }, { expectError: true, note: 'bake blocked with 0 approved' })
 check('BAKE GATE: bake refused with zero approved ingredients', !!bakeTooEarly.error, String(bakeTooEarly.error).slice(0, 80))
 
 await call('alice', 'approve_step', { step_id: stepIds[0].id })
 await call('alice', 'approve_steps', { step_ids: stepIds.slice(1, 6).map(s => s.id) })
 await call('alice', 'discard_step', { step_id: stepIds[stepIds.length - 1].id })
 await call('alice', 'certify', { id: aId, note: 'Consent recorded before bake' })
-const baked = await call('alice', 'bake_recipe', { id: aId, note: 'Reviewed - reusable migration how-to' })
+const baked = await call('alice', 'bake_job', { id: aId, note: 'Reviewed - reusable migration how-to' })
 check('BAKE: succeeds once ingredients are approved', baked.ok && baked.data?.baked === true, JSON.stringify(baked.data?.baked))
 const extra = await call('alice', 'save_resource', { type: 'decision', title: 'Use core components', content: 'Decision record', project: 'ACME AEM Migration' })
 if (extra.data?.id) await call('alice', 'approve_resource', { id: extra.data.id })
-await call('alice', 'export_as_skill', { recipe_id: aId, format: 'prompt' })
+await call('alice', 'export_as_skill', { job_id: aId, format: 'prompt' })
 await call('alice', 'bake_project', { project: 'ACME AEM Migration' })
 await call('alice', 'set_project_status', { project: 'ACME AEM Migration', status: 'active' })
 
 // cross-owner visibility of APPROVED work
-const bobSeesApproved = (await call('bob', 'list_recipes', {})).data || []
-check('SHARING: bob now sees alice\'s BAKED/approved recipe', bobSeesApproved.some(r => r.id === aId), `bob sees ${bobSeesApproved.length}`)
+const bobSeesApproved = (await call('bob', 'list_jobs', {})).data || []
+check('SHARING: bob now sees alice\'s BAKED/approved job', bobSeesApproved.some(r => r.id === aId), `bob sees ${bobSeesApproved.length}`)
 
 // ---------------------------------------------------------------- 4. head-chef CX gate
 console.log('\n[4] bharat (head-chef): CX gate')
 const pending = (await call('bharat', 'list_cx_pending', {})).data || []
-check('CX QUEUE: baked recipe appears pending head-chef', pending.some(r => r.id === aId), `${pending.length} pending`)
+check('CX QUEUE: baked job appears pending head-chef', pending.some(r => r.id === aId), `${pending.length} pending`)
 const cxBefore = await call('bharat', 'get_cx_graph')
 const inCxBefore = (cxBefore.data?.nodes || []).some(n => n.id === aId)
-check('CX GATE: baked-but-unapproved recipe is NOT yet in the CX graph', !inCxBefore)
+check('CX GATE: baked-but-unapproved job is NOT yet in the CX graph', !inCxBefore)
 
-const notHeadChef = await call('alice', 'headchef_approve', { recipe_id: aId }, { expectError: true, note: 'non-head-chef refused' })
+const notHeadChef = await call('alice', 'headchef_approve', { job_id: aId }, { expectError: true, note: 'non-head-chef refused' })
 check('CX GATE: a plain chef cannot admit to the CX graph', !!notHeadChef.error)
 
-await call('bharat', 'headchef_approve', { recipe_id: aId })
+await call('bharat', 'headchef_approve', { job_id: aId })
 await call('bharat', 'rebuild_cx_graph')
 const cxAfter = await call('bharat', 'get_cx_graph')
 const nodes = cxAfter.data?.nodes || []
 check('CX GATE: head-chef admission puts it in the CX graph', nodes.some(n => n.id === aId), `${nodes.length} nodes`)
-check('CX INTEGRITY: bob\'s un-approved recipe is NOT in the CX graph', !nodes.some(n => n.id === bId))
-const rejUnbaked = await call('bharat', 'headchef_reject', { recipe_id: bId }, { expectError: true, note: 'refuses a non-baked recipe' })
-check('CX GATE: headchef_reject refuses a NON-BAKED recipe (candidate gate)', !!rejUnbaked.error, String(rejUnbaked.error).slice(0,70))
-await call('bharat', 'headchef_reject', { recipe_id: aId })
-await call('bharat', 'headchef_approve', { recipe_id: aId })
-await call('bharat', 'admin_list_recipes', {})
+check('CX INTEGRITY: bob\'s un-approved job is NOT in the CX graph', !nodes.some(n => n.id === bId))
+const rejUnbaked = await call('bharat', 'headchef_reject', { job_id: bId }, { expectError: true, note: 'refuses a non-baked job' })
+check('CX GATE: headchef_reject refuses a NON-BAKED job (candidate gate)', !!rejUnbaked.error, String(rejUnbaked.error).slice(0,70))
+await call('bharat', 'headchef_reject', { job_id: aId })
+await call('bharat', 'headchef_approve', { job_id: aId })
+await call('bharat', 'admin_list_jobs', {})
 await call('bharat', 'admin_list_projects')
 await call('bharat', 'set_head_chefs', { head_chefs: ['service-account', OWNER.bharat] })
 await call('bharat', 'update_settings', { retention_days: 30 })
@@ -237,9 +237,9 @@ await call('bharat', 'get_resource', { id: aId })
 console.log('\n[5] viewer: read-only enforcement')
 const vRoles = await call('viewer', 'get_my_roles')
 check('viewer role is exclusive (no chef)', JSON.stringify(vRoles.data?.roles) === JSON.stringify(['viewer']), JSON.stringify(vRoles.data?.roles))
-const vList = await call('viewer', 'list_recipes', {})
+const vList = await call('viewer', 'list_jobs', {})
 check('viewer CAN read', vList.ok)
-const vWrite = await call('viewer', 'start_recipe', { project: 'X', title: 'nope' }, { expectError: true, note: 'read-only enforced' })
+const vWrite = await call('viewer', 'start_job', { project: 'X', title: 'nope' }, { expectError: true, note: 'read-only enforced' })
 check('viewer CANNOT write', !!vWrite.error)
 const vCx = await call('viewer', 'get_cx_graph')
 check('viewer can read the CX graph (shared knowledge)', vCx.ok)

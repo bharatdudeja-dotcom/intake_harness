@@ -42,20 +42,20 @@ await new Promise(r => w.addEventListener('load', r))
 await sleep(250)
 w.auth = w.auth || {}; w.auth.owner = 'bharat.dudeja@tapcxm.com'
 try { await w.loadAll() } catch (e) {}
-for (const fn of ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks', 'renderCookbook', 'renderHeadChef', 'renderAgents', 'renderSettings', 'renderConnections']) {
+for (const fn of ['renderHome', 'renderProjects', 'renderWorklogList', 'renderTasks', 'renderCookbook', 'renderAgents', 'renderSettings', 'renderConnections']) {
   try { w[fn]() } catch (e) {}
 }
 try { await w.buildGraph() } catch (e) {}
 try { await w.buildCx() } catch (e) {}
-try { await w.openWorklog('recipe-live') } catch (e) {}
-try { await w.openDetail('recipe-live') } catch (e) {}
+try { await w.openWorklog('job-live') } catch (e) {}
+try { await w.openDetail('job-live') } catch (e) {}
 await sleep(200)
 
 const D = w.document
 // 'ingr.' was missing from this list, which is why the audit reported clean
 // while the panel dump plainly showed it. An audit worth having is one that
 // fails when the thing it checks for is on screen.
-const WORDS = /(recipes?|ingredients?|ingr|cookbook|head ?chefs?|chefs?|bakes?|baked|baking|cook-?off|test kitchen)/gi
+const WORDS = /(jobs?|ingredients?|ingr|cookbook|head ?chefs?|chefs?|bakes?|baked|baking|cook-?off|test kitchen)/gi
 const found = new Map()
 const walker = D.createTreeWalker(D.body, 4 /* TEXT_NODE */)
 let n

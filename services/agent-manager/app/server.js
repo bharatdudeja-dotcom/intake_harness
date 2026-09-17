@@ -41,7 +41,8 @@ const ROUTES = [
   // Short aliases, because the old paths carry a package name we have outgrown.
   ['/mcp', () => require('./actions/mcp-server')],
   ['/dashboard-api', () => require('./actions/dashboard-api')],
-  ['/oauth', () => require('./actions/oauth-bridge')]
+  ['/oauth', () => require('./actions/oauth-bridge')],
+  ['/mcp-connect', () => require('./actions/mcp-connect')]
 ]
 
 /**
@@ -93,7 +94,7 @@ const CONFIG_KEYS = [
   'OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET', 'OAUTH_ISSUER_URL',
   'SERVICE_API_KEY', 'API_KEY_OWNERS',
   'DASHBOARD_OAUTH_CLIENT_ID', 'DASHBOARD_PASSCODE', 'DASHBOARD_REQUIRE_IDENTITY',
-  'MCP_RESOURCE_URL', 'MCP_PRM_URL', 'MCP_PACKAGE_NAME', 'MCP_OAUTH_BRIDGE_URL'
+  'MCP_RESOURCE_URL','MCP_CONNECT_REDIRECT_URI', 'MCP_PRM_URL', 'MCP_PACKAGE_NAME', 'MCP_OAUTH_BRIDGE_URL'
 ]
 
 function configParams () {

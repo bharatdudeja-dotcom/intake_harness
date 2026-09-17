@@ -1,7 +1,7 @@
 # Adobe IMS per-user auth — Developer Console setup
 
 This connector authenticates each user with **their own Adobe IMS (Adobe ID) identity**, so
-their cookbook data is private to them (own recipes + anyone's approved/CX-admitted content).
+their cookbook data is private to them (own jobs + anyone's approved/CX-admitted content).
 That requires **User Authentication** OAuth credentials in the Adobe Developer Console.
 
 > **The Server-to-Server credential you exported (`TapMcpConnector-110557-OAuth Server-to-Server.json`)

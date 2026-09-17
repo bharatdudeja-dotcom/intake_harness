@@ -34,8 +34,15 @@ import { createIntakeRequest, toWorkfrontPayload } from "@/lib/agents/intake/wor
  * to make a run go green is precisely the failure this system exists to catch.
  */
 
-/** Past this the doc says the agent has failed. A verdict, not a retry budget. */
-const LOOP_LIMIT = 2;
+/**
+ * Past this, escalate rather than ask again. The requirements doc's own
+ * number here was 2 ("more than two rounds means the agent failed, not the
+ * marketer") — raised to 15 on explicit product direction, trading that
+ * strict verdict for more room per run. If runs are still escalating for
+ * "still missing X" at this limit, check the caller is actually submitting
+ * non-empty answers before treating this number as the problem again.
+ */
+const LOOP_LIMIT = 15;
 
 function readLoopCount(body: AgentRequest<{ loopCount?: number }>): number {
   const n = Number(body.input?.loopCount);
@@ -56,10 +63,14 @@ async function groundQuestions(missingLabels: string[]) {
     return { grounded: false, reason: "nothing missing to ground", hits: null as unknown };
   }
   try {
+    // search_adobe_knowledge takes only { query, topic? } (see chaunceyplum/mcp
+    // mcp_server/lambda_handler.py) — "agent" is hardcoded to "adobe" inside the
+    // tool itself, not a caller param, and there is no top_k on this tool at all.
+    // Passing either produced "<lambda>() got an unexpected keyword argument
+    // 'agent'" on every call, so grounding silently failed on every run.
     const hits = await callMcpTool("intake", "search_adobe_knowledge", {
       query: `Adobe Experience Platform profile attributes and schema fields for ${missingLabels.join(", ")}`,
-      agent: "adobe",
-      top_k: 3,
+      topic: "aep",
     });
     return { grounded: true, reason: null, hits };
   } catch (err) {
@@ -158,9 +169,16 @@ export async function POST(req: NextRequest) {
    * success and wrote nothing.
    */
   const outcome = await createIntakeRequest({ intake: parsed.fields, brief });
+  const stated = parsed.extracted.filter((f) => f.from === "stated").length;
+  const message =
+    `Extracted ${stated} stated and ${parsed.inferred.length} inferred field(s) from the brief. ` +
+    (outcome.created
+      ? `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
+      : `Dry run — did not create the Workfront request: ${outcome.reason}`);
 
   return NextResponse.json<AgentResponse>({
     status: "completed",
+    message,
     output: {
       brief,
       ...summarise(parsed),

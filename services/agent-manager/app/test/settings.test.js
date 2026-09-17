@@ -101,9 +101,9 @@ describe('update_settings (D48)', () => {
         expect(after.retention_days).toBe(7)
 
         // a freshly appended experimental step should now expire ~7 days out, not 30
-        const recipe = parseResult(await callTool('start_recipe', { project: 'Retention Edit', title: 'r' }))
+        const job = parseResult(await callTool('start_job', { project: 'Retention Edit', title: 'r' }))
         const before = Date.now()
-        const step = parseResult(await callTool('append_step', { recipe_id: recipe.id, kind: 'message', content: 'x', source: 'other' }))
+        const step = parseResult(await callTool('append_step', { job_id: job.id, kind: 'message', content: 'x', source: 'other' }))
         const days = (new Date(step.expires_at).getTime() - before) / (24 * 60 * 60 * 1000)
         expect(days).toBeGreaterThan(6.9)
         expect(days).toBeLessThan(7.1)
@@ -144,12 +144,12 @@ describe('update_settings (D48)', () => {
 })
 
 describe('admin_reset_data (D52)', () => {
-    test('requires confirm=true; wipes recipes and projects but keeps settings', async () => {
-        // seed a project + a recipe + a settings override
+    test('requires confirm=true; wipes jobs and projects but keeps settings', async () => {
+        // seed a project + a job + a settings override
         await callTool('update_settings', { retention_days: 21 })
         await callTool('start_project', { name: 'Doomed Project' })
-        const rec = parseResult(await callTool('start_recipe', { project: 'Doomed Project', title: 'to be wiped' }))
-        await callTool('append_step', { recipe_id: rec.id, kind: 'message', content: 'x', source: 'other' })
+        const rec = parseResult(await callTool('start_job', { project: 'Doomed Project', title: 'to be wiped' }))
+        await callTool('append_step', { job_id: rec.id, kind: 'message', content: 'x', source: 'other' })
 
         // guard: confirm must be true
         const guarded = await callTool('admin_reset_data', { confirm: false })
@@ -157,10 +157,10 @@ describe('admin_reset_data (D52)', () => {
 
         const reset = parseResult(await callTool('admin_reset_data', { confirm: true }))
         expect(reset.reset).toBe(true)
-        expect(reset.recipes).toBeGreaterThanOrEqual(1)
+        expect(reset.jobs).toBeGreaterThanOrEqual(1)
 
         // everything gone
-        expect(parseResult(await callTool('list_recipes', {}))).toHaveLength(0)
+        expect(parseResult(await callTool('list_jobs', {}))).toHaveLength(0)
         expect(parseResult(await callTool('list_projects', {}))).toHaveLength(0)
         // config (settings override) preserved
         expect(parseResult(await callTool('get_settings', {})).retention_days).toBe(21)

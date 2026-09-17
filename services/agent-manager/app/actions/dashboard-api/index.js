@@ -27,7 +27,7 @@ governing permissions and limitations under the License.
  *   name alone:
  *     - save_resource is allowed ONLY when arguments.type === 'handoff-prompt'
  *       (D37) - a dashboard visitor can log a task brief but still cannot
- *       author any other recipe kind.
+ *       author any other job kind.
  *     - set_task_status is allowed unconditionally - it only ever flips a
  *       handoff-prompt's open/in_progress/done lifecycle field, never content.
  *     - append_step is allowed ONLY when arguments.kind is 'image' or
@@ -74,9 +74,9 @@ const ALLOWED_TOOLS = new Set([
     'export_as_skill',
     'list_active_tasks',
     'set_task_status',
-    // Increment 12 (D48) - daily-driver dashboard. READS: the ordered Step/Recipe model.
-    'get_recipe',
-    'list_recipes',
+    // Increment 12 (D48) - daily-driver dashboard. READS: the ordered Step/Job model.
+    'get_job',
+    'list_jobs',
     'list_steps',
     // The agent estate: which systems are wired in, what agents each one has,
     // and which MCP servers back them. set_mcp_server is a WRITE, and it is
@@ -87,11 +87,11 @@ const ALLOWED_TOOLS = new Set([
     'list_gateway_tools',
     'list_projects',
     'get_settings',
-    // CONSENT / LIFECYCLE WRITES: per-step approval, discard, and recipe/project bake.
+    // CONSENT / LIFECYCLE WRITES: per-step approval, discard, and job/project bake.
     'approve_step',
     'approve_steps',
     'discard_step',
-    'bake_recipe',
+    'bake_job',
     'bake_project',
     'set_project_status', // Projects panel archive/lifecycle (disclosed superset of the brief, D48)
     // GUARDED SETTINGS WRITE: runs under the shared service key today; per-user RBAC is a
@@ -100,7 +100,7 @@ const ALLOWED_TOOLS = new Set([
     // Increment 14 (D53) - company CX knowledge graph: read + guarded rebuild only.
     'get_cx_graph',
     'rebuild_cx_graph',
-    // Increment 25 (D106) - the Cook-off board. Counts per person, no recipe identity, readable by
+    // Increment 25 (D106) - the Cook-off board. Counts per person, no job identity, readable by
     // everyone on purpose so the standings and the purity colours are the same for every viewer.
     'get_cookoff',
     // Increment 15 (D55) - the admin list tools were proxied for the dashboard's "All owners"
@@ -138,7 +138,7 @@ const ALLOWED_TOOLS = new Set([
     // only ever affects the caller's own account, and it re-verifies their current password.
     'change_my_password',
     // Assignment (D86): the explicit route for sharing unfinished work. Self-guarded server-side
-    // to the recipe's owner, a head chef or an admin.
+    // to the job's owner, a head chef or an admin.
     'assign_step',
     'unassign_step',
     'list_my_assignments',
@@ -368,7 +368,7 @@ function buildInfo (params) {
             userKeyAccepted: true,
             loginSupported: true,
             header: 'x-cookbook-user-id / x-cookbook-password',
-            note: 'Your private work is visible only to you. Approved recipes and the Company CX Graph are shared with everyone.'
+            note: 'Your private work is visible only to you. Approved jobs and the Company CX Graph are shared with everyone.'
         },
         dashboardAuth: config.dashboardClientId
             ? 'per-user OIDC login (PKCE); the signed-in user\'s token is forwarded to the MCP server, so the view is private to them'
@@ -437,6 +437,13 @@ async function proxyRpc (rpc, params, logger, cors, userToken, userKey, login) {
  * @returns {Promise<{statusCode: number, headers: object, body: string}>}
  */
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     const logger = Core.Logger('dashboard-api', { level: params.LOG_LEVEL || 'info' })
     const cors = corsHeadersFor(params)
 
