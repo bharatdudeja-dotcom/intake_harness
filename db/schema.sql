@@ -178,6 +178,54 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS segmentation_labels JSONB NOT NULL
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS kind_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS promote_admins TEXT[];
 
+-- The MCP gateway, ported from Agent Manager's lib/mcp-servers.js /
+-- lib/mcp-oauth.js / lib/mcp-gateway.js: a registry of upstream MCP
+-- servers this harness can call directly and, when `gateway` is on,
+-- re-expose (namespaced by id) through this app's own /api/mcp endpoint.
+--
+-- `auth` is a literal Authorization header value, a "${ENV_VAR}" reference
+-- resolved at call time, or NULL when the server uses OAuth instead — see
+-- src/lib/mcp-servers.ts's resolveSecret(). The oauth_* columns are the
+-- RFC 7591/8707 dance's result (dynamic client registration + PKCE
+-- authorization_code): never returned to the browser, only whether one is
+-- set (src/lib/mcp-servers-types.ts's McpServerSafe).
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id                  TEXT PRIMARY KEY,
+    label               TEXT NOT NULL,
+    practice            TEXT,
+    endpoint            TEXT NOT NULL DEFAULT '',
+    instance            TEXT,
+    auth                TEXT,
+    active              BOOLEAN NOT NULL DEFAULT false,
+    gateway             BOOLEAN NOT NULL DEFAULT false,
+    oauth_client_id     TEXT,
+    oauth_access_token  TEXT,
+    oauth_refresh_token TEXT,
+    oauth_expires_at    TIMESTAMPTZ,
+    oauth_connected_at  TIMESTAMPTZ,
+    oauth_resource      TEXT,
+    oauth_as_metadata   JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One in-flight OAuth authorization_code+PKCE attempt per row, keyed by the
+-- `state` the provider echoes back — single-use (deleted on the callback
+-- that consumes it) and short-lived (TXN_TTL_MS in the oauth start route
+-- prunes anything older on each new attempt), so a replayed callback finds
+-- nothing and the verifier never leaves the server.
+CREATE TABLE IF NOT EXISTS mcp_oauth_transactions (
+    state        TEXT PRIMARY KEY,
+    server_id    TEXT NOT NULL,
+    client_id    TEXT NOT NULL,
+    verifier     TEXT NOT NULL,
+    as_metadata  JSONB NOT NULL,
+    resource     TEXT,
+    redirect_uri TEXT NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

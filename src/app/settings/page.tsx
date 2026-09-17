@@ -4,6 +4,7 @@ import { countPurgeable, getSettings, programmeLabel } from "@/lib/settings";
 import { RetentionSettings } from "./retention-settings";
 import { LabelSettings } from "./label-settings";
 import { PromoteAdminsSettings } from "./promote-admins-settings";
+import { McpServersSettings } from "./mcp-servers-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +23,15 @@ export default async function SettingsPage() {
   ]);
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+    <div className="flex max-w-3xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
       <div>
         <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Settings</h1>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           What this deployment is actually configured with.
         </p>
       </div>
+
+      <McpServersSettings />
 
       <RetentionSettings initialSettings={settings} initialPurgeableCount={purgeableCount} />
 
