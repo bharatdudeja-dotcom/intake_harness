@@ -33,11 +33,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     brief?: string;
     loopCount?: number;
     fields?: Record<string, unknown>;
+    questions?: { key: string; label: string }[];
   };
+  const mergedFields = { ...(pausedOutput.fields ?? {}), ...(body.answers as Record<string, unknown>) };
+
+  // An empty answer merges in as an empty string, which still counts as
+  // missing next round — the round just gets spent for nothing, and enough
+  // of those trip the loop-count escalation for no real reason. Reject it
+  // here rather than relying on every caller's own client-side validation.
+  const stillBlank = (pausedOutput.questions ?? []).filter(
+    (q) => String(mergedFields[q.key] ?? "").trim() === "",
+  );
+  if (stillBlank.length) {
+    return NextResponse.json(
+      { error: `Still blank: ${stillBlank.map((q) => q.label).join(", ")}. Answer every asked question before resuming.` },
+      { status: 400 },
+    );
+  }
+
   const resumedInput = {
     brief: pausedOutput.brief,
     loopCount: pausedOutput.loopCount,
-    fields: { ...(pausedOutput.fields ?? {}), ...(body.answers as Record<string, unknown>) },
+    fields: mergedFields,
   };
 
   const baseUrl = req.nextUrl.origin;

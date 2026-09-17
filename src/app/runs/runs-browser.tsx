@@ -117,6 +117,12 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     return output?.questions ?? [];
   }, [pendingTaskRun]);
 
+  // An empty answer merges in as an empty string, which still counts as
+  // missing on the next round — so this has to gate the button, not just
+  // "some questions exist." Without it, submitting blank fields silently
+  // re-asks the same questions until the loop limit escalates.
+  const readyToSubmitAnswers = pendingQuestions.every((q) => (answers[q.key] ?? "").trim() !== "");
+
   const [advancing, setAdvancing] = useState(false);
 
   async function approveNext() {
@@ -403,7 +409,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                   )}
                   <button
                     onClick={submitAnswers}
-                    disabled={resuming || pendingQuestions.length === 0}
+                    disabled={resuming || pendingQuestions.length === 0 || !readyToSubmitAnswers}
                     className="self-start rounded-full bg-amber-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {resuming ? "Submitting…" : "Submit and resume"}

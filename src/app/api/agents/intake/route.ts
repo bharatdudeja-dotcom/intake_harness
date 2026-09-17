@@ -34,8 +34,15 @@ import { createIntakeRequest, toWorkfrontPayload } from "@/lib/agents/intake/wor
  * to make a run go green is precisely the failure this system exists to catch.
  */
 
-/** Past this the doc says the agent has failed. A verdict, not a retry budget. */
-const LOOP_LIMIT = 2;
+/**
+ * Past this, escalate rather than ask again. The requirements doc's own
+ * number here was 2 ("more than two rounds means the agent failed, not the
+ * marketer") — raised to 15 on explicit product direction, trading that
+ * strict verdict for more room per run. If runs are still escalating for
+ * "still missing X" at this limit, check the caller is actually submitting
+ * non-empty answers before treating this number as the problem again.
+ */
+const LOOP_LIMIT = 15;
 
 function readLoopCount(body: AgentRequest<{ loopCount?: number }>): number {
   const n = Number(body.input?.loopCount);
