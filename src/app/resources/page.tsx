@@ -1,5 +1,9 @@
+import { getSettings } from "@/lib/settings";
 import { ResourcesBrowser } from "./resources-browser";
 
-export default function ResourcesPage() {
-  return <ResourcesBrowser />;
+export const dynamic = "force-dynamic";
+
+export default async function ResourcesPage() {
+  const settings = await getSettings();
+  return <ResourcesBrowser kindLabels={settings.kind_labels} />;
 }

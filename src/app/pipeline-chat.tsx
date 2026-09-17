@@ -31,7 +31,7 @@ type StepOutput = {
  * src/lib/pipeline/orchestrator.ts's per-step gate (runPipeline only ever
  * runs the next agent; POST .../continue is what approves the next one).
  */
-export function PipelineChat() {
+export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?: string }) {
   const [brief, setBrief] = useState("");
   const [workfrontProjectId, setWorkfrontProjectId] = useState("");
   const [programme, setProgramme] = useState("");
@@ -380,7 +380,7 @@ export function PipelineChat() {
               <input
                 type="text"
                 className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                placeholder="Programme (optional — groups this run for the Programmes page)"
+                placeholder={`${programmeLabel} (optional — groups this run for the ${programmeLabel}s page)`}
                 value={programme}
                 onChange={(e) => setProgramme(e.target.value)}
                 disabled={busy}

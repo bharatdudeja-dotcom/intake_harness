@@ -11,7 +11,14 @@ type Filter = "all" | ResourceType;
  * the Runs page (list + detail + admin approve/promote), because these
  * share the exact two-tier curation model runs already use.
  */
-export function ResourcesBrowser({ initialResourceId }: { initialResourceId?: string }) {
+export function ResourcesBrowser({
+  initialResourceId,
+  kindLabels = {},
+}: {
+  initialResourceId?: string;
+  kindLabels?: Record<string, string>;
+}) {
+  const labelFor = (t: ResourceType) => kindLabels[t] || RESOURCE_TYPE_LABELS[t];
   const [filter, setFilter] = useState<Filter>("all");
   const [resources, setResources] = useState<ResourceRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialResourceId ?? null);
@@ -224,7 +231,7 @@ export function ResourcesBrowser({ initialResourceId }: { initialResourceId?: st
             >
               {RESOURCE_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {RESOURCE_TYPE_LABELS[t]}
+                  {labelFor(t)}
                 </option>
               ))}
             </select>
@@ -272,7 +279,7 @@ export function ResourcesBrowser({ initialResourceId }: { initialResourceId?: st
             onClick={() => setFilter(t)}
             className={`rounded-full px-3 py-1 text-xs ${filter === t ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-black" : "border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400"}`}
           >
-            {RESOURCE_TYPE_LABELS[t]}
+            {labelFor(t)}
           </button>
         ))}
       </div>
@@ -293,7 +300,7 @@ export function ResourcesBrowser({ initialResourceId }: { initialResourceId?: st
                 >
                   <span className="font-medium text-black dark:text-zinc-50">{r.title}</span>
                   <div className="flex items-center gap-2 text-zinc-400">
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 dark:bg-zinc-900">{RESOURCE_TYPE_LABELS[r.type]}</span>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 dark:bg-zinc-900">{labelFor(r.type)}</span>
                     {r.promoted && <span title="Promoted to Shared Graph">🔗</span>}
                     {r.approved && !r.promoted && <span title="Approved">✓</span>}
                   </div>
@@ -309,7 +316,7 @@ export function ResourcesBrowser({ initialResourceId }: { initialResourceId?: st
             <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
-                  {RESOURCE_TYPE_LABELS[detail.type]}
+                  {labelFor(detail.type)}
                 </span>
                 <h3 className="font-medium text-black dark:text-zinc-50">{detail.title}</h3>
                 {detail.approved && (

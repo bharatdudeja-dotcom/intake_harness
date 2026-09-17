@@ -12,7 +12,7 @@ import { StatusBadge } from "../status-badge";
  * field on the landing page), upserted idempotently — this page just
  * lists what exists and, on selection, which runs are in it.
  */
-export function ProgrammesBrowser() {
+export function ProgrammesBrowser({ label = "Programme" }: { label?: string }) {
   const [programmes, setProgrammes] = useState<ProgrammeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,9 +96,9 @@ export function ProgrammesBrowser() {
     <div className="flex max-w-4xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Programmes</h1>
+          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">{label}s</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Named groupings for runs — set the &quot;Programme&quot; field when submitting a brief to join one.
+            Named groupings for runs — set the &quot;{label}&quot; field when submitting a brief to join one.
           </p>
         </div>
         <button
@@ -116,7 +116,7 @@ export function ProgrammesBrowser() {
           <input
             type="text"
             className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-            placeholder="Programme name"
+            placeholder={`${label} name`}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -140,7 +140,7 @@ export function ProgrammesBrowser() {
       <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <ol className="flex flex-col gap-1">
           {loading && <p className="text-xs text-zinc-400">Loading…</p>}
-          {!loading && programmes.length === 0 && <p className="text-xs text-zinc-400">No programmes yet.</p>}
+          {!loading && programmes.length === 0 && <p className="text-xs text-zinc-400">No {label.toLowerCase()}s yet.</p>}
           {programmes.map((p) => (
             <li key={p.programme_id}>
               <button
@@ -176,11 +176,11 @@ export function ProgrammesBrowser() {
                     </Link>
                   </li>
                 ))}
-                {selected.runs.length === 0 && <p className="text-xs text-zinc-400">No runs in this programme yet.</p>}
+                {selected.runs.length === 0 && <p className="text-xs text-zinc-400">No runs in this {label.toLowerCase()} yet.</p>}
               </ol>
             </div>
           ) : (
-            <p className="text-sm text-zinc-400">Select a programme to see its runs.</p>
+            <p className="text-sm text-zinc-400">Select a {label.toLowerCase()} to see its runs.</p>
           )}
         </div>
       </div>
