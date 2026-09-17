@@ -130,12 +130,17 @@ export function toWorkfrontPayload(
   brief: string,
   fieldMap?: FieldMap | null,
 ) {
-  const { campaign_name: campaignName, ...rest } = intake;
+  const { campaign_name: campaignName, workfront_project_id: projectIdOverride, ...rest } = intake;
   const fields: Record<string, unknown> = {
     name: String(campaignName || "Campaign intake (unnamed)"),
     description: brief,
     categoryID: INTAKE_FORM_ID,
   };
+  // Routing metadata, not a brief field — pulled out here (same as
+  // campaign_name) so it lands as the native projectID rather than being
+  // sent to Workfront as a bogus DE: custom field. createIntakeRequest
+  // skips resolveIntakeQueue entirely when this is set.
+  if (projectIdOverride) fields.projectID = String(projectIdOverride);
   /*
    * Custom-field names come from the form, via a FieldMap.
    *
@@ -266,12 +271,17 @@ export async function createIntakeRequest(args: {
   const { fields, customFields, dropped } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
 
   /*
-   * An issue belongs to a project. Resolve the queue and attach it, and if the
-   * queue cannot be found, say THAT rather than sending a create that Workfront
-   * will reject for a reason the reader then has to decode.
+   * An issue belongs to a project. `fields.projectID` is already set if the
+   * intake specified `workfront_project_id` (see toWorkfrontPayload) - in
+   * that case this is the marketer's own routing choice and resolution is
+   * skipped entirely, including the MCP lookup. Otherwise resolve the queue
+   * and attach it, and if it cannot be found, say THAT rather than sending
+   * a create that Workfront will reject for a reason the reader then has to
+   * decode.
    */
-  const queue = INTAKE_OBJECT === "OPTASK" ? await resolveIntakeQueue() : { id: null, name: "", reason: null };
-  if (INTAKE_OBJECT === "OPTASK") {
+  const needsQueue = INTAKE_OBJECT === "OPTASK" && !fields.projectID;
+  const queue = needsQueue ? await resolveIntakeQueue() : { id: null, name: "", reason: null };
+  if (needsQueue) {
     if (!queue.id) {
       return {
         created: false,

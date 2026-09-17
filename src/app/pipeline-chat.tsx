@@ -33,6 +33,7 @@ type StepOutput = {
  */
 export function PipelineChat() {
   const [brief, setBrief] = useState("");
+  const [workfrontProjectId, setWorkfrontProjectId] = useState("");
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -63,10 +64,11 @@ export function PipelineChat() {
     setBusyLabel(agentLabel("intake"));
     setError(null);
     try {
+      const fields = workfrontProjectId.trim() ? { workfront_project_id: workfrontProjectId.trim() } : undefined;
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { brief: text } }),
+        body: JSON.stringify({ input: { brief: text, fields } }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -344,23 +346,33 @@ export function PipelineChat() {
 
       <div className="flex flex-col gap-2 border-t border-zinc-200 p-4 dark:border-zinc-800">
         {!run ? (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                className="flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                placeholder="Describe the campaign / audience brief…"
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && startRun()}
+                disabled={busy}
+              />
+              <button
+                onClick={startRun}
+                disabled={busy || !brief.trim()}
+                className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
+              >
+                Send
+              </button>
+            </div>
             <input
               type="text"
-              className="flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-              placeholder="Describe the campaign / audience brief…"
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && startRun()}
+              className="rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+              placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
+              value={workfrontProjectId}
+              onChange={(e) => setWorkfrontProjectId(e.target.value)}
               disabled={busy}
             />
-            <button
-              onClick={startRun}
-              disabled={busy || !brief.trim()}
-              className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
-            >
-              Send
-            </button>
           </div>
         ) : (
           <div className="flex items-center justify-between">

@@ -203,6 +203,20 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     aliases: ["Audience_to_be_Targeted", "audience to be targeted", "target audience"],
     ask: "Who is the audience, in a sentence?",
   },
+  {
+    /*
+     * Routing metadata, not a campaign fact — which Workfront project the
+     * intake issue should land in. Deliberately NOT required and has no
+     * `ask`: a marketer doesn't state a Workfront project GUID in a brief,
+     * so this must never trigger a needs_input round asking for one. Set
+     * explicitly (the intake form's own project-id input) or left absent,
+     * in which case intake/workfront.ts falls back to
+     * WORKFRONT_INTAKE_PROJECT_ID / WORKFRONT_INTAKE_QUEUE as before.
+     */
+    key: "workfront_project_id",
+    label: "Workfront project",
+    aliases: ["project id", "destination project", "workfront project"],
+  },
 ] as const;
 
 /** The fields without which nothing can be built. */
