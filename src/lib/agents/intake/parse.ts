@@ -222,6 +222,31 @@ function findCampaignName(brief: string): ExtractedField | null {
    * name the campaign in a small number of recognisable frames; those are
    * cheaper and far more accurate than guessing at the sentence.
    */
+  /*
+   * FIRST: a label the marketer wrote out, "Campaign name: Detroit NBA Drop".
+   *
+   * This is the strongest signal there is and it was not being read at all, so
+   * the fallback below took the whole first sentence - LABEL INCLUDED - and the
+   * Workfront project was created called
+   * `Campaign name: Detroit NBA Benefit Drop - Retention`, which then had to be
+   * renamed by hand.
+   *
+   * It is also self-inflicted in a particular way worth noting: a marketer does
+   * not usually write "Campaign name:" in prose. An assistant does, after the
+   * parser has rejected two less explicit phrasings - so the label appears
+   * precisely because the extraction was struggling, and then the label itself
+   * became the name. Reading it explicitly fixes both halves.
+   */
+  const labelled = text.match(
+    /\bcampaign\s*(?:name|title)\s*[:\-]\s*"?(.{3,60}?)"?\s*(?:[.;\n]|$)/i,
+  );
+  if (labelled) {
+    const name = labelled[1].trim().replace(/[.,;:\s]+$/, "");
+    if (name) {
+      return { key: "campaign_name", label: "Campaign name", value: name, from: "stated", evidence: labelled[0] };
+    }
+  }
+
   const framed = text.match(
     /\bfor (?:the )?(.{3,60}?)\s+(?:push|campaign|launch|programme|program|initiative|activation)\b/i,
   ) || text.match(/\b(?:campaign|push|programme|program)\s+(?:called|named)\s+"?(.{3,60}?)"?(?:[.,]|$)/i);
@@ -233,7 +258,10 @@ function findCampaignName(brief: string): ExtractedField | null {
     }
   }
 
-  const first = text.split(/[.!?\n]/)[0]?.trim();
+  // A leading "Something:" is a LABEL, not part of the name. Belt and braces
+  // for the case above: any label this catches should have been read there, but
+  // a label that reaches the title is the bug that renames a real project.
+  const first = text.split(/[.!?\n]/)[0]?.trim().replace(/^[A-Za-z][A-Za-z ]{2,24}:\s*/, "");
   if (!first) return null;
 
   const words = first.split(/\s+/);

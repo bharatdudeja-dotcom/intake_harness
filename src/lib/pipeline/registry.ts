@@ -44,6 +44,14 @@ export interface AgentDefinition {
   contextAccess: AgentName[];
 }
 
+/*
+ * GATES ARE NOT IN THIS FILE - see lib/pipeline/gates.ts.
+ *
+ * PIPELINE is the ORDER. What has to be true before a step may run is a
+ * separate question, and the answers are process decisions from the map (1.5
+ * "Approved?", 2.7 "Attributes available?") rather than properties of an agent.
+ * An agent whose gate is shut is not called and writes no task_runs row.
+ */
 export const PIPELINE: AgentDefinition[] = [
   {
     name: "intake",
@@ -65,18 +73,35 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/review",
     label: "Agent 2 — Review / Triage",
     owner: "Dev 2",
-    // Workfront (workfront-core + workfront-comments) plus other stuff, per
-    // the stated split: read/update the work request while triaging a
-    // rejection (B2), and read/post comments — that's where a rejection
-    // reason and the redraft explanation most likely live.
+    /*
+     * Phase 2 plus the 1.5a rework path, so the scope spans both.
+     *
+     *   Workfront  2.1 creates the project and links it to the issue; triage
+     *              reads and updates the request; comments carry the rejection
+     *              reason and the conversion note.
+     *   AEP        2.3 asks whether the audience already exists. It is a READ
+     *              of the catalog and nothing more - adobe_list_segments only.
+     *              Agent 3 keeps the estimate and schema tools; phase 2 has no
+     *              business estimating or creating anything.
+     *
+     * This is the narrowest set that covers 2.1 to 2.7. Note what is NOT here:
+     * adobe_create_segment, adobe_create_segment_estimate, adobe_get_schema.
+     * 2.3 needs to know IF an audience exists, not to build or size one.
+     */
     allowedTools: [
       "search_adobe_knowledge",
       ...allWorkfrontToolNames(),
+      "adobe_list_segments",
     ],
-    // Empty today: this stub doesn't read priorOutputs at all, and its
-    // `input` already IS intake's output. Widen this only when a real
-    // implementation needs to look back further than its immediate input.
-    contextAccess: [],
+    /*
+     * 2.1 needs the ORIGINAL brief and the issue Agent 1 created.
+     *
+     * Its `input` is intake's output and carries both today, so this is belt
+     * and braces rather than a new capability - but phase 2 writing the brief
+     * to the project is the step that makes the brief survive, and it should
+     * not depend on the brief happening to still be in the last hop's payload.
+     */
+    contextAccess: ["intake"],
   },
   {
     name: "audience_creation",
@@ -97,12 +122,26 @@ export const PIPELINE: AgentDefinition[] = [
       // in AEP before opening a GTO/attribute request.
       "adobe_list_schemas",
       "adobe_get_schema",
+      /*
+       * The fields, which are NOT in the schema document.
+       *
+       * A schema is allOf + $refs to field groups and the connector does not
+       * expand them, so adobe_get_schema returns no field definitions and 2.7
+       * was permanently "undetermined". These two return the real fields.
+       */
+      "adobe_list_field_groups",
+      "adobe_get_field_group",
     ],
-    // Empty today: this stub doesn't read priorOutputs, and Review's output
-    // already carries the confirmed intake forward via its `input`. Add
-    // "intake" here specifically if the real implementation needs the
-    // ORIGINAL brief/grounding, separate from whatever Review transformed.
-    contextAccess: [],
+    /*
+     * The original brief, and what phase 2 concluded.
+     *
+     * 3.1's FAC-versus-rule-builder decision and the identity gap at 3.4 both
+     * read the brief's own fields, and by the time Agent 3 runs its `input` is
+     * phase 2's output - which carries the project, not necessarily the brief
+     * as the marketer wrote it. Naming both here is how it sees the request
+     * rather than only the last transformation of it.
+     */
+    contextAccess: ["intake", "review"],
   },
 ];
 

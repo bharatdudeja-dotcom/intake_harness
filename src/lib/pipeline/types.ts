@@ -47,12 +47,37 @@ export interface AgentResponse<TOutput = unknown> {
   metadata?: Record<string, unknown>;
 }
 
-/** One row in `runs` — a single pipeline invocation. */
+/**
+ * One row in `runs` — a single pipeline invocation.
+ *
+ * "awaiting_approval" is NOT "needs_input", and the difference is the whole
+ * point of lib/pipeline/gates.ts:
+ *
+ *   needs_input        the agent ran, and wants something from the marketer.
+ *   awaiting_approval  the agent has NOT run, and will not until a gate opens.
+ *                      There is no task_runs row for it, because nothing
+ *                      happened.
+ *
+ * Collapsing them would put the pipeline back where it started: unable to tell
+ * "Agent 3 looked and could not build" from "Agent 3 was never asked".
+ */
 export interface RunRow {
   run_id: string;
-  status: "running" | "completed" | "failed" | "needs_input";
+  status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
   current_step: number;
   input: unknown;
+  /** What this run is waiting for, when it is waiting. Null otherwise. */
+  blocked_on: {
+    gate_id: string;
+    map_step: string;
+    label: string;
+    step_index: number;
+    agent: AgentName;
+    awaiting: string;
+    needs: "approval" | "upstream";
+    /** The Workfront record to go and look at, when the wait is on a person. */
+    ref?: { objCode: string; objId: string };
+  } | null;
   created_at: string;
   updated_at: string;
 }

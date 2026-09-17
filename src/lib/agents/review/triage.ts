@@ -152,7 +152,20 @@ function triageClause(clause: string, current: Record<string, string>): TriageFi
    * field is absent - which is the only case the original guard was really for.
    */
   if (SOURCE_CUES.test(clause)) {
-    const namesAMissingField = spec && MISSING_CUES.test(clause) && !/(unclear|ambiguous|which|whether|what)/i.test(clause);
+    /*
+     * "Unclear", "which", "whether" - the words that mean a QUESTION, not an
+     * absence.
+     *
+     * The \b here were once written through a code generator that turned them
+     * into literal backspace characters (U+0008), so this regex was
+     * /<BS>(unclear|ambiguous|...)<BS>/ and matched nothing. Which quietly
+     * reinstated the very bug the block below documents as fixed: a rejection
+     * reading "unclear whether this is FAC or profile store" was classified as
+     * a missing field again, losing the most expensive classification in the
+     * map. The fix was written and then neutralised by an escape.
+     */
+    const ASKS_A_QUESTION = /\b(unclear|ambiguous|which|whether|what)\b/i;
+    const namesAMissingField = spec && MISSING_CUES.test(clause) && !ASKS_A_QUESTION.test(clause);
     if (!namesAMissingField) {
       return {
         kind: "wrong_data_source",

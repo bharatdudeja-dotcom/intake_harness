@@ -24,6 +24,7 @@
 import { callMcpTool } from "@/lib/mcp-client";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
+import { writeCustomFields } from "@/lib/agents/shared/workfront-write";
 
 /**
  * What the intake creates in Workfront.
@@ -171,75 +172,22 @@ export function toWorkfrontPayload(
 
   if (fieldMap) {
     const applied = applyFieldMap(values, fieldMap);
-    return { fields, customFields: applied.customFields, dropped: applied.dropped, fieldMap };
+    return {
+      fields,
+      customFields: applied.customFields,
+      dropped: applied.dropped,
+      // Carried so the artifact can say the launch date's year was inferred,
+      // rather than presenting an inferred date as one the marketer gave.
+      coerced: applied.coerced,
+      uncoercible: applied.uncoercible,
+      fieldMap,
+    };
   }
   for (const [k, v] of Object.entries(values)) {
     if (v == null || String(v).trim() === "") continue;
     customFields[k] = v;
   }
-  return { fields, customFields, dropped: [], fieldMap: null };
-}
-
-/**
- * Write custom-form values, keeping whatever the form will accept.
- *
- * WHY NOT ONE UPDATE
- *
- * Workfront rejects the WHOLE update when any single field is not on a form
- * attached to the object, and the error names only the first offender. Against
- * the live tenant that meant: send four fields, get "Requested_Launch_Date is
- * gated" and write nothing; drop it, get "Audience_to_be_Targeted is gated" and
- * write nothing. All four values lost for the sake of two.
- *
- * And the fields are spread across DIFFERENT forms - "CSC Campaign - Project"
- * carries some, another form carries the rest - so there is no single form we
- * could attach that would accept them all.
- *
- * So: try the batch, and when a field is refused, drop THAT field and retry.
- * The tenant tells us its own layout, which is more reliable than modelling it,
- * and every value that can land does. What could not land is returned, named,
- * rather than being silently absent from a record that looks complete.
- */
-async function writeCustomFields(
-  objId: string,
-  values: Record<string, unknown>,
-  intent: string,
-): Promise<{ written: string[]; rejected: Array<{ field: string; reason: string }> }> {
-  const set = workfrontToolset();
-  const remaining = { ...values };
-  const rejected: Array<{ field: string; reason: string }> = [];
-
-  // At most one attempt per field, plus one. A field can only be dropped once,
-  // so this cannot loop.
-  const limit = Object.keys(values).length + 1;
-  for (let attempt = 0; attempt < limit; attempt++) {
-    const keys = Object.keys(remaining);
-    if (!keys.length) break;
-    try {
-      await callMcpTool("intake", set.update, set.customFieldArgs(INTAKE_OBJECT, objId, remaining, intent));
-      return { written: keys, rejected };
-    } catch (err) {
-      const message = (err as Error).message;
-      /*
-       * Find the field Workfront is objecting to. It reports the LABEL without
-       * the DE: prefix, so match on the suffix of our own key.
-       */
-      const named = message.match(/rejected field '([^']+)'/i)?.[1];
-      const key = named
-        ? keys.find((k) => k === named || k === `DE:${named}` || k.endsWith(named))
-        : undefined;
-      if (!key) {
-        // Not a per-field rejection - a real failure. Report it whole.
-        return { written: [], rejected: keys.map((f) => ({ field: f, reason: message })) };
-      }
-      delete remaining[key];
-      rejected.push({
-        field: key,
-        reason: "not on a custom form attached to this object, so Workfront refused it",
-      });
-    }
-  }
-  return { written: Object.keys(values).filter((k) => !rejected.some((r) => r.field === k)), rejected };
+  return { fields, customFields, dropped: [], coerced: [], uncoercible: [], fieldMap: null };
 }
 
 /**
@@ -262,8 +210,8 @@ export async function createIntakeRequest(args: {
    * that flag travels with the outcome - a payload nobody can tell apart from a
    * verified one is how the bug survived.
    */
-  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, INTAKE_OBJECT === "PROJ" ? "project" : "issue");
-  const { fields, customFields, dropped } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
+  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, INTAKE_OBJECT === "PROJ" ? "project" : "issue", "intake");
+  const { fields, customFields, dropped, coerced, uncoercible } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
 
   /*
    * An issue belongs to a project. Resolve the queue and attach it, and if the
@@ -339,7 +287,7 @@ export async function createIntakeRequest(args: {
   let customFieldsRejected: Array<{ field: string; reason: string }> = [];
   if (Object.keys(customFields).length) {
     // customFields is already keyed by DE:<parameter name>.
-    const outcome = await writeCustomFields(objId, customFields, args.brief);
+    const outcome = await writeCustomFields("intake", INTAKE_OBJECT, objId, customFields, args.brief);
     customFieldsWritten = outcome.written;
     customFieldsRejected = outcome.rejected;
     // "Set" means every value landed. Partial is its own state and says so.
