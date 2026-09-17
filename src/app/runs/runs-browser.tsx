@@ -124,6 +124,25 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const readyToSubmitAnswers = pendingQuestions.every((q) => (answers[q.key] ?? "").trim() !== "");
 
   const [advancing, setAdvancing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  async function retryStuck() {
+    if (!selectedRunId) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${selectedRunId}/retry`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Failed to retry run (HTTP ${res.status}).`);
+        return;
+      }
+      await loadDetail(selectedRunId);
+      await refresh();
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function approveNext() {
     if (!selectedRunId) return;
@@ -348,6 +367,22 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       {detail.run.promoted ? "Promoted to Shared Graph" : "Promote to Shared Graph"}
                     </button>
                   </div>
+                </div>
+              )}
+
+              {detail.run.status === "running" && (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+                  <p className="text-zinc-700 dark:text-zinc-300">
+                    Stuck at &quot;running&quot; — a previous attempt likely died before recording a result. Retrying
+                    re-attempts the same step; nothing already recorded is lost.
+                  </p>
+                  <button
+                    onClick={retryStuck}
+                    disabled={retrying}
+                    className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+                  >
+                    {retrying ? "Retrying…" : "Retry"}
+                  </button>
                 </div>
               )}
 

@@ -120,6 +120,24 @@ export function PipelineChat() {
     }
   }
 
+  async function retryStuck() {
+    if (!runDetail) return;
+    setBusy(true);
+    setBusyLabel(agentLabel(PIPELINE[runDetail.run.current_step]?.name ?? "intake"));
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${runDetail.run.run_id}/retry`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await loadDetail(runDetail.run.run_id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setBusyLabel(null);
+    }
+  }
+
   function reset() {
     setBrief("");
     setRunDetail(null);
@@ -257,6 +275,21 @@ export function PipelineChat() {
             </div>
           );
         })}
+
+        {run?.status === "running" && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+            <p className="text-zinc-700 dark:text-zinc-300">
+              That step got stuck — likely a hung request. Retrying re-attempts it; nothing already recorded is lost.
+            </p>
+            <button
+              onClick={retryStuck}
+              disabled={busy}
+              className="shrink-0 rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-black"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* The approval gate — the whole point of this view. Nothing after the
             step above ran without this being clicked. */}

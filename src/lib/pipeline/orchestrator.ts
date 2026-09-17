@@ -55,52 +55,100 @@ async function advanceOneStep(
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();
 
-  await query<TaskRunRow>(
-    `INSERT INTO task_runs
-       (run_id, task_id, step_index, status, input, output, message, metadata,
-        started_at, finished_at, duration_ms)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
-    [
-      run.run_id,
-      agent.name,
-      stepIndex,
-      response.status,
-      JSON.stringify(currentInput),
-      JSON.stringify(response.output ?? null),
-      response.message ?? null,
-      JSON.stringify(response.metadata ?? {}),
-      startedAt.toISOString(),
-      finishedAt.toISOString(),
-      durationMs,
-    ],
-  );
+  // Everything from here on just RECORDS the outcome above; callAgent's own
+  // try/catch already turned an agent failure into an ordinary "failed"
+  // response. If recording itself throws (a dropped DB connection, a query
+  // timeout), the run must still not be left at "running" — that status
+  // accepts neither resumeRun nor continueRun, so a run stuck there has no
+  // way back in short of someone hand-editing the database (see the outer
+  // catch below).
+  try {
+    await query<TaskRunRow>(
+      `INSERT INTO task_runs
+         (run_id, task_id, step_index, status, input, output, message, metadata,
+          started_at, finished_at, duration_ms)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+      [
+        run.run_id,
+        agent.name,
+        stepIndex,
+        response.status,
+        JSON.stringify(currentInput),
+        JSON.stringify(response.output ?? null),
+        response.message ?? null,
+        JSON.stringify(response.metadata ?? {}),
+        startedAt.toISOString(),
+        finishedAt.toISOString(),
+        durationMs,
+      ],
+    );
 
-  if (response.status !== "completed") {
-    if (response.status === "failed") {
-      await runEscalation(run.run_id, baseUrl, {
-        failedTask: agent.name,
-        failedStepIndex: stepIndex,
-        message: response.message ?? null,
-        input: currentInput,
-      }, priorOutputs, stepIndex + 1);
+    if (response.status !== "completed") {
+      if (response.status === "failed") {
+        await runEscalation(run.run_id, baseUrl, {
+          failedTask: agent.name,
+          failedStepIndex: stepIndex,
+          message: response.message ?? null,
+          input: currentInput,
+        }, priorOutputs, stepIndex + 1);
+      }
+
+      const [updated] = await query<RunRow>(
+        `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
+         WHERE run_id = $1 RETURNING *`,
+        [run.run_id, response.status, stepIndex],
+      );
+      return updated;
     }
 
+    const nextStepIndex = stepIndex + 1;
+    const isLastStep = nextStepIndex >= PIPELINE.length;
     const [updated] = await query<RunRow>(
       `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
        WHERE run_id = $1 RETURNING *`,
-      [run.run_id, response.status, stepIndex],
+      [run.run_id, isLastStep ? "completed" : "awaiting_approval", nextStepIndex],
     );
     return updated;
+  } catch (err) {
+    const [failed] = await query<RunRow>(
+      `UPDATE runs SET status = 'failed', current_step = $2, updated_at = NOW()
+       WHERE run_id = $1 RETURNING *`,
+      [run.run_id, stepIndex],
+    );
+    await runEscalation(run.run_id, baseUrl, {
+      failedTask: agent.name,
+      failedStepIndex: stepIndex,
+      message: `Recording this step's result failed: ${(err as Error).message}`,
+      input: currentInput,
+    }, priorOutputs, stepIndex + 1).catch(() => {});
+    return failed;
+  }
+}
+
+/**
+ * Recovers a run stuck at "running" — the state resumeRun/continueRun set
+ * just before calling advanceOneStep, meant to be transitional within a
+ * single request. If that request died before advanceOneStep resolved it
+ * (a hung downstream call outliving even AGENT_CALL_TIMEOUT_MS, a killed
+ * process), the row is left there with no way back in through either of
+ * those functions, since both require a different starting status. This
+ * re-attempts `current_step` from scratch using the same "what's already
+ * completed" reconstruction resumeRun/continueRun use, so retrying costs
+ * nothing but time — it is not a guess at what the dead attempt was doing.
+ */
+export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "running") {
+    throw new Error(`Run ${runId} is "${run.status}", not "running" — nothing to retry.`);
   }
 
-  const nextStepIndex = stepIndex + 1;
-  const isLastStep = nextStepIndex >= PIPELINE.length;
-  const [updated] = await query<RunRow>(
-    `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
-     WHERE run_id = $1 RETURNING *`,
-    [run.run_id, isLastStep ? "completed" : "awaiting_approval", nextStepIndex],
-  );
-  return updated;
+  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const currentInput = lastCompleted ? lastCompleted.output : run.input;
+
+  return advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
 }
 
 /** Starts a run and executes only its first agent (Intake). */
@@ -237,12 +285,37 @@ async function runEscalation(
   );
 }
 
+/**
+ * Past this, give up rather than hang. Without a bound here, an agent
+ * whose own MCP call hangs (an unresponsive Workfront/AEP endpoint, a
+ * dead TCP connection nothing ever times out) leaves this fetch pending
+ * indefinitely — and with it, the run stuck at "running" forever, since
+ * neither resumeRun nor continueRun accept that status to try again. A
+ * bounded timeout turns that into an ordinary caught error instead, which
+ * the caller already converts into a normal "failed" task_run.
+ */
+const AGENT_CALL_TIMEOUT_MS = 60_000;
+
 async function callAgent(baseUrl: string, path: string, body: AgentRequest): Promise<AgentResponse> {
-  const res = await fetch(new URL(path, baseUrl), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AGENT_CALL_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL(path, baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`Agent at ${path} did not respond within ${AGENT_CALL_TIMEOUT_MS / 1000}s.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
