@@ -575,7 +575,7 @@
 
 ### append_step — as alice (HTTP 200)
 ```json
-{"recipe_id":"recipe-1786640219520-migrate-wknd-templates-to-editable-templ","source":"desktop-ai","model":"opus-4.8","tokens_used":1075,"kind":"config","content":"{\"templateType\":\"editable\",\"policy\":\"wknd/policies/hero\"}","format":"json"}
+{"recipe_id":"recipe-1786640219520-migrate-wknd-templates-to-editable-templ","source":"desktop-ai","model":"opus-4.8","tokens_used":1075,"kind":"config","content":"{\"templateType\":\"editable\",\"policy\":\"wknd/policies/oracle\"}","format":"json"}
 ```
 ```
 {
@@ -590,7 +590,7 @@
 
 ### append_step — as alice (HTTP 200)
 ```json
-{"recipe_id":"recipe-1786640219520-migrate-wknd-templates-to-editable-templ","source":"desktop-ai","model":"opus-4.8","tokens_used":1100,"kind":"handoff","content":"Hand to the dev agent: convert the hero component policy.","format":"md"}
+{"recipe_id":"recipe-1786640219520-migrate-wknd-templates-to-editable-templ","source":"desktop-ai","model":"opus-4.8","tokens_used":1100,"kind":"handoff","content":"Hand to the dev agent: convert the oracle component policy.","format":"md"}
 ```
 ```
 {
@@ -950,7 +950,7 @@
 
 ### save_resource — as alice (HTTP 200)
 ```json
-{"type":"handoff-prompt","title":"Convert hero policy","content":"Convert the hero component policy to editable template","project":"ACME AEM Migration","target_agent":"claude-code"}
+{"type":"handoff-prompt","title":"Convert oracle policy","content":"Convert the oracle component policy to editable template","project":"ACME AEM Migration","target_agent":"claude-code"}
 ```
 ```
 {
@@ -968,7 +968,7 @@
 [
   {
     "id": "handoff-prompt-1786640250963-convert-hero-policy",
-    "title": "Convert hero policy",
+    "title": "Convert oracle policy",
     "type": "handoff-prompt",
     "format": "md",
     "project": "ACME AEM Migration",
@@ -1681,7 +1681,7 @@ Recipe 'recipe-1786640259679-braze-content-block-strategy' is not baked, so it i
   "id": "recipe-1786640219520-migrate-wknd-templates-to-editable-templ",
   "title": "Migrate WKND templates to editable templates",
   "type": "architecture-doc",
-  "content": "Updated in place - v2\n\n---\n\nDecision: use editable templates + core components, not static.\n\n---\n\n# Migration plan\n\n1. Audit\n2. Convert\n3. Verify\n\n```mermaid\nflowchart TB\n  A[Audit] --> B[Convert] --> C[Verify]\n```\n\n---\n\ncurl -u $AEM_AUTH \"$AEM/bin/querybuilder.json?type=cq:Template\"\n\n---\n\nflowchart LR\n  Static[Static Template] --> Editable[Editable Template]\n  Editable --> Policy[Content Policy]\n\n---\n\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"40\"><rect width=\"120\" height=\"40\" fill=\"#C96442\"/><text x=\"10\" y=\"25\" fill=\"#fff\">AEM</text></svg>\n\n---\n\n{\"templateType\":\"editable\",\"policy\":\"wknd/policies/hero\"}\n\n---\n\nHand to the dev agen
+  "content": "Updated in place - v2\n\n---\n\nDecision: use editable templates + core components, not static.\n\n---\n\n# Migration plan\n\n1. Audit\n2. Convert\n3. Verify\n\n```mermaid\nflowchart TB\n  A[Audit] --> B[Convert] --> C[Verify]\n```\n\n---\n\ncurl -u $AEM_AUTH \"$AEM/bin/querybuilder.json?type=cq:Template\"\n\n---\n\nflowchart LR\n  Static[Static Template] --> Editable[Editable Template]\n  Editable --> Policy[Content Policy]\n\n---\n\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"40\"><rect width=\"120\" height=\"40\" fill=\"#C96442\"/><text x=\"10\" y=\"25\" fill=\"#fff\">AEM</text></svg>\n\n---\n\n{\"templateType\":\"editable\",\"policy\":\"wknd/policies/oracle\"}\n\n---\n\nHand to the dev agen
 ```
 
 ### get_my_roles — as viewer (HTTP 200)

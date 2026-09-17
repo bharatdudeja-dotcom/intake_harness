@@ -102,11 +102,11 @@ const tryJson = (s) => { try { return JSON.parse(s) } catch { return s } }
 function note (line) { notes.push(line); console.log(`  ${line}`) }
 function phase (title) { console.log(`\n=== ${title} ===`); log.push(`\n## ${title}\n`) }
 
-/** Append a batch of steps to one recipe, returning their ids in order. */
-async function steps (persona, recipeId, list) {
+/** Append a batch of steps to one job, returning their ids in order. */
+async function steps (persona, jobId, list) {
     const ids = []
     for (const s of list) {
-        const r = await as(persona, 'append_step', { recipe_id: recipeId, source: s.source || 'ide-agent', model: s.model || 'opus-5', ...s.args, kind: s.kind, ...(s.signal ? { signal: s.signal } : {}), ...(s.content ? { content: s.content } : {}), ...(s.format ? { format: s.format } : {}), ...(s.language ? { language: s.language } : {}), ...(s.tokens ? { tokens_used: s.tokens } : {}), ...(s.tags ? { tags: s.tags } : {}) })
+        const r = await as(persona, 'append_step', { job_id: jobId, source: s.source || 'ide-agent', model: s.model || 'opus-5', ...s.args, kind: s.kind, ...(s.signal ? { signal: s.signal } : {}), ...(s.content ? { content: s.content } : {}), ...(s.format ? { format: s.format } : {}), ...(s.language ? { language: s.language } : {}), ...(s.tokens ? { tokens_used: s.tokens } : {}), ...(s.tags ? { tags: s.tags } : {}) })
         if (r?.id) ids.push(r.id)
     }
     return ids
@@ -255,8 +255,8 @@ async function main () {
     note(`reuse check first: ${Array.isArray(prior) ? prior.length : 0} prior result(s), greenfield, so build`)
 
     await as('jesse', 'start_project', { name: 'Cacao & Co.: Lifecycle Activation', note: 'Premium single-origin chocolate DTC brand. Braze build + AEM landing pages. Phase 1: cart recovery, loyalty, subscription retention.' })
-    const jCart = await as('jesse', 'start_recipe', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Abandoned-cart Canvas: the Tempering Series (3 messages)' })
-    note(`recipe created, practice inherited: ${jCart.practice}`)
+    const jCart = await as('jesse', 'start_job', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Abandoned-cart Canvas: the Tempering Series (3 messages)' })
+    note(`job created, practice inherited: ${jCart.practice}`)
 
     const jCartSteps = await steps('jesse', jCart.id, [
         {
@@ -347,7 +347,7 @@ re-reads the copy when they retune a Canvas timing.`
     await as('jesse', 'approve_steps', { step_ids: jCartSteps.slice(0, 5), note: 'Reviewed with Saul. Reusable across any perishable-goods DTC cart programme.' })
     await as('jesse', 'discard_step', { step_id: jCartSteps[5] })
     note('approved 5 ingredients, discarded the client-side beacon dead end')
-    const jCartBaked = await as('jesse', 'bake_recipe', { id: jCart.id, note: 'Live in production 12 Aug. Reusable pattern: margin-ranked cart recovery for perishable goods.' })
+    const jCartBaked = await as('jesse', 'bake_job', { id: jCart.id, note: 'Live in production 12 Aug. Reusable pattern: margin-ranked cart recovery for perishable goods.' })
     note(`baked: ${jCartBaked.baked === true}`)
 
     // ── Saul: loyalty promo terms + the AEM landing page ────────────────────
@@ -355,9 +355,9 @@ re-reads the copy when they retune a Canvas timing.`
     const found = await as('saul', 'search_resources', { query: 'abandoned cart canvas margin' })
     note(`Saul searched first and found Jesse's baked work: ${Array.isArray(found) ? found.length : 0} hit(s), reuse, not rebuild`)
     const jesseWork = await as('saul', 'get_resource', { id: jCart.id })
-    note(`Saul read Jesse's recipe end to end (${(jesseWork.steps || []).length} ingredients) before writing terms`)
+    note(`Saul read Jesse's job end to end (${(jesseWork.steps || []).length} ingredients) before writing terms`)
 
-    const sPromo = await as('saul', 'start_recipe', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Golden Ticket loyalty promo: offer terms, eligibility and the AEM landing page', practice: 'braze' })
+    const sPromo = await as('saul', 'start_job', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Golden Ticket loyalty promo: offer terms, eligibility and the AEM landing page', practice: 'braze' })
     const sPromoSteps = await steps('saul', sPromo.id, [
         {
             kind: 'decision', tokens: 1710, tags: ['loyalty', 'promo-mechanics', 'legal'],
@@ -373,7 +373,7 @@ pure prize draw:
 
 **Why not straight BOGO.** BOGO on a 68%-margin single-origin bar hands away the entire margin
 on the brand's most defensible product, and it teaches the customer that the real price is half
-the sticker. Premium brands that discount their hero SKU stop being premium brands. The tiered
+the sticker. Premium brands that discount their oracle SKU stop being premium brands. The tiered
 credit costs less per retained customer and rewards *frequency*, which is what a subscription
 business actually needs.
 
@@ -508,15 +508,15 @@ existence. I'd rather explain that once now than unpick it after launch.`
         }
     ])
     await as('saul', 'approve_steps', { step_ids: sPromoSteps, note: 'Terms drafted, model and claim component reviewed. Reusable for any prize-competition mechanic in the UK.' })
-    await as('saul', 'bake_recipe', { id: sPromo.id, note: 'Pending client legal sign-off on three open items, but the mechanic and the compliance reasoning are reusable now.' })
-    note(`Saul baked the loyalty promo recipe (${sPromoSteps.length} ingredients approved)`)
+    await as('saul', 'bake_job', { id: sPromo.id, note: 'Pending client legal sign-off on three open items, but the mechanic and the compliance reasoning are reusable now.' })
+    note(`Saul baked the loyalty promo job (${sPromoSteps.length} ingredients approved)`)
 
     // Saul hands the Braze build back to Jesse, as a first-class handoff with lineage.
     const handoff = await as('saul', 'save_resource', {
         type: 'handoff-prompt',
         title: 'Handoff to Jesse: build the Golden Ticket Braze side (ticket issuance + claim reminders)',
         project: 'Cacao & Co.: Lifecycle Activation',
-        content: `Jesse, the promo mechanic and terms are baked (see the Golden Ticket recipe). Braze side is yours.
+        content: `Jesse, the promo mechanic and terms are baked (see the Golden Ticket job). Braze side is yours.
 
 WHAT YOU NEED TO BUILD
 1. Ticket issuance is NOT a Braze decision. The storefront decides (1-in-2,000, server-side,
@@ -545,7 +545,7 @@ I'm around Thursday for the client legal call if you want the compliance context
     // ── Jesse takes the handoff, collaboration in the other direction ──────
     phase('Jesse Pinkman, takes Saul\'s handoff, builds the ticket flow')
     await as('jesse', 'set_task_status', { id: handoff.id, status: 'in_progress' })
-    const jTicket = await as('jesse', 'start_recipe', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Golden Ticket: issuance contract + claim-reminder Canvas' })
+    const jTicket = await as('jesse', 'start_job', { project: 'Cacao & Co.: Lifecycle Activation', title: 'Golden Ticket: issuance contract + claim-reminder Canvas' })
     const jTicketSteps = await steps('jesse', jTicket.id, [
         {
             kind: 'steering', signal: 'affirm', tokens: 260, tags: ['handoff', 'saul'],
@@ -623,16 +623,16 @@ Claim it by **{{expiry}}**. After that the ticket returns to the batch.
         }
     ])
     await as('jesse', 'approve_steps', { step_ids: jTicketSteps, note: 'Built on Saul\'s handoff. The issuance-stays-server-side reasoning is the reusable part.' })
-    await as('jesse', 'bake_recipe', { id: jTicket.id, note: 'One open defect logged (refund → void). Pattern reusable for any auditable prize mechanic.' })
-    await as('saul', 'link_recipes', { handoff_id: handoff.id, recipe_ids: [jTicket.id] })
+    await as('jesse', 'bake_job', { id: jTicket.id, note: 'One open defect logged (refund → void). Pattern reusable for any auditable prize mechanic.' })
+    await as('saul', 'link_jobs', { handoff_id: handoff.id, job_ids: [jTicket.id] })
     await as('saul', 'set_task_status', { id: handoff.id, status: 'done' })
     note('Jesse baked the ticket flow; Saul linked the handoff to it and closed the task, full lineage recorded')
 
     // ── Mike: decisioning architecture + pre-sales ──────────────────────────
     phase('Mike Ehrmantraut: decisioning architecture and a client proposal')
     await as('mike', 'start_project', { name: 'Gustavo\'s Fine Foods. Offer Decisioning', note: 'Multi-brand food group. Central decisioning across email, app and in-store POS. Pre-sales through to architecture.' })
-    const mArch = await as('mike', 'start_recipe', { project: 'Gustavo\'s Fine Foods. Offer Decisioning', title: 'Decisioning architecture: eligibility, ranking, capping and the arbitration contract' })
-    note(`Mike's recipe inherited practice: ${mArch.practice}`)
+    const mArch = await as('mike', 'start_job', { project: 'Gustavo\'s Fine Foods. Offer Decisioning', title: 'Decisioning architecture: eligibility, ranking, capping and the arbitration contract' })
+    note(`Mike's job inherited practice: ${mArch.practice}`)
     const mArchSteps = await steps('mike', mArch.id, [
         {
             kind: 'diagram', format: 'mermaid', tokens: 1240, tags: ['decisioning', 'architecture'],
@@ -767,10 +767,10 @@ four.`
         }
     ])
     await as('mike', 'approve_steps', { step_ids: mArchSteps, note: 'Architecture reviewed with the client trading team. The eligibility/ranking separation is the reusable core.' })
-    await as('mike', 'bake_recipe', { id: mArch.id, note: 'Reference architecture for any multi-channel offer decisioning engagement.' })
+    await as('mike', 'bake_job', { id: mArch.id, note: 'Reference architecture for any multi-channel offer decisioning engagement.' })
     note('Mike baked the decisioning reference architecture')
 
-    const mProposal = await as('mike', 'start_recipe', { project: 'Gustavo\'s Fine Foods. Offer Decisioning', title: 'Pre-sales: personalisation roadmap proposal and commercial model' })
+    const mProposal = await as('mike', 'start_job', { project: 'Gustavo\'s Fine Foods. Offer Decisioning', title: 'Pre-sales: personalisation roadmap proposal and commercial model' })
     const mPropSteps = await steps('mike', mProposal.id, [
         {
             kind: 'doc', format: 'md', tokens: 2680, tags: ['pre-sales', 'proposal', 'commercial'],
@@ -868,14 +868,14 @@ all; the order did, and the order is what determines whether it gets read.`
         }
     ])
     await as('mike', 'approve_steps', { step_ids: mPropSteps, note: 'Proposal sent 11 Aug. Phasing structure and the stop-point argument are reusable across pre-sales.' })
-    await as('mike', 'bake_recipe', { id: mProposal.id, note: 'Reusable pre-sales pattern: phase with stop points, exclude what you cannot size.' })
-    note('Mike baked the pre-sales proposal recipe')
+    await as('mike', 'bake_job', { id: mProposal.id, note: 'Reusable pre-sales pattern: phase with stop points, exclude what you cannot size.' })
+    note('Mike baked the pre-sales proposal job')
 
     // ── Hank: security awareness programme ──────────────────────────────────
     phase('Hank Schrader: phishing-simulation programme and security analytics')
     await as('hank', 'start_project', { name: 'Internal: Security Awareness Programme', note: 'Authorised internal phishing simulation and security analytics reporting. Approved by the exec team; scope is our own employees only.' })
-    const hSim = await as('hank', 'start_recipe', { project: 'Internal: Security Awareness Programme', title: 'Phishing simulation template library: design, ethics guardrails and difficulty tiers' })
-    note(`Hank's recipe inherited practice: ${hSim.practice}`)
+    const hSim = await as('hank', 'start_job', { project: 'Internal: Security Awareness Programme', title: 'Phishing simulation template library: design, ethics guardrails and difficulty tiers' })
+    note(`Hank's job inherited practice: ${hSim.practice}`)
     const hSimSteps = await steps('hank', hSim.id, [
         {
             kind: 'doc', format: 'md', tokens: 2410, tags: ['security', 'awareness', 'governance'],
@@ -1044,10 +1044,10 @@ document-share notification referencing a real internal process. Accepted.`
         }
     ])
     await as('hank', 'approve_steps', { step_ids: hSimSteps, note: 'Programme design, guardrails and analytics schema. The guardrails are the reusable part - any client running awareness training needs them.' })
-    await as('hank', 'bake_recipe', { id: hSim.id, note: 'Reusable: authorised simulation programme design with ethics guardrails and privacy-preserving analytics.' })
+    await as('hank', 'bake_job', { id: hSim.id, note: 'Reusable: authorised simulation programme design with ethics guardrails and privacy-preserving analytics.' })
     note('Hank baked the simulation programme design')
 
-    const hGov = await as('hank', 'start_recipe', { project: 'Internal: Security Awareness Programme', title: 'Governance review: what marketing data may and may not enter the martech stack' })
+    const hGov = await as('hank', 'start_job', { project: 'Internal: Security Awareness Programme', title: 'Governance review: what marketing data may and may not enter the martech stack' })
     const hGovSteps = await steps('hank', hGov.id, [
         {
             kind: 'decision', tokens: 1980, tags: ['governance', 'data-protection', 'cross-practice'],
@@ -1129,14 +1129,14 @@ I want from every governance conversation.`
         }
     ])
     await as('hank', 'approve_steps', { step_ids: hGovSteps, note: 'Governance ruling + Q3 report. The ruling constrains every practice, so it belongs in the company cookbook.' })
-    await as('hank', 'bake_recipe', { id: hGov.id, note: 'Cross-practice: the special-category-data ruling applies to every martech engagement we run.' })
+    await as('hank', 'bake_job', { id: hGov.id, note: 'Cross-practice: the special-category-data ruling applies to every martech engagement we run.' })
     note('Hank baked the governance ruling (cross-practice) and the Q3 analytics report')
 
     // ── Walter: AEM work, then head-chef curation ───────────────────────────
     phase('Walter White: AEM architecture, then curating as Head Chef')
     await as('walter', 'start_project', { name: 'Cacao & Co.: AEM Experience Platform', note: 'AEM as a Cloud Service. Editable templates, component library, headless delivery for the app.' })
-    const wAem = await as('walter', 'start_recipe', { project: 'Cacao & Co.: AEM Experience Platform', title: 'Editable templates and component architecture for the chocolate storefront' })
-    note(`Walter's recipe inherited practice: ${wAem.practice}`)
+    const wAem = await as('walter', 'start_job', { project: 'Cacao & Co.: AEM Experience Platform', title: 'Editable templates and component architecture for the chocolate storefront' })
+    note(`Walter's job inherited practice: ${wAem.practice}`)
     const wAemSteps = await steps('walter', wAem.id, [
         {
             kind: 'decision', tokens: 2140, tags: ['aem', 'architecture', 'templates'],
@@ -1195,7 +1195,7 @@ copy maintained separately for web and app, diverges within one campaign cycle. 
         T3["editorial-article"]
     end
     subgraph POL["Policies gate what authors may place"]
-        P1["hero: image | video | split<br/>(NOT carousel - never converts)"]
+        P1["oracle: image | video | split<br/>(NOT carousel - never converts)"]
         P2["body: text, cf-ref, tasting-notes,<br/>origin-map, product-grid"]
         P3["cta: single primary per page<br/>(enforced, not advised)"]
     end
@@ -1330,13 +1330,13 @@ engineer around. They cannot engineer around headcount.`
         }
     ])
     await as('walter', 'approve_steps', { step_ids: wAemSteps, note: 'Reviewed with the client CTO. Template-count and hybrid-delivery reasoning are reusable on every AEM engagement.' })
-    await as('walter', 'bake_recipe', { id: wAem.id, note: 'Reference architecture: three templates + hybrid delivery. Reusable.' })
+    await as('walter', 'bake_job', { id: wAem.id, note: 'Reference architecture: three templates + hybrid delivery. Reusable.' })
     note('Walter baked the AEM reference architecture')
 
     // ── Head Chef curation ──────────────────────────────────────────────────
     phase('Head Chef curation: what becomes company doctrine')
     const pending = await as('walter', 'list_cx_pending')
-    note(`CX queue: ${Array.isArray(pending) ? pending.length : 0} baked recipe(s) awaiting a head chef`)
+    note(`CX queue: ${Array.isArray(pending) ? pending.length : 0} baked job(s) awaiting a head chef`)
 
     const admit = [
         [jCart.id, 'Margin-ranked cart recovery for perishable goods, with the absolute-deadline rule. Reusable on any DTC lifecycle engagement.'],
@@ -1346,11 +1346,11 @@ engineer around. They cannot engineer around headcount.`
         [hGov.id, 'The special-category-data ruling constrains every practice. Everyone needs to know this before they design a schema.'],
         [wAem.id, 'Three templates over eleven, and hybrid over headless-everything, with the authoring-cost argument. Reusable on every AEM build.']
     ]
-    for (const [id, note_] of admit) await as('walter', 'headchef_approve', { recipe_id: id })
-    note(`Walter admitted ${admit.length} recipes to the Company CX Graph`)
+    for (const [id, note_] of admit) await as('walter', 'headchef_approve', { job_id: id })
+    note(`Walter admitted ${admit.length} jobs to the Company CX Graph`)
 
     // Held back deliberately - and the reason is the useful part.
-    await as('mike', 'headchef_reject', { recipe_id: mProposal.id, note: 'Held back from the CX graph, not because it is weak, but because it contains a named client\'s commercial terms and day rates. The reusable pattern (phase with stop points, exclude what you cannot size) should be re-captured as a client-neutral playbook and admitted then.' })
+    await as('mike', 'headchef_reject', { job_id: mProposal.id, note: 'Held back from the CX graph, not because it is weak, but because it contains a named client\'s commercial terms and day rates. The reusable pattern (phase with stop points, exclude what you cannot size) should be re-captured as a client-neutral playbook and admitted then.' })
     note('Mike (2nd head chef) held back the proposal: named client commercial terms don\'t belong in shared doctrine')
 
     await as('walter', 'rebuild_cx_graph', {})
@@ -1431,26 +1431,26 @@ them, because consent is what separates this from the thing we're defending agai
 }`]
     ]
     for (const [persona, project, title, kind, content] of inflight) {
-        const r = await as(persona, 'start_recipe', { project, title })
-        await as(persona, 'append_step', { recipe_id: r.id, kind, content, source: 'ide-agent', model: 'opus-5', tokens_used: 640 })
+        const r = await as(persona, 'start_job', { project, title })
+        await as(persona, 'append_step', { job_id: r.id, kind, content, source: 'ide-agent', model: 'opus-5', tokens_used: 640 })
     }
-    note(`${inflight.length} private work-in-progress recipes left un-baked, one per consultant`)
+    note(`${inflight.length} private work-in-progress jobs left un-baked, one per consultant`)
 
     // ── Verify the dataset behaves like a real multi-tenant cookbook ────────
     phase('Verification: does the dogfooded dataset behave correctly?')
-    const jPrivate = await as('jesse', 'list_recipes', {})
-    const sSees = await as('saul', 'list_recipes', {})
+    const jPrivate = await as('jesse', 'list_jobs', {})
+    const sSees = await as('saul', 'list_jobs', {})
     const jTitles = new Set(jPrivate.map(r => r.title))
     const saulSeesJesseWip = sSees.some(r => r.title.includes('churn-save flow (WIP)'))
     note(`ISOLATION: Jesse sees his own WIP (${jTitles.has('Bar of the Month, churn-save flow (WIP)')}); Saul sees it: ${saulSeesJesseWip} (must be false)`)
     if (saulSeesJesseWip) failures++
-    const jesseView = await as('jesse', 'list_recipes', {})
-    const hankView = await as('hank', 'list_recipes', {})
-    note(`Jesse sees ${jesseView.length} recipe(s); Hank sees ${hankView.length}, own work plus everyone's shared work`)
+    const jesseView = await as('jesse', 'list_jobs', {})
+    const hankView = await as('hank', 'list_jobs', {})
+    note(`Jesse sees ${jesseView.length} job(s); Hank sees ${hankView.length}, own work plus everyone's shared work`)
 
-    const brazeOnly = await as('saul', 'list_recipes', { practice: 'braze' })
-    const secOnly = await as('walter', 'list_recipes', { practice: 'security' })
-    const aemOnly = await as('jesse', 'list_recipes', { practice: 'aem' })
+    const brazeOnly = await as('saul', 'list_jobs', { practice: 'braze' })
+    const secOnly = await as('walter', 'list_jobs', { practice: 'security' })
+    const aemOnly = await as('jesse', 'list_jobs', { practice: 'aem' })
     note(`practice filters: braze=${brazeOnly.length}, security=${secOnly.length}, aem=${aemOnly.length}, knowledge stays in its discipline`)
 
     const saulFinds = await as('saul', 'search_resources', { query: 'decisioning eligibility ranking' })
@@ -1458,11 +1458,11 @@ them, because consent is what separates this from the thing we're defending agai
 
     const viewerGraph = await as('viewer', 'get_cx_graph', {})
     note(`read-only viewer can read the shared graph: ${viewerGraph.nodes?.length ?? 0} nodes`)
-    await as('viewer', 'start_recipe', { project: 'x', title: 'y' }, { expectError: true })
+    await as('viewer', 'start_job', { project: 'x', title: 'y' }, { expectError: true })
     note('read-only viewer still cannot write')
 
-    const skill = await as('jesse', 'export_as_skill', { recipe_id: jCart.id })
-    note(`export_as_skill works on a baked recipe: ${typeof skill === 'string' ? skill.length : JSON.stringify(skill).length} chars of replayable playbook`)
+    const skill = await as('jesse', 'export_as_skill', { job_id: jCart.id })
+    note(`export_as_skill works on a baked job: ${typeof skill === 'string' ? skill.length : JSON.stringify(skill).length} chars of replayable playbook`)
 }
 
 main().then(() => {

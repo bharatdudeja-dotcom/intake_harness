@@ -139,10 +139,10 @@ describe('save_resource policy enforcement', () => {
 
 describe('approve_resource / certify', () => {
     // D79: re-approving is IDEMPOTENT, not an error. Approving any step already promotes the
-    // recipe, so a caller following the documented capture -> approve -> certify order used to
-    // hit a hard failure for requesting a state the recipe was already in. The asked-for state
+    // job, so a caller following the documented capture -> approve -> certify order used to
+    // hit a hard failure for requesting a state the job was already in. The asked-for state
     // holds either way; the response just has to say nothing changed.
-    test('approving an already-approved recipe succeeds and reports that nothing changed', async () => {
+    test('approving an already-approved job succeeds and reports that nothing changed', async () => {
         const saveBody = await callTool('save_resource', { type: 'decision', title: 't', content: 'c', project: 'P' })
         const { id } = JSON.parse(saveBody.result.content[0].text)
 
@@ -181,7 +181,7 @@ describe('MCP Resources re-exposure', () => {
         expect(body.result.resources).toEqual([])
     })
 
-    test('resources/list includes an approved recipe but not an experimental one', async () => {
+    test('resources/list includes an approved job but not an experimental one', async () => {
         const approvedSave = await callTool('save_resource', { type: 'decision', title: 'Approved one', content: 'x', project: 'P' })
         const { id: approvedId } = JSON.parse(approvedSave.result.content[0].text)
         await callTool('approve_resource', { id: approvedId }) // certify -> enters cookbook
@@ -197,7 +197,7 @@ describe('MCP Resources re-exposure', () => {
         expect(uris).not.toContain(`resource://company/architecture-diagram/${expId}`)
     })
 
-    test('resources/read returns the content and mimeType of an approved recipe', async () => {
+    test('resources/read returns the content and mimeType of an approved job', async () => {
         const saveBody = await callTool('save_resource', { type: 'decision', title: 'Readable', content: 'the content', project: 'P' })
         const { id } = JSON.parse(saveBody.result.content[0].text)
         await callTool('approve_resource', { id })
@@ -207,7 +207,7 @@ describe('MCP Resources re-exposure', () => {
         expect(body.result.contents[0].mimeType).toBe('text/markdown')
     })
 
-    test('resources/read errors for an experimental (unapproved) recipe', async () => {
+    test('resources/read errors for an experimental (unapproved) job', async () => {
         const saveBody = await callTool('save_resource', {
             type: 'architecture-diagram', title: 'Gated', content: 'graph TD;', format: 'mermaid', project: 'P'
         })
@@ -234,7 +234,7 @@ describe('MCP Prompts', () => {
     test('prompts/list shows all four control-plane prompts', async () => {
         const { body } = await rpc('prompts/list')
         const names = body.result.prompts.map(p => p.name)
-        expect(names).toEqual(expect.arrayContaining(['capture-architecture', 'document-decision', 'commit-session', 'use-recipe']))
+        expect(names).toEqual(expect.arrayContaining(['capture-architecture', 'document-decision', 'commit-session', 'use-job']))
         expect(names).toHaveLength(4)
     })
 

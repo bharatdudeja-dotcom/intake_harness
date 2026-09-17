@@ -8,8 +8,8 @@
   The Company Cookbook - daily-driver control-plane dashboard (Increment 12, D44-D48).
   NOT an inference surface (D12/D26): no chat, no model calls. It observes, curates, and
   operates the connector via the dashboard-api proxy action, which holds SERVICE_API_KEY
-  server-side. This page never sees the key. The ordered Step/Recipe model (D45/D47) is the
-  spine: a Recipe is an ordered log of Steps; the Work Log is that log; the Cookbook is its
+  server-side. This page never sees the key. The ordered Step/Job model (D45/D47) is the
+  spine: a Job is an ordered log of Steps; the Work Log is that log; the Cookbook is its
   approved steps in order.
 -->
 <!-- Swap assets/brand-mark.svg for the licensed Comcast file and the tab,
@@ -52,15 +52,15 @@
   --pk-purple: #6460AA; --pk-blue: #0089D0;   --pk-green: #0DB14B;
   --cb-ink: #161616;
 
-  /* The Hero Agent is not one more agent in the row, so it does not take a
+  /* The Oracle is not one more agent in the row, so it does not take a
      feather. It takes the mix - which is what the whole mark is. */
-  --hero: #96358C;
-  --hero-soft: #F5E9F4;
+  --oracle: #96358C;
+  --oracle-soft: #F5E9F4;
 }
 @supports (color: color-mix(in oklab, red, blue)) {
   :root {
-    --hero: color-mix(in oklab, var(--pk-purple) 52%, var(--pk-red));
-    --hero-soft: color-mix(in oklab, var(--hero) 11%, var(--surface));
+    --oracle: color-mix(in oklab, var(--pk-purple) 52%, var(--pk-red));
+    --oracle-soft: color-mix(in oklab, var(--oracle) 11%, var(--surface));
   }
 }
 [data-theme="dark"] {
@@ -80,7 +80,7 @@
   --pk-yellow: #FFC53D; --pk-orange: #FF8A4C; --pk-red: #F04C82;
   --pk-purple: #8F8BD1; --pk-blue: #46AEE8;   --pk-green: #3DCB72;
   --cb-ink: #EDEAE3;
-  --hero: #C77BC0; --hero-soft: #3A2438;
+  --oracle: #C77BC0; --oracle-soft: #3A2438;
 }
 /* PERIODIC: a lab-green scheme for a cookbook kept by chemists. Same measured discipline as the
    other two themes; scripts/contrast-check.mjs holds all three to WCAG AA. */
@@ -311,11 +311,11 @@ h3.head { font-size: 15px; margin-bottom: 4px; }
 /* Work Log split */
 .worklog { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
 @media (max-width: 900px) { .worklog { grid-template-columns: 1fr; } }
-.recipe-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 180px); overflow-y: auto; padding-right: 4px; }
-.recipe-item { text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 12px; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
-.recipe-item:hover { border-color: var(--border-strong); }
-.recipe-item[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
-.recipe-item b { font-size: 13px; font-weight: 600; }
+.job-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 180px); overflow-y: auto; padding-right: 4px; }
+.job-item { text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 12px; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+.job-item:hover { border-color: var(--border-strong); }
+.job-item[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.job-item b { font-size: 13px; font-weight: 600; }
 .expiry { font-size: 11px; color: var(--exp); display: inline-flex; align-items: center; gap: 4px; }
 .expiry.soon { color: var(--danger); font-weight: 600; }
 
@@ -479,21 +479,21 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 .agent-tile .who .owner{opacity:.7}
 .agent-tile.current{border-color:var(--tint,var(--border-strong));box-shadow:0 0 0 2px color-mix(in oklab,var(--tint,var(--accent)) 22%,transparent)}
 
-/* The Hero Agent gets its own card above the systems, not a tile inside one,
+/* The Oracle gets its own card above the systems, not a tile inside one,
    because it belongs to no system - it reads across all of them. */
-.hero-card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--r);
-  background:linear-gradient(135deg,var(--hero-soft),var(--surface) 62%);
-  border-left:3px solid var(--hero);margin-bottom:14px}
-.hero-card .hero-top{display:flex;align-items:center;gap:13px}
-.hero-card .hero-top b{font-size:15px}
-.hero-card .hero-role{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--hero);font-weight:650}
+.oracle-card{padding:16px 18px;border:1px solid var(--border);border-radius:var(--r);
+  background:linear-gradient(135deg,var(--oracle-soft),var(--surface) 62%);
+  border-left:3px solid var(--oracle);margin-bottom:14px}
+.oracle-card .oracle-top{display:flex;align-items:center;gap:13px}
+.oracle-card .oracle-top b{font-size:15px}
+.oracle-card .oracle-role{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--oracle);font-weight:650}
 #graph-sub{display:flex;align-items:flex-start;gap:9px}
 #graph-sub .agent-face{flex:0 0 auto;margin-top:-3px}
-.hero-queue{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
-.hero-queue h4{font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--hero);
+.oracle-queue{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.oracle-queue h4{font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--oracle);
   display:flex;align-items:center;gap:6px;margin:0 0 6px}
-.hero-face .am-scan{animation:am-scan 3.8s ease-in-out infinite}
+.oracle-face .am-scan{animation:am-scan 3.8s ease-in-out infinite}
 @keyframes am-scan{0%,100%{transform:translateX(0)}50%{transform:translateX(17px)}}
 
 /* Live progress. One segment per agent in the journey, because the journey
@@ -530,7 +530,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 .jrn-cap .live{color:var(--accent-text);font-weight:600}
 @media (prefers-reduced-motion:reduce){
   .jrn-seg.now::after{animation:none;opacity:.55}
-  .hero-face .am-scan{animation:none}
+  .oracle-face .am-scan{animation:none}
 }
 </style>
 </head>
@@ -549,7 +549,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <div class="group">Knowledge</div>
     <button data-panel="cookbook"><i data-lucide="book-marked"></i> Playbooks <span class="key">5</span></button>
     <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span><span id="headchef-badge"></span></button>
-    <button data-panel="graph"><i data-lucide="git-fork"></i> Hero Agent Graph <span class="key">7</span></button>
+    <button data-panel="graph"><i data-lucide="git-fork"></i> Oracle Graph <span class="key">7</span></button>
     <button data-panel="cx"><i data-lucide="network"></i> Shared Graph <span class="key">8</span></button>
     <div class="group">Admin</div>
     <button data-panel="settings"><i data-lucide="sliders-horizontal"></i> Settings <span class="key">9</span></button>
@@ -560,7 +560,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <div style="margin-top:6px">No-secret proxy · key stays server-side</div>
   </div>
   <div class="whoami">
-    <span id="role-chip" class="chip" title="Everyone is a Marketer. The Hero Agent proposes what should be learned; a named human always decides. An Admin manages roles and settings."><i data-lucide="user"></i> <b>Not signed in</b></span>
+    <span id="role-chip" class="chip" title="Everyone is a Marketer. The Oracle proposes what should be learned; a named human always decides. An Admin manages roles and settings."><i data-lucide="user"></i> <b>Not signed in</b></span>
     <button class="btn" id="signout-btn" style="display:none" title="Sign out so someone else can sign in"><i data-lucide="log-out"></i> <span id="signout-label">Sign out</span></button>
   </div>
 </aside>
@@ -590,14 +590,14 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
           <select id="worklog-stage" class="switcher" aria-label="Filter by stage">
             <option value="">Any stage</option>
             <option value="draft">Experimental</option>
-            <option value="ready">Ready for the Hero Agent</option>
-            <option value="awaiting">With the Hero Agent</option>
+            <option value="ready">Ready for the Oracle</option>
+            <option value="awaiting">With the Oracle</option>
             <option value="incx">In the Shared Knowledge Graph</option>
           </select>
           <span class="sub" id="worklog-count"></span>
         </div>
         
-        <div class="recipe-list" id="worklog-list"></div>
+        <div class="job-list" id="worklog-list"></div>
       </div>
       <div id="worklog-detail"><div class="empty"><i data-lucide="list-ordered"></i><p>Select a run to open its Work Log.</p></div></div>
     </div>
@@ -697,7 +697,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
 
 <div id="palette">
   <div class="palette-box">
-    <input id="palette-input" placeholder="Jump to a panel or a recipe…" aria-label="Command palette">
+    <input id="palette-input" placeholder="Jump to a panel or a job…" aria-label="Command palette">
     <div class="palette-list" id="palette-list"></div>
   </div>
 </div>
@@ -735,7 +735,7 @@ const AGENT_MARK = {
   audience_creation: '\u{1F3AF}',    // target - who the campaign is aimed at
   'audience-creation': '\u{1F3AF}',
   escalation: '\u{1F6A8}',           // siren - something went wrong
-  hero: '\u{1F9B8}',                // the Hero Agent - carries what earlier
+  oracle: '\u{1F9B8}',                // the Oracle - carries what earlier
                                      // runs learned, and hands it over
   human: '\u{1F464}'                 // a person, wherever one decided
 }
@@ -778,7 +778,7 @@ const FACE_HUES = ['--pk-orange', '--pk-red', '--pk-purple', '--pk-blue', '--pk-
  * and its own eye treatment, so it is still identifiable in greyscale or at
  * 16px where the hue has gone.
  *
- * The Hero Agent is the same robot too, and that is deliberate - it belongs to
+ * The Oracle is the same robot too, and that is deliberate - it belongs to
  * this cast. It gets exactly two things none of the others do: the crest, and a
  * visor carrying all six feathers instead of one. Those two differences are the
  * whole of its glorification, which is why nothing else is allowed to have
@@ -806,7 +806,7 @@ const BOT_EYES = [
          `<rect x="24.2" y="23.4" width="6.2" height="1.8" rx=".9" fill="${g}"/><rect x="24.2" y="26.2" width="6.2" height="1.8" rx=".9" fill="${g}" opacity=".55"/>`
 ]
 
-/** Mouths, kept quiet. The hero has the only expressive one. */
+/** Mouths, kept quiet. The oracle has the only expressive one. */
 const BOT_MOUTHS = [
   (c) => `<path d="M17.5 34h9" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`,
   (c) => `<rect x="17.5" y="33" width="9" height="2.4" rx="1.2" fill="${c}" opacity=".75"/>`,
@@ -822,7 +822,7 @@ const BOT_MOUTHS = [
  * @param {number} size px
  */
 function agentFace (id, awake = false, size = 44) {
-  if (String(id || '').toLowerCase() === 'hero') return heroFace(awake, size)
+  if (String(id || '').toLowerCase() === 'oracle') return oracleFace(awake, size)
 
   const h = agentHash(id)
   // Unsigned shifts, and a guarded pick: a signed shift on a hash above 2^31
@@ -837,7 +837,7 @@ function agentFace (id, awake = false, size = 44) {
   const shell = awake ? hue : 'var(--border-strong)'
   const fill = awake ? 'var(--surface)' : 'var(--surface-2)'
   // Mono, flat: one feather per agent, and the visor is the only place it lands
-  // at full strength. A gradient here would start to look like the hero.
+  // at full strength. A gradient here would start to look like the oracle.
   const visorFill = awake ? hue : 'var(--surface-3)'
   const glow = awake ? 'var(--surface)' : 'var(--muted)'
 
@@ -854,27 +854,27 @@ function agentFace (id, awake = false, size = 44) {
 }
 
 /**
- * The Hero Agent.
+ * The Oracle.
  *
  * The same robot as the rest of the cast, with exactly two things none of them
  * have: a crest, and a visor carrying all six feathers rather than one. It
  * reads across every agent's runs, so it wears all of their colours.
  *
  * Dormant it keeps the visor dark and the crest unlit, so "nothing to read yet"
- * looks like waiting rather than like the hero is missing.
+ * looks like waiting rather than like the oracle is missing.
  *
  * @param {boolean} awake has it anything to read across
  * @param {number} size px
  */
-function heroFace (awake = false, size = 44) {
-  const hue = 'var(--hero)'
+function oracleFace (awake = false, size = 44) {
+  const hue = 'var(--oracle)'
   const ink = awake ? hue : 'var(--muted)'
   const shell = awake ? hue : 'var(--border-strong)'
   const fill = awake ? 'var(--surface)' : 'var(--surface-2)'
-  const gid = 'heroVisor' + (awake ? 'On' : 'Off')
+  const gid = 'oracleVisor' + (awake ? 'On' : 'Off')
 
-  return `<svg class="agent-face hero-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
-      viewBox="0 0 44 44" role="img" aria-label="The Hero Agent">
+  return `<svg class="agent-face oracle-face${awake ? ' is-awake' : ''}" width="${size}" height="${size}"
+      viewBox="0 0 44 44" role="img" aria-label="The Oracle">
     <defs>
       <linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0"    stop-color="var(--pk-orange)"/>
@@ -1058,7 +1058,7 @@ async function ensureUserIdentity (info) {
       adoptCredential(cred, me)
       hideUserKeyGate()
       // Name who signed in - at a demo the audience needs to see the identity change.
-      setTimeout(() => toast(`Signed in as ${displayName(me.owner)}${(me.roles || []).includes('head-chef') ? ' - Hero Agent' : ''}`), 400)
+      setTimeout(() => toast(`Signed in as ${displayName(me.owner)}${(me.roles || []).includes('head-chef') ? ' - Oracle' : ''}`), 400)
       resolve()
     })
   })
@@ -1078,7 +1078,7 @@ function switchUser () { sessionStorage.removeItem(UKEY_KEY); auth.cred = null; 
  * Prefer the name they were given when their login was created. Guessing from the email address
  * only looks right until it does not: "dirk-test@..." became "Dirk Test", which is a job title
  * from an account suffix rather than anybody's name, and the guess then followed him across every
- * recipe he authored. The stored name is the answer whenever there is one; the guess is only a
+ * job he authored. The stored name is the answer whenever there is one; the guess is only a
  * fallback for identities with no login record.
  */
 function displayName (owner) {
@@ -1216,14 +1216,14 @@ document.getElementById('login-id').addEventListener('keydown', e => { if (e.key
 document.getElementById('userkey-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin() })
 
 const state = {
-  info: null, tools: [], policy: [], recipes: [], recipesAll: [], tasks: [], projects: [], settings: null,
+  info: null, tools: [], policy: [], jobs: [], jobsAll: [], tasks: [], projects: [], settings: null,
   segLevels: [{ key: 'project', label: 'Project' }],
   project: localStorage.getItem('dashProject') || '',
   practices: [], myPractices: [], agentSystems: [], systemAgents: [], mcpServers: [], people: {},
   worklogQuery: '',
-  currentRecipe: null, graphBuilt: false, cxGraph: null, cookoff: [],
-  // D64: marketer roles + Hero Agent CX-graph gate
-  role: 'chef', roles: ['chef'], userRoles: {}, headChefs: [], cxPending: [], drawerRecipeId: null
+  currentJob: null, graphBuilt: false, cxGraph: null, cookoff: [],
+  // D64: marketer roles + Oracle CX-graph gate
+  role: 'chef', roles: ['chef'], userRoles: {}, headChefs: [], cxPending: [], drawerJobId: null
 }
 
 /* ---------- helpers ---------- */
@@ -1243,44 +1243,44 @@ function recStatus (r) { return r.baked ? 'baked' : canon(r.status) }
 function inCookbook (r) { return r.baked || canon(r.status) === 'approved' }
 
 /* =====================================================================
-   Recipe STAGE (D84) - the single source of truth for where a recipe is in the workflow.
+   Job STAGE (D84) - the single source of truth for where a job is in the workflow.
 
    There are FOUR real states, and the UI used to show two. That gap caused a real failure:
-   approving a recipe's artifacts auto-promotes the recipe to status "approved", which was
-   badged "house recipe" - so it looked finished and submitted. But the Company CX Graph gate
-   requires baked === true, so an approved-but-unbaked recipe sat in limbo: its author believed
-   it was submitted, and the Hero Agent's queue never showed it. Nobody had done anything wrong;
+   approving a job's artifacts auto-promotes the job to status "approved", which was
+   badged "house job" - so it looked finished and submitted. But the Company CX Graph gate
+   requires baked === true, so an approved-but-unbaked job sat in limbo: its author believed
+   it was submitted, and the Oracle's queue never showed it. Nobody had done anything wrong;
    the vocabulary was lying. These four stages are now named honestly everywhere.
    ===================================================================== */
 const STAGES = {
   // el: a short symbol for the compact stage badge. Ex, Rb, Hc, Cx.
   draft: { label: 'experimental', el: 'Ex', icon: 'flask-conical', cls: 'exp', hint: 'Private draft. Approve the artifacts worth keeping.' },
-  ready: { label: 'ready to approve', el: 'Rb', icon: 'clock', cls: 'ready', hint: 'The run has finished but has not been handed over. Approve it to send it to the Hero Agent.' },
-  awaiting: { label: 'with the Hero Agent', el: 'Hc', icon: 'sparkles', cls: 'baked', hint: 'Approved and handed over. The Hero Agent is reading it against earlier runs.' },
+  ready: { label: 'ready to approve', el: 'Rb', icon: 'clock', cls: 'ready', hint: 'The run has finished but has not been handed over. Approve it to send it to the Oracle.' },
+  awaiting: { label: 'with the Oracle', el: 'Hc', icon: 'sparkles', cls: 'baked', hint: 'Approved and handed over. The Oracle is reading it against earlier runs.' },
   incx: { label: 'in CX graph', el: 'Cx', icon: 'badge-check', cls: 'house', hint: 'Admitted to the Company CX Graph - shared company knowledge.' }
 }
 /** @returns {'draft'|'ready'|'awaiting'|'incx'} */
-function recipeStage (r) {
+function jobStage (r) {
   if (r.cx_approved === true) return 'incx'
   if (r.baked === true) return 'awaiting'
   if (canon(r.status) === 'approved') return 'ready'
   return 'draft'
 }
-/** True when this recipe is mine to submit and has not been submitted yet. */
-function needsBaking (r) { return recipeStage(r) === 'ready' && isMine(r) }
-/** Recipes I authored. Owner identity is what the server resolved for my login. */
+/** True when this job is mine to submit and has not been submitted yet. */
+function needsBaking (r) { return jobStage(r) === 'ready' && isMine(r) }
+/** Jobs I authored. Owner identity is what the server resolved for my login. */
 function isMine (r) { return !!state.owner && (r.owner === state.owner || r.author === state.owner) }
-/** Someone else's recipe that is visible to me because they assigned me one of its ingredients. */
+/** Someone else's job that is visible to me because they assigned me one of its ingredients. */
 function isAssignedToMe (r) { return !!state.owner && (r.assigned_to || []).includes(state.owner) && !isMine(r) }
 /** The chip that explains WHY a colleague's unfinished work is visible to me. */
 function assignedChip (r) {
   return isAssignedToMe(r)
-    ? '<span class="chip" title="A colleague assigned you an artifact of this recipe, which is why you can see it."><i data-lucide="user-check"></i>assigned to you</span>'
+    ? '<span class="chip" title="A colleague assigned you an artifact of this job, which is why you can see it."><i data-lucide="user-check"></i>assigned to you</span>'
     : ''
 }
 
 function statusBadge (r) {
-  const s = STAGES[recipeStage(r)]
+  const s = STAGES[jobStage(r)]
   return `<span class="badge ${s.cls}" data-el="${s.el}" title="${esc(s.hint)}"><i data-lucide="${s.icon}"></i>${s.label}</span>`
 }
 function stepStatusBadge (s) {
@@ -1294,7 +1294,7 @@ function stepStatusBadge (s) {
 function segVal (r, key) { if (r.segments && r.segments[key] !== undefined) return r.segments[key]; return r[key] }
 function recProject (r) { return segVal(r, 'project') || '' }
 function levelLabel (key) { const l = state.segLevels.find(x => x.key === key); return l ? l.label : key }
-function scoped (list) { const rows = list || state.recipes; if (!state.project) return rows; return rows.filter(r => recProject(r) === state.project) }
+function scoped (list) { const rows = list || state.jobs; if (!state.project) return rows; return rows.filter(r => recProject(r) === state.project) }
 function crumb (r) {
   const parts = []; let prev
   for (const level of state.segLevels) { const v = segVal(r, level.key); if (v && v !== prev) { parts.push({ label: level.label, value: v }); prev = v } }
@@ -1303,17 +1303,17 @@ function crumb (r) {
   return `<span class="crumb" title="${esc(title)}"><i data-lucide="milestone"></i>${parts.map((p, i) => i === 0 ? `<b>${esc(p.value)}</b>` : esc(p.value)).join(' › ')}</span>`
 }
 
-const KIND_ICONS = { recipe: 'scroll-text', message: 'message-square', code: 'code', diagram: 'workflow', image: 'image', decision: 'scale', doc: 'file-text', handoff: 'send', config: 'settings-2', steering: 'compass', other: 'file', 'architecture-diagram': 'workflow', 'architecture-doc': 'file-text', playbook: 'book-open', configuration: 'settings-2', 'meeting-notes': 'notebook-pen', 'code-snippet': 'code', 'handoff-prompt': 'send' }
+const KIND_ICONS = { job: 'scroll-text', message: 'message-square', code: 'code', diagram: 'workflow', image: 'image', decision: 'scale', doc: 'file-text', handoff: 'send', config: 'settings-2', steering: 'compass', other: 'file', 'architecture-diagram': 'workflow', 'architecture-doc': 'file-text', playbook: 'book-open', configuration: 'settings-2', 'meeting-notes': 'notebook-pen', 'code-snippet': 'code', 'handoff-prompt': 'send' }
 /**
- * What a run is CALLED here. The store's type is still "recipe" - renaming a
+ * What a run is CALLED here. The store's type is still "job" - renaming a
  * stored value would orphan every record written before the rename - so the
  * translation happens at the edge, where it is a label and nothing else.
  */
-const TYPE_LABEL = { recipe: 'run', 'handoff-prompt': 'handoff' }
+const TYPE_LABEL = { job: 'run', 'handoff-prompt': 'handoff' }
 function typeLabel (t) { return TYPE_LABEL[t] || t }
 
 /* The chip shows what a thing is CALLED, not the value stored for it: the
-   store's type is still "recipe" and renaming a stored value would orphan
+   store's type is still "job" and renaming a stored value would orphan
    every record written before the rename. */
 function kindChip (kind) { return `<span class="chip"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i>${esc(typeLabel(kind))}</span>` }
 /*
@@ -1349,7 +1349,7 @@ function tokenChip (t) {
   if (!Number.isFinite(n)) return ''
   return `<span class="chip" title="${n.toLocaleString()} tokens reported by the capturing client"><i data-lucide="coins"></i>${fmtTokens(n)}</span>`
 }
-/** True when a recipe/step carries no reported token cost at all. */
+/** True when a job/step carries no reported token cost at all. */
 function tokensMissing (x) { return x.tokens_used === undefined || x.tokens_used === null }
 
 function expiryHtml (iso) {
@@ -1370,17 +1370,17 @@ function expiryHtml (iso) {
  * removed it. If a future view needs to cross owners it has to be a server-side decision with a
  * reason attached, not a client-side toggle.
  */
-async function recipesPromise () { return callTool('list_recipes') }
+async function jobsPromise () { return callTool('list_jobs') }
 async function projectsPromise () { return callTool('list_projects') }
 
 async function loadAll (silent) {
   if (!silent) $('#conn-sub').textContent = `Loading…`
-  const [info, init, tools, policy, recipes, projects, tasks, seg, settings, role, pending, practices, agentSystems, systemAgents, mcpServers, cxg, people, cookoff] = await Promise.allSettled([
+  const [info, init, tools, policy, jobs, projects, tasks, seg, settings, role, pending, practices, agentSystems, systemAgents, mcpServers, cxg, people, cookoff] = await Promise.allSettled([
     fetch(API_BASE).then(r => r.json()),
     rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'cx-agent-manager-dashboard', version: '4.0.0' } }),
     rpc('tools/list'),
     callTool('get_resource_policy'),
-    recipesPromise(),
+    jobsPromise(),
     projectsPromise(),
     callTool('list_active_tasks'),
     callTool('get_segmentation_config'),
@@ -1400,7 +1400,7 @@ async function loadAll (silent) {
   if (init.status === 'fulfilled') state.instructions = (init.value && init.value.instructions) || ''
   if (tools.status === 'fulfilled') state.tools = (tools.value && tools.value.tools) || []
   if (policy.status === 'fulfilled') state.policy = policy.value; else fails.push('policy')
-  if (recipes.status === 'fulfilled') { state.recipesAll = recipes.value || []; state.recipes = state.recipesAll } else fails.push('recipes')
+  if (jobs.status === 'fulfilled') { state.jobsAll = jobs.value || []; state.jobs = state.jobsAll } else fails.push('jobs')
   if (projects.status === 'fulfilled') state.projects = projects.value || []
   // Never fatal: an empty board is a fine degradation, a failed load screen is not.
   if (cookoff.status === 'fulfilled') state.cookoff = cookoff.value || []
@@ -1422,11 +1422,11 @@ async function loadAll (silent) {
   if (mcpServers.status === 'fulfilled') state.mcpServers = mcpServers.value || []
 
   if (fails.length) {
-    // These were the internal promise names - "info", "policy", "recipes" - which
+    // These were the internal promise names - "info", "policy", "jobs" - which
     // are not what any of it is called on screen.
     const SAY = {
       info: 'the connection', init: 'the connection', tools: 'the tool list',
-      policy: 'the artifact policy', recipes: 'your runs', projects: 'programmes',
+      policy: 'the artifact policy', jobs: 'your runs', projects: 'programmes',
       tasks: 'the live queue', seg: 'the programme levels', settings: 'settings',
       role: 'your role', pending: 'the approvals queue', practices: 'the agent list',
       agentSystems: 'the agent systems', systemAgents: 'the agents',
@@ -1435,16 +1435,16 @@ async function loadAll (silent) {
     }
     banner(`Could not load ${[...new Set(fails.map(f => SAY[f] || f))].join(', ')}. The proxy or an upstream may be unavailable.`)
   } else banner('')
-  const approved = state.recipes.filter(inCookbook).length
-  $('#conn-sub').innerHTML = `Your view · ${state.recipes.length} run(s) visible · ${approved} in Playbooks`
+  const approved = state.jobs.filter(inCookbook).length
+  $('#conn-sub').innerHTML = `Your view · ${state.jobs.length} run(s) visible · ${approved} in Playbooks`
   renderProjectSwitcher()
   updateRoleUI()
   state.graphBuilt = false
   renderAll()
 }
 
-/* D64: reflect the caller's role in the UI - the header chip + the Hero Agent nav entry
-   (shown only to Hero Agents) with a pending-queue badge. */
+/* D64: reflect the caller's role in the UI - the header chip + the Oracle nav entry
+   (shown only to Oracles) with a pending-queue badge. */
 function updateRoleUI () {
   const chip = $('#role-chip')
   const isHead = state.role === 'head-chef'
@@ -1484,19 +1484,19 @@ function updateRoleUI () {
  * Project records are the source of truth for what a project IS (D49), but a record with nothing in
  * it is a trap in a filter: you select it and every panel goes empty, which reads as a broken app
  * rather than an empty project. Records outlive their contents easily, because deleting the last
- * recipe leaves the record behind, and renaming a project leaves the old name archived.
+ * job leaves the record behind, and renaming a project leaves the old name archived.
  *
  * So the picker offers projects that actually hold something you can see, plus whatever is selected
  * right now, so the list never shifts under you mid-use. The Projects panel still shows every
  * record, empty ones included, because there the emptiness is the information.
  */
 function projectNames () {
-  const withContent = new Set(state.recipes.map(r => recProject(r)).filter(Boolean))
+  const withContent = new Set(state.jobs.map(r => recProject(r)).filter(Boolean))
   const names = state.projects
     .map(p => p.name)
     .filter(Boolean)
     .filter(name => withContent.has(name) || name === state.project)
-  // A recipe can name a project that has no record of its own; it still belongs in the filter.
+  // A job can name a project that has no record of its own; it still belongs in the filter.
   for (const name of withContent) names.push(name)
   return [...new Set(names)].sort()
 }
@@ -1525,7 +1525,7 @@ function renderAll () {
     }
   }
   updateRoleUI()
-  const pend = scoped(state.recipes).filter(r => !inCookbook(r)).length
+  const pend = scoped(state.jobs).filter(r => !inCookbook(r)).length
   $('#tasks-badge').outerHTML = '' // placeholder; tasks badge set below
   const tb = document.createElement('span')
   const openTasks = state.tasks.length
@@ -1544,17 +1544,17 @@ function renderAll () {
 
    Who is actually feeding the cookbook, scored in crystals.
 
-   3 crystals for submitting a recipe, 5 more when a Hero Agent admits it. Volume earns something,
+   3 crystals for submitting a job, 5 more when a Oracle admits it. Volume earns something,
    but work that survived review earns nearly three times as much, so the board rewards what the
    product is for rather than who typed the most.
 
-   PURITY is the share of your submissions a Hero Agent admitted, and it sets the colour of your
+   PURITY is the share of your submissions a Oracle admitted, and it sets the colour of your
    crystal. Only a flawless record earns the blue: anything less cooks out white, then yellow, then
    pink, then chilli-powder red. Two cooks can hold the same crystal count and be visibly different
    grades, which is the whole joke and also the honest signal.
 
    Crystals are COMPUTED, never stored: derived from the CX graph (admitted, cross-owner) and the
-   Hero Agent queue (submitted, not yet admitted), both of which every signed-in user already reads.
+   Oracle queue (submitted, not yet admitted), both of which every signed-in user already reads.
    No new tool and no stored score, so the board cannot drift from the data it describes.
    ===================================================================== */
 const CRYSTALS_PER_BAKE = 3
@@ -1562,7 +1562,7 @@ const CRYSTALS_PER_ADMISSION = 5
 
 /** Purity grades, best first. The blue is reserved for a spotless record. */
 const GRADES = [
-  { min: 100, key: 'blue', label: 'blue', note: 'Flawless. Every recipe you submitted got in.' },
+  { min: 100, key: 'blue', label: 'blue', note: 'Flawless. Every job you submitted got in.' },
   { min: 75, key: 'white', label: 'white', note: 'Strong, with the odd batch held back.' },
   { min: 50, key: 'yellow', label: 'yellow', note: 'Half your submissions got in.' },
   { min: 25, key: 'pink', label: 'pink', note: 'More held back than admitted.' },
@@ -1574,10 +1574,10 @@ const gradeFor = (purity) => GRADES.find(g => purity >= g.min) || GRADES[GRADES.
 /*
  * D106: one board, the same for everyone.
  *
- * This used to build the standings from two sources: admitted recipes out of the CX graph, which
+ * This used to build the standings from two sources: admitted jobs out of the CX graph, which
  * everybody can see, and pending submissions out of list_cx_pending, which only reviewers can.
  * A plain marketer therefore loaded an empty queue, the code read that as nothing outstanding, and
- * every contributor came out a spotless 100% blue. The same person was 50% yellow to a Hero Agent
+ * every contributor came out a spotless 100% blue. The same person was 50% yellow to a Oracle
  * and 100% blue to everyone else.
  *
  * Both numbers now come from get_cookoff, which publishes per-person COUNTS and nothing else. Every
@@ -1651,8 +1651,8 @@ function renderCookOff () {
 
   el.innerHTML = `<div class="cookoff">
     ${cookOffWordmark()}
-    <p class="sub" style="margin:10px 0 2px">Who is feeding the cookbook. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every recipe a Hero Agent admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
-    <p class="help" style="margin-bottom:16px">The crystal colour is <b>purity</b>: the share of what you submitted that a Hero Agent admitted. Only a spotless record cooks blue. Everybody sees the same board, the same ranks and the same colours.</p>
+    <p class="sub" style="margin:10px 0 2px">Who is feeding the cookbook. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every job a Oracle admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
+    <p class="help" style="margin-bottom:16px">The crystal colour is <b>purity</b>: the share of what you submitted that a Oracle admitted. Only a spotless record cooks blue. Everybody sees the same board, the same ranks and the same colours.</p>
 
     <ol class="lb">
       ${top.map((r, i) => `
@@ -1670,7 +1670,7 @@ function renderCookOff () {
         </li>`).join('')}
     </ol>
 
-    ${mine > 4 ? `<p class="help" style="margin-top:14px">You are ${board[mine].joint ? 'joint ' : ''}${ordinal(board[mine].rank)} with ${board[mine].crystals} crystals. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} more for the next recipe that gets in.</p>` : ''}
+    ${mine > 4 ? `<p class="help" style="margin-top:14px">You are ${board[mine].joint ? 'joint ' : ''}${ordinal(board[mine].rank)} with ${board[mine].crystals} crystals. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} more for the next job that gets in.</p>` : ''}
 
     <div class="grades">
       ${GRADES.map(g => `<span class="grade" title="${esc(g.note)}">${crystalSvg(13, g.key)} ${g.min === 100 ? '100%' : `${g.min}%+`} ${esc(g.label)}</span>`).join('')}
@@ -1680,13 +1680,13 @@ function renderCookOff () {
 }
 
 function renderHome () {
-  const rows = scoped(state.recipes)
-  // D84: MY stats, not everyone's. These used to be computed over every visible recipe - which
+  const rows = scoped(state.jobs)
+  // D84: MY stats, not everyone's. These used to be computed over every visible job - which
   // includes everyone's shared work - so each user saw a near-identical total dominated by other
-  // people's recipes, and the "tokens" figure looked the same for the whole company.
+  // people's jobs, and the "tokens" figure looked the same for the whole company.
   const mine = rows.filter(isMine)
-  const experimental = mine.filter(r => recipeStage(r) === 'draft')
-  const readyToBake = mine.filter(r => recipeStage(r) === 'ready')
+  const experimental = mine.filter(r => jobStage(r) === 'draft')
+  const readyToBake = mine.filter(r => jobStage(r) === 'ready')
   const cookbook = mine.filter(inCookbook)
   const tokens = mine.reduce((a, r) => a + (Number(r.tokens_used) || 0), 0)
   const noTokenData = mine.filter(tokensMissing).length
@@ -1702,7 +1702,7 @@ function renderHome () {
       <div class="card stat" data-symbol="Rc"><span class="n">${mine.length}</span><span class="l">my runs</span></div>
       <div class="card stat" data-symbol="Dr"><span class="n">${experimental.length}</span><span class="l">drafts</span></div>
       <div class="card stat" data-symbol="Cb"><span class="n">${cookbook.length}</span><span class="l">in Playbooks</span></div>
-      <div class="card stat" data-symbol="Tk" title="${noTokenData ? noTokenData + ' of your recipes report no token usage, so they are not counted.' : 'Every one of your recipes reports token usage.'}">
+      <div class="card stat" data-symbol="Tk" title="${noTokenData ? noTokenData + ' of your jobs report no token usage, so they are not counted.' : 'Every one of your jobs reports token usage.'}">
         <span class="n">${fmtTokens(tokens)}</span>
         <span class="l">my tokens${noTokenData ? ` · <span style="color:var(--exp)">${noTokenData} not reported</span>` : ''}</span>
       </div>
@@ -1711,16 +1711,16 @@ function renderHome () {
 
 
     ${readyToBake.length ? `<div class="card section-gap" style="border-left:3px solid var(--ready)">
-      <h3 class="head"><i data-lucide="clock"></i> Ready for the Hero Agent (${readyToBake.length})</h3>
-      <p class="help">Finished runs waiting to be handed over. Approving sends the run to the Hero Agent,
+      <h3 class="head"><i data-lucide="clock"></i> Ready for the Oracle (${readyToBake.length})</h3>
+      <p class="help">Finished runs waiting to be handed over. Approving sends the run to the Oracle,
         which reads it against every earlier run and proposes what should be learned. You can do the same
         by telling Claude to approve the run &mdash; same action, either door.</p>
       ${readyToBake.map(r => `
         <div class="listrow">
-          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
+          <button class="btn tiny grow" data-open-job="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
           <span class="sub">${r.step_count || 1} event(s)</span>
           <button class="btn tiny primary" data-submit-run="${esc(r.id)}"
-            title="Hand this run to the Hero Agent. It proposes; a named human still decides what reaches the shared graph."><i data-lucide="check"></i> Approve</button>
+            title="Hand this run to the Oracle. It proposes; a named human still decides what reaches the shared graph."><i data-lucide="check"></i> Approve</button>
         </div>`).join('')}
     </div>` : ''}
 
@@ -1730,7 +1730,7 @@ function renderHome () {
         <p class="sub">Experimental artifacts auto-expire (retention ${state.settings ? state.settings.retention_days : 30}d). Approve to keep.</p>
         ${expiring.length ? expiring.map(r => `
           <div class="listrow">
-            <button class="btn tiny" data-open-recipe="${esc(r.id)}">${esc(r.title)}</button>
+            <button class="btn tiny" data-open-job="${esc(r.id)}">${esc(r.title)}</button>
             <span style="margin-left:auto">${expiryHtml(r.expires_at)}</span>
           </div>`).join('') : '<p class="empty" style="padding:18px"><i data-lucide="check-circle-2"></i><br>Nothing expiring.</p>'}
       </div>
@@ -1760,10 +1760,10 @@ function renderHome () {
    Projects
    ===================================================================== */
 function renderProjects () {
-  // D49: list real project RECORDS and their recipes; open a project to see its recipes,
-  // click a recipe to open its Work Log (ordered artifacts).
+  // D49: list real project RECORDS and their jobs; open a project to see its jobs,
+  // click a job to open its Work Log (ordered artifacts).
   const projs = state.projects.slice().sort((a, b) => (a.status || 'active').localeCompare(b.status || 'active') || a.name.localeCompare(b.name))
-  const byProject = name => state.recipes.filter(r => recProject(r) === name)
+  const byProject = name => state.jobs.filter(r => recProject(r) === name)
   $('#panel-projects').innerHTML = `
     <p class="panel-intro">Engagements. Each holds the runs captured for it.</p>
     ${projs.length ? projs.map(p => {
@@ -1779,7 +1779,7 @@ function renderProjects () {
         </div>
         <div class="meta"><span>${rs.length} run(s)</span><span>${cook} in Playbooks</span></div>
         <div class="stack section-gap">
-          ${rs.length ? rs.map(r => `<button class="recipe-item" data-open-worklog="${esc(r.id)}" style="flex-direction:row; align-items:center; gap:8px;">
+          ${rs.length ? rs.map(r => `<button class="job-item" data-open-worklog="${esc(r.id)}" style="flex-direction:row; align-items:center; gap:8px;">
             <i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b style="flex:1 1 10ch; min-width:0">${esc(r.title)}</b>${statusBadge(r)}<span class="sub" style="flex:0 0 auto">${r.step_count || 1} artifact(s)</span></button>`).join('') : '<span class="sub">No runs yet. Ask Claude to start an intake.</span>'}
         </div></div>`
     }).join('') : '<p class="empty"><i data-lucide="folder-plus"></i><br>No programmes yet. Ask Claude to start one.</p>'}`
@@ -1787,25 +1787,25 @@ function renderProjects () {
 }
 
 /* =====================================================================
-   Work Log (per recipe = task): ordered steps
+   Work Log (per job = task): ordered steps
    ===================================================================== */
 function renderWorklogList () {
   // D84: the Work Log had no owner/stage filter of its own - only the global admin toggle, whose
   // "Personal" mode still includes everyone's shared work. So "show me just my work" was not
   // expressible, and the list looked unfiltered.
   // Your bench: what you wrote, plus what somebody deliberately handed you (D105).
-  const all = scoped(state.recipes).filter(r => isMine(r) || isAssignedToMe(r))
+  const all = scoped(state.jobs).filter(r => isMine(r) || isAssignedToMe(r))
   const stageSel = $('#worklog-stage')
   const stage = stageSel ? stageSel.value : ''
   // D92: a search carries its query into this list, so the left column is the neighbourhood of
   // whatever is open on the right rather than an unrelated list you have to hunt through.
   const q = (state.worklogQuery || '').trim().toLowerCase()
-  const openId = state.currentRecipe && state.currentRecipe.id
+  const openId = state.currentJob && state.currentJob.id
   const matchesQuery = (r) => !q ||
     `${r.title || ''} ${recProject(r) || ''} ${r.practice || ''}`.toLowerCase().includes(q)
 
   const rows = all
-    .filter(r => stage ? recipeStage(r) === stage : true)
+    .filter(r => stage ? jobStage(r) === stage : true)
     // Whatever is open on the right always appears on the left, even when a filter would exclude
     // it: a detail pane whose own item is missing from the list reads as a broken selection.
     .filter(r => matchesQuery(r) || r.id === openId)
@@ -1823,16 +1823,16 @@ function renderWorklogList () {
   }
   const list = $('#worklog-list')
   if (!rows.length) {
-    list.innerHTML = `<p class="empty"><i data-lucide="inbox"></i><br>${all.length ? `No recipes match this stage. You have ${all.length} on your bench.` : 'Nothing on your bench yet. Runs captured from Claude land here, along with anything a colleague assigns you.'}</p>`
+    list.innerHTML = `<p class="empty"><i data-lucide="inbox"></i><br>${all.length ? `No jobs match this stage. You have ${all.length} on your bench.` : 'Nothing on your bench yet. Runs captured from Claude land here, along with anything a colleague assigns you.'}</p>`
     refreshIcons(); return
   }
   list.innerHTML = rows.map(r => `
-    <button class="recipe-item" data-worklog="${esc(r.id)}" ${state.currentRecipe && state.currentRecipe.id === r.id ? 'aria-current="true"' : ''}>
+    <button class="job-item" data-worklog="${esc(r.id)}" ${state.currentJob && state.currentJob.id === r.id ? 'aria-current="true"' : ''}>
       <div class="tagrow"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b class="grow">${esc(r.title)}</b></div>
       <div class="tagrow">${statusBadge(r)}${assignedChip(r)}${!isMine(r) && r.owner ? `<span class="chip"><i data-lucide="user"></i>${esc(displayName(r.owner))}</span>` : ''}<span class="sub">${r.step_count || 1} artifact(s)</span></div>
     </button>`).join('')
   refreshIcons()
-  // Bring the open recipe's own row into view. The list scrolls independently, so arriving from a
+  // Bring the open job's own row into view. The list scrolls independently, so arriving from a
   // search left the selected row somewhere below the fold and the selection looked lost.
   const current = list.querySelector('[aria-current="true"]')
   if (current && current.scrollIntoView) {
@@ -1844,21 +1844,21 @@ async function openWorklog (id) {
   const detail = $('#worklog-detail')
   detail.innerHTML = '<div class="empty"><i data-lucide="loader"></i><p>Loading artifacts…</p></div>'; refreshIcons()
   let r
-  try { r = await callTool('get_recipe', { id, view: 'full' }) } catch (e) { detail.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`; return }
-  state.currentRecipe = r
+  try { r = await callTool('get_job', { id, view: 'full' }) } catch (e) { detail.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`; return }
+  state.currentJob = r
   renderWorklogList()
   /*
-   * D107: the header showed "ready to bake" on a recipe that was already baked.
+   * D107: the header showed "ready to bake" on a job that was already baked.
    *
    * The catalog entry carries what this panel needs (project, tokens, models), so it became the
    * whole source of the header, lifecycle flags included. But the catalog is a list loaded
    * separately, and after a bake done from Active Tasks the badge could still be drawn from the
-   * copy held before that write landed. r is what get_recipe just returned for this exact id, so on
+   * copy held before that write landed. r is what get_job just returned for this exact id, so on
    * lifecycle it is authoritative and the list is not. Keep the catalog for the rest of the header.
    */
-  const listed = state.recipes.find(x => x.id === id)
+  const listed = state.jobs.find(x => x.id === id)
   const meta = listed ? { ...listed, baked: r.baked, cx_approved: r.cx_approved, status: r.status } : r
-  // Only explain the steering colours on a recipe that actually contains steering (D100).
+  // Only explain the steering colours on a job that actually contains steering (D100).
   const hasSteering = (r.steps || []).some(st => canon(st.kind) === 'steering')
   const legend = !hasSteering ? '' : `<div class="legend">
     <span><span class="swatch" style="background:var(--affirm)"></span>steering · affirm</span>
@@ -1876,9 +1876,9 @@ async function openWorklog (id) {
       <div class="rowbtns">
         <button class="btn" id="export-replay" data-id="${esc(r.id)}"><i data-lucide="share-2"></i> Export replay skill</button>
         <button class="btn" id="attach-diagram" data-id="${esc(r.id)}"><i data-lucide="paperclip"></i> Attach diagram/image</button>
-        <button class="btn" id="pdf-recipe"><i data-lucide="file-down"></i> PDF</button>
+        <button class="btn" id="pdf-job"><i data-lucide="file-down"></i> PDF</button>
       </div>
-      ${['draft', 'ready'].includes(recipeStage(meta)) ? '<p class="help">Approve the run to hand it to the Hero Agent. It proposes; a named person decides.</p>' : ''}
+      ${['draft', 'ready'].includes(jobStage(meta)) ? '<p class="help">Approve the run to hand it to the Oracle. It proposes; a named person decides.</p>' : ''}
     </div>
     ${runLedger(r.steps || [])}
     ${legend}
@@ -2068,18 +2068,18 @@ async function hydrateRenderables (root) {
    ===================================================================== */
 function renderTasks () {
   // D64: Active Tasks is the live work board - the in-flight work, not just handoffs. Two lanes:
-  //  (1) recipes still in progress (experimental, in an active/unset-status project, recent), and
+  //  (1) jobs still in progress (experimental, in an active/unset-status project, recent), and
   //  (2) open/in-progress handoff prompts. Baking happens HERE (never in the Work Log), and only
   //  once >= 1 artifact is approved (the server enforces it; we surface the result).
   const activeProjectNames = new Set(state.projects.filter(p => (p.status || 'active') === 'active').map(p => p.name))
-  const inProgress = scoped(state.recipes)
+  const inProgress = scoped(state.jobs)
     .filter(r => !inCookbook(r) && r.type !== 'handoff-prompt')
     .filter(r => { const p = recProject(r); return !p || activeProjectNames.has(p) })
     .sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || ''))
     .slice(0, 24)
   const tasks = state.tasks.slice()
 
-  const recipeCards = inProgress.map(r => `
+  const jobCards = inProgress.map(r => `
       <div class="card">
         <div class="card-head"><i data-lucide="${KIND_ICONS[r.type] || 'scroll-text'}"></i><b>${esc(r.title)}</b>${statusBadge(r)}</div>
         ${crumb(r)}
@@ -2087,27 +2087,27 @@ function renderTasks () {
         ${journeyBar(r)}
         <div class="rowbtns">
           <button class="btn tiny" data-open-worklog="${esc(r.id)}"><i data-lucide="list-ordered"></i> Open Work Log</button>
-          ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Hero Agent</button>` : ''}
+          ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Oracle</button>` : ''}
         </div>
       </div>`).join('')
 
   const handoffCards = tasks.map(t => `
       <div class="card">
         <div class="card-head"><i data-lucide="send"></i><b>${esc(t.title)}</b><span class="chip">${esc(t.task_status || 'open')}</span></div>
-        <div class="meta">${t.target_agent ? `<span class="chip"><i data-lucide="bot"></i>${esc(t.target_agent)}</span>` : ''}${t.recipe_id ? `<button class="btn tiny" data-open-recipe="${esc(t.recipe_id)}"><i data-lucide="list-ordered"></i> Thread</button>` : ''}</div>
+        <div class="meta">${t.target_agent ? `<span class="chip"><i data-lucide="bot"></i>${esc(t.target_agent)}</span>` : ''}${t.job_id ? `<button class="btn tiny" data-open-job="${esc(t.job_id)}"><i data-lucide="list-ordered"></i> Thread</button>` : ''}</div>
         <div class="rowbtns">
           <button class="btn tiny" data-copy-task="${esc(t.id)}"><i data-lucide="copy"></i> Copy prompt</button>
           ${(t.task_status || 'open') !== 'done' ? `<button class="btn tiny sage" data-done-task="${esc(t.id)}"><i data-lucide="check"></i> Mark done</button>` : ''}
         </div>
       </div>`).join('')
 
-  // Two lanes, each with its own one-line explanation, because "recipes in progress" and "prompts
+  // Two lanes, each with its own one-line explanation, because "jobs in progress" and "prompts
   // written for another tool" are different objects and the single blended intro read as one thing.
-  const assigned = scoped(state.recipes).filter(isAssignedToMe)
+  const assigned = scoped(state.jobs).filter(isAssignedToMe)
   const empty = !inProgress.length && !tasks.length && !assigned.length
   $('#panel-tasks').innerHTML = `
     <p class="panel-intro">Work in flight${state.project ? ` in <b>${esc(state.project)}</b>` : ''}.
-      Approve a run across to the Hero Agent once at least one of its artifacts is approved.</p>
+      Approve a run across to the Oracle once at least one of its artifacts is approved.</p>
     ${empty ? '<p class="empty"><i data-lucide="list-checks"></i><br>Nothing in flight. Ask Claude to start an intake.</p>' : ''}
     ${assigned.length ? `<h3 class="head"><i data-lucide="user-check"></i> Assigned to you <span class="sub">(${assigned.length})</span></h3>
       <p class="help">A colleague handed you an artifact of these, which is why you can see work that is not yours.</p>
@@ -2119,7 +2119,7 @@ function renderTasks () {
         </div>`).join('')}</div>` : ''}
     ${inProgress.length ? `<h3 class="head section-gap"><i data-lucide="flask-conical"></i> In progress <span class="sub">(${inProgress.length})</span></h3>
       <p class="help">Your runs that are not finished yet.</p>
-      <div class="cards section-gap">${recipeCards}</div>` : ''}
+      <div class="cards section-gap">${jobCards}</div>` : ''}
     ${tasks.length ? `<h3 class="head section-gap"><i data-lucide="send"></i> Handoff prompts <span class="sub">(${tasks.length})</span></h3>
       <p class="help">Briefs written for another tool or person to execute.</p>
       <div class="cards section-gap">${handoffCards}</div>` : ''}`
@@ -2127,8 +2127,8 @@ function renderTasks () {
 }
 
 /* =====================================================================
-   Hero Agent review queue (D64): baked recipes awaiting admission to the Company
-   CX Graph. Visible only to Hero Agents (nav entry gated by updateRoleUI). Approve
+   Oracle review queue (D64): baked jobs awaiting admission to the Company
+   CX Graph. Visible only to Oracles (nav entry gated by updateRoleUI). Approve
    -> headchef_approve (admits to CX graph); Reject -> headchef_reject.
    ===================================================================== */
 /* =====================================================================
@@ -2155,7 +2155,7 @@ function renderTasks () {
  * this project exists.
  * ------------------------------------------------------------------------- */
 function agentTint (id) {
-  if (String(id || '').toLowerCase() === 'hero') return 'var(--hero)'
+  if (String(id || '').toLowerCase() === 'oracle') return 'var(--oracle)'
   const h = agentHash(id)
   return `var(${FACE_HUES[(h >>> 0) % FACE_HUES.length]})`
 }
@@ -2197,7 +2197,7 @@ function runProgress (r, steps) {
   // The stage in flight is the first one not yet reached, and only while the
   // run is still open - a finished run has no "current" stage, it has an end.
   const stage = reached.filter(Boolean).length
-  const settled = inCookbook(r) || recipeStage(r) !== 'draft'
+  const settled = inCookbook(r) || jobStage(r) !== 'draft'
   // A stage that reported success while its tool call failed. Rolled up by the
   // server too, so a list view shows it and not only the opened run.
   const faulted = new Set(r.agent_faults || [])
@@ -2241,7 +2241,7 @@ function renderAgents () {
   const el = $('#panel-agents')
   if (!el) return
 
-  const rows = scoped(state.recipes)
+  const rows = scoped(state.jobs)
   const systems = state.agentSystems || []
   const agents = state.systemAgents || []
   const servers = state.mcpServers || []
@@ -2253,17 +2253,17 @@ function renderAgents () {
   const artifactsFor = (agentId) => runsFor(agentId).reduce((n, r) => n + (r.step_count || 0), 0)
 
   /*
-   * The Hero Agent sits above the systems, in its own card, because it belongs
-   * to none of them: the four agents each do one stage of one run, and the hero
+   * The Oracle sits above the systems, in its own card, because it belongs
+   * to none of them: the four agents each do one stage of one run, and the oracle
    * is the only thing that reads ACROSS runs. Putting it in the grid with the
    * rest would say it is a fifth stage, which is the one thing it is not.
    */
   const inCx = rows.filter(r => r.cx_approved === true).length
-  const hero = `<div class="hero-card">
-      <div class="hero-top">
-        ${agentFace('hero', rows.length > 0, 54)}
+  const oracle = `<div class="oracle-card">
+      <div class="oracle-top">
+        ${agentFace('oracle', rows.length > 0, 54)}
         <div style="flex:1;min-width:0">
-          <div class="hero-role">The Hero Agent</div>
+          <div class="oracle-role">The Oracle</div>
           <b>Reads across every run, and proposes what should be learned</b>
           <div class="sub">${rows.length} run(s) read &middot; ${inCx} in the Shared Knowledge Graph
             &middot; ${pending.length} awaiting a person</div>
@@ -2271,11 +2271,11 @@ function renderAgents () {
       </div>
       <p class="help" style="margin:10px 0 0">It proposes only. A named human always decides what
         reaches the Shared Knowledge Graph &mdash; that gate is the point, not an obstacle.</p>
-      ${pending.length ? `<div class="hero-queue">
+      ${pending.length ? `<div class="oracle-queue">
         <h4><i data-lucide="stamp"></i> Waiting for a decision <span class="sub">(${pending.length})</span></h4>
         ${pending.map(r => `
         <div class="listrow">
-          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
+          <button class="btn tiny grow" data-open-job="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
           ${statusBadge(r)}
           <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'}${r.baked_at ? ` · ${esc(relTime(r.baked_at))}` : ''}</span>
           ${isHead ? `<button class="btn tiny sage" data-cx-approve="${esc(r.id)}"><i data-lucide="check"></i> Admit</button>
@@ -2295,16 +2295,16 @@ function renderAgents () {
          * something could not otherwise tell "nothing submitted" from "sitting
          * with its author". Whose move it is, is the information.
          */
-        const notSubmitted = rows.filter(r => recipeStage(r) === 'ready')
+        const notSubmitted = rows.filter(r => jobStage(r) === 'ready')
         if (!notSubmitted.length) return ''
-        return `<div class="hero-queue">
+        return `<div class="oracle-queue">
           <h4><i data-lucide="clock"></i> Approved, not yet handed over <span class="sub">(${notSubmitted.length})</span></h4>
           <p class="help">These cannot be admitted yet - their author still needs to approve them across.</p>
           ${notSubmitted.map(r => `
             <div class="listrow">
-              <button class="btn tiny grow" data-open-recipe="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
+              <button class="btn tiny grow" data-open-job="${esc(r.id)}" style="justify-content:flex-start;text-align:left">${esc(r.title)}</button>
               <span class="sub">${r.owner ? esc(displayName(r.owner)) : 'unknown author'}</span>
-              ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Hero Agent</button>` : ''}
+              ${needsBaking(r) ? `<button class="btn tiny sage" data-submit-run="${esc(r.id)}"><i data-lucide="send"></i> Approve &rarr; Oracle</button>` : ''}
             </div>`).join('')}
         </div>`
       })()}
@@ -2357,7 +2357,7 @@ function renderAgents () {
     <p class="panel-intro">Every agent system wired into Agent Manager, and the agents each one has.
       Agents are read from the system&rsquo;s own catalog, so one added upstream appears here &mdash;
       and through here to Claude &mdash; on its own.</p>
-    ${hero}
+    ${oracle}
     ${(() => {
       const live = rows.filter(r => { const p = runProgress(r); return p && p.live })
       if (!live.length) return ''
@@ -2366,7 +2366,7 @@ function renderAgents () {
         <p class="help">Where each open run has actually got to, read from the artifacts it has
           recorded &mdash; not from what a stage reported about itself.</p>
         ${live.map(r => `<div style="padding:9px 0;border-top:1px solid var(--border)">
-          <button class="btn tiny grow" data-open-recipe="${esc(r.id)}"
+          <button class="btn tiny grow" data-open-job="${esc(r.id)}"
             style="justify-content:flex-start;text-align:left;width:100%">${esc(r.title)}</button>
           ${journeyBar(r)}
         </div>`).join('')}
@@ -2378,31 +2378,31 @@ function renderAgents () {
 
 
 /* =====================================================================
-   Cookbook: baked/approved recipes, grouped by kind, approved steps in order
+   Cookbook: baked/approved jobs, grouped by kind, approved steps in order
    ===================================================================== */
 let cookbookQuery = ''
 function cookbookSearch (v) { cookbookQuery = v; renderCookbook(); const i = $('#cookbook-search'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length) } }
 function renderCookbook () {
-  // D49: approved recipes only, organized by Project → then kind. Cards are recipes, never ingredients.
+  // D49: approved jobs only, organized by Project → then kind. Cards are jobs, never ingredients.
   const q = cookbookQuery.toLowerCase().trim()
-  let rows = scoped(state.recipes).filter(inCookbook)
+  let rows = scoped(state.jobs).filter(inCookbook)
   if (q) rows = rows.filter(r => (r.title || '').toLowerCase().includes(q) || (r.tags || []).some(t => t.toLowerCase().includes(q)))
   const byProject = new Map()
   for (const r of rows) { const p = recProject(r) || '(no project)'; if (!byProject.has(p)) byProject.set(p, []); byProject.get(p).push(r) }
   let html = `<div class="toolbar">
     <p class="sub" style="flex:1; min-width:220px">Certified runs${state.project ? ` in <b>${esc(state.project)}</b>` : ''}. Each is its approved artifacts, in order.</p>
-    <input class="field" id="cookbook-search" placeholder="Search recipes…" value="${esc(q)}" style="max-width:240px" oninput="cookbookSearch(this.value)"></div>`
+    <input class="field" id="cookbook-search" placeholder="Search jobs…" value="${esc(q)}" style="max-width:240px" oninput="cookbookSearch(this.value)"></div>`
   if (!rows.length) {
-    const exp = scoped(state.recipes).filter(r => !inCookbook(r)).length
+    const exp = scoped(state.jobs).filter(r => !inCookbook(r)).length
     html += `<p class="empty"><i data-lucide="book-marked"></i><br>${q ? 'No matching runs.' : (exp ? `Nothing promoted yet. ${exp} experimental run(s) are in the Event Log.` : 'No runs captured yet.')}</p>`
   } else {
     for (const [project, plist] of [...byProject.entries()].sort()) {
       const byKind = new Map()
-      for (const r of plist) { const k = r.type || 'recipe'; if (!byKind.has(k)) byKind.set(k, []); byKind.get(k).push(r) }
+      for (const r of plist) { const k = r.type || 'job'; if (!byKind.has(k)) byKind.set(k, []); byKind.get(k).push(r) }
       html += `<h3 class="head section-gap"><i data-lucide="folder"></i> ${esc(project)} <span class="sub">(${plist.length})</span></h3>`
       for (const [kind, list] of [...byKind.entries()].sort()) {
         html += `<div class="sub" style="margin:8px 0 6px"><i data-lucide="${KIND_ICONS[kind] || 'file'}"></i> ${esc(typeLabel(kind))}</div><div class="cards">` +
-          list.map(r => `<div class="card click" data-open-recipe="${esc(r.id)}">
+          list.map(r => `<div class="card click" data-open-job="${esc(r.id)}">
             <div class="card-head"><b>${esc(r.title)}</b>${statusBadge(r)}</div>
             ${crumb(r)}
             <div class="meta">${(r.models_used || []).map(m => modelChip(m)).join('')}${tokenChip(r.tokens_used)}<span>${r.step_count || 1} artifact(s)</span>${r.owner ? `<span><i data-lucide="user"></i> ${esc(displayName(r.owner))}</span>` : ''}</div>
@@ -2415,25 +2415,25 @@ function renderCookbook () {
 }
 
 /* =====================================================================
-   Recipe / Step detail drawer (render by kind + provenance + export + PDF)
+   Job / Step detail drawer (render by kind + provenance + export + PDF)
    ===================================================================== */
 async function openDetail (id, view) {
   const dr = $('#drawer'); const scrim = $('#drawer-scrim')
   scrim.classList.add('show'); dr.classList.add('show'); dr.setAttribute('aria-hidden', 'false')
-  state.drawerRecipeId = id // D64: so Refresh can re-render the open drawer in place
+  state.drawerJobId = id // D64: so Refresh can re-render the open drawer in place
   dr.innerHTML = '<div class="empty"><i data-lucide="loader"></i><p>Loading…</p></div>'; refreshIcons()
   let r
-  try { r = await callTool('get_recipe', { id, view: view || (inCookbookMetaById(id) ? 'approved' : 'full') }) } catch (e) { dr.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`; return }
+  try { r = await callTool('get_job', { id, view: view || (inCookbookMetaById(id) ? 'approved' : 'full') }) } catch (e) { dr.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`; return }
   /*
-   * D107: the header showed "ready to bake" on a recipe that was already baked.
+   * D107: the header showed "ready to bake" on a job that was already baked.
    *
    * The catalog entry carries what this panel needs (project, tokens, models), so it became the
    * whole source of the header, lifecycle flags included. But the catalog is a list loaded
    * separately, and after a bake done from Active Tasks the badge could still be drawn from the
-   * copy held before that write landed. r is what get_recipe just returned for this exact id, so on
+   * copy held before that write landed. r is what get_job just returned for this exact id, so on
    * lifecycle it is authoritative and the list is not. Keep the catalog for the rest of the header.
    */
-  const listed = state.recipes.find(x => x.id === id)
+  const listed = state.jobs.find(x => x.id === id)
   const meta = listed ? { ...listed, baked: r.baked, cx_approved: r.cx_approved, status: r.status } : r
   const steps = r.steps || []
   dr.innerHTML = `
@@ -2451,15 +2451,15 @@ async function openDetail (id, view) {
       <button class="btn tiny" id="pdf-detail"><i data-lucide="file-down"></i> PDF</button>
     </div>
     ${journeyBar(meta, steps)}
-    ${['draft', 'ready'].includes(recipeStage(meta)) && isMine(meta) ? `<div class="rowbtns" style="margin:10px 0">
-      <button class="btn primary" data-submit-run="${esc(id)}"><i data-lucide="send"></i> Approve &rarr; hand to the Hero Agent</button>
+    ${['draft', 'ready'].includes(jobStage(meta)) && isMine(meta) ? `<div class="rowbtns" style="margin:10px 0">
+      <button class="btn primary" data-submit-run="${esc(id)}"><i data-lucide="send"></i> Approve &rarr; hand to the Oracle</button>
     </div><p class="help">It proposes; a named person decides what reaches the Shared Knowledge Graph.</p>` : ''}
     ${runLedger(steps)}
     <div id="detail-steps" class="steps"></div>
     ${meta.approved_by ? `<div class="card section-gap"><h3 class="head"><i data-lucide="badge-check"></i> Consent record</h3><div class="kv"><span class="k">Approved by</span><span class="v">${esc(meta.approved_by)}</span></div><div class="kv"><span class="k">At</span><span class="v">${fmtDate(meta.approved_at)}</span></div>${meta.approval_note ? `<div class="kv"><span class="k">Note</span><span class="v">${esc(meta.approval_note)}</span></div>` : ''}</div>` : ''}
     ${(() => {
       /* Provenance names ROLES, not just people (D90). It used to label the author "Owner" and the
-         curation action "Baked", so a Hero Agent who submitted and admitted somebody else's work
+         curation action "Baked", so a Oracle who submitted and admitted somebody else's work
          appeared three times with no role attached and read as its author. Who made the thing and
          who cleared it are different claims, and the panel now says which is which. */
       const author = meta.owner || 'not set'
@@ -2482,8 +2482,8 @@ async function openDetail (id, view) {
   for (const s of steps) ds.appendChild(renderStepCard(s))
   refreshIcons(); hydrateRenderables(ds)
 }
-function inCookbookMetaById (id) { const m = state.recipes.find(x => x.id === id); return m ? inCookbook(m) : false }
-function closeDrawer () { $('#drawer').classList.remove('show'); $('#drawer-scrim').classList.remove('show'); $('#drawer').setAttribute('aria-hidden', 'true'); state.drawerRecipeId = null }
+function inCookbookMetaById (id) { const m = state.jobs.find(x => x.id === id); return m ? inCookbook(m) : false }
+function closeDrawer () { $('#drawer').classList.remove('show'); $('#drawer-scrim').classList.remove('show'); $('#drawer').setAttribute('aria-hidden', 'true'); state.drawerJobId = null }
 
 /* =====================================================================
    Settings (editable: retention, segmentation labels, kind labels)
@@ -2637,9 +2637,9 @@ ${m.oauth_connected
       ${(s.kinds || []).map(k => `<label class="flabel" for="kind-${esc(k.type)}">${esc(k.type)} <span class="sub">(${esc(k.approval)})</span></label><input class="field" id="kind-${esc(k.type)}" data-kind="${esc(k.type)}" value="${esc(k.label)}" style="max-width:320px">`).join('')}
     </div>
     <div class="card section-gap">
-      <h3 class="head"><i data-lucide="crown"></i> Hero Agents (CX-graph gatekeepers)</h3>
-      <p class="help">The people who may admit baked recipes into the Company CX Graph. You are a <b>${esc(state.role)}</b>. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
-      <div class="rowbtns">${(s.head_chefs && s.head_chefs.length) ? s.head_chefs.map(h => `<span class="chip"><i data-lucide="crown"></i>${esc(h)}</span>`).join('') : '<span class="sub">No Hero Agents configured.</span>'}</div>
+      <h3 class="head"><i data-lucide="crown"></i> Oracles (CX-graph gatekeepers)</h3>
+      <p class="help">The people who may admit baked jobs into the Company CX Graph. You are a <b>${esc(state.role)}</b>. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
+      <div class="rowbtns">${(s.head_chefs && s.head_chefs.length) ? s.head_chefs.map(h => `<span class="chip"><i data-lucide="crown"></i>${esc(h)}</span>`).join('') : '<span class="sub">No Oracles configured.</span>'}</div>
     </div>
     <div class="card section-gap" id="my-password-card">
       <h3 class="head"><i data-lucide="key-round"></i> Change my password</h3>
@@ -2659,7 +2659,7 @@ ${m.oauth_connected
     </div>
     ${state.roles.includes('admin') ? `<div class="card section-gap" id="create-login-card">
       <h3 class="head"><i data-lucide="user-plus"></i> Create a Cookbook login (admin)</h3>
-      <p class="help">One login for the dashboard and for their assistant, so their work carries their name from the first recipe. The password is stored as a hash and cannot be read back, so the setup file downloads now.</p>
+      <p class="help">One login for the dashboard and for their assistant, so their work carries their name from the first job. The password is stored as a hash and cannot be read back, so the setup file downloads now.</p>
       <div class="fgrid">
         <label class="flabel" for="nu-name">Full name</label>
         <input class="field" id="nu-name" placeholder="Jesse Pinkman" style="max-width:320px">
@@ -2687,7 +2687,7 @@ ${m.oauth_connected
     </div>
     <div class="card section-gap" id="team-roles-card">
       <h3 class="head"><i data-lucide="users"></i> Team / Roles (admin)</h3>
-      <p class="help">Everyone is a <b>Marketer</b>. A <b>Hero Agent approver</b> decides what the Hero Agent proposes is promoted into the Shared Knowledge Graph. An <b>Admin</b> manages roles and settings.</p>
+      <p class="help">Everyone is a <b>Marketer</b>. A <b>Oracle approver</b> decides what the Oracle proposes is promoted into the Shared Knowledge Graph. An <b>Admin</b> manages roles and settings.</p>
       <div id="team-roles-body"><span class="sub">Loading…</span></div>
       <div class="rowbtns">
         <input class="field" id="team-add-owner" placeholder="user identity (email / username)" style="max-width:320px">
@@ -2706,7 +2706,7 @@ ${m.oauth_connected
 /* Role VALUES, matching the server's enum. Never display these raw - see ROLE_LABEL.
    'chef' is the stored value; 'Marketer' is what a person reads. */
 const ASSIGNABLE_ROLES = ['chef', 'head-chef', 'admin']
-const ROLE_LABEL = { chef: 'Marketer', 'head-chef': 'Hero Agent approver', admin: 'Admin', viewer: 'Read-only' }
+const ROLE_LABEL = { chef: 'Marketer', 'head-chef': 'Oracle approver', admin: 'Admin', viewer: 'Read-only' }
 const roleLabel = (r) => ROLE_LABEL[r] || r
 
 /* =====================================================================
@@ -2750,9 +2750,9 @@ I am a marketer. When I ask you to create a campaign brief or an audience reques
 3. If a stage reports success but its output carries an error, say so. A step that
    claims completed while its tool failed is not a success, and I would rather hear it
    from you than find it later.
-4. When the run is finished and I am happy, approve it. That hands it to the Hero
+4. When the run is finished and I am happy, approve it. That hands it to the Oracle
    Agent, which reads it against every earlier run and proposes what should be learned.
-   The Hero Agent only proposes - a named person still decides what is promoted.
+   The Oracle only proposes - a named person still decides what is promoted.
 
 Before starting, search for prior runs on this topic and tell me what you find. Reuse
 before rebuilding.
@@ -2773,7 +2773,7 @@ Setup for ${user.display_name || user.id}
 Login id     ${user.id}
 Password     ${user.password}
 Email        ${user.email || 'not set'}
-Roles        ${(user.roles || ['chef']).map(r => ({ chef: 'Marketer', 'head-chef': 'Hero Agent approver', admin: 'Admin', viewer: 'Read-only' })[r] || r).join(', ')}
+Roles        ${(user.roles || ['chef']).map(r => ({ chef: 'Marketer', 'head-chef': 'Oracle approver', admin: 'Admin', viewer: 'Read-only' })[r] || r).join(', ')}
 Domain       ${user.practice || 'not set'}
 Issued       ${new Date().toISOString().slice(0, 10)}
 
@@ -2858,8 +2858,8 @@ clients will stop connecting.
 
   capture     every step of a run is logged as it happens. Private to you.
   approve     one button, or just tell Claude to approve. Hands the run to the
-              Hero Agent.
-  propose     the Hero Agent reads the run against every earlier run and proposes
+              Oracle.
+  propose     the Oracle reads the run against every earlier run and proposes
               what should be learned. It only ever proposes.
   promote     a named person decides what enters the Shared Knowledge Graph.
 
@@ -2890,7 +2890,7 @@ TROUBLESHOOTING
       Your login cannot write. Ask an admin for a marketer role.
 
   "no approved artifacts"
-      Nothing has been submitted to the Hero Agent yet.
+      Nothing has been submitted to the Oracle yet.
 
 
 SECURITY
@@ -3126,20 +3126,20 @@ function mountForceGraph (container, nodes, edges, { onClick } = {}) {
 
 /* =====================================================================
    Knowledge graph: composition and lineage, with each stage distinct.
-   steered (corrected) recipes ringed (D54)
+   steered (corrected) jobs ringed (D54)
    ===================================================================== */
 async function buildGraph () {
   const sub = $('#graph-sub'); const legend = $('#graph-legend'); const container = $('#graph')
   /*
    * This graph is YOURS (D84, enforced in D98). It shows your own work at every stage, including
    * the private drafts nobody else can see, which is exactly why it can never be pointed at
-   * somebody else: not by a Hero Agent, not by an admin, not by the all-owners view. Filtering to
+   * somebody else: not by a Oracle, not by an admin, not by the all-owners view. Filtering to
    * your own work here is deliberate and unconditional. Shared knowledge has its own graph.
    */
-  let rows = scoped(state.recipes).filter(isMine)
+  let rows = scoped(state.jobs).filter(isMine)
   const where = state.project ? `<b>${esc(state.project)}</b>` : 'all projects'
   if (!rows.length) {
-    sub.innerHTML = `${agentFace('hero', false, 30)} The Hero Agent has nothing of yours to read in ${where} yet.`
+    sub.innerHTML = `${agentFace('oracle', false, 30)} The Oracle has nothing of yours to read in ${where} yet.`
     legend.innerHTML = ''
     container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="inbox"></i><br>' +
       'Nothing captured here yet. This graph only ever shows YOUR work, private drafts included &mdash; ' +
@@ -3152,15 +3152,15 @@ async function buildGraph () {
   if (capped) rows = rows.slice().sort((a, b) => (b.updated_at || b.updated || b.created || '').localeCompare(a.updated_at || a.updated || a.created || '')).slice(0, CAP)
 
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
-  for (const r of rows) stageCounts[recipeStage(r)]++
-  sub.innerHTML = `${agentFace('hero', true, 30)} <b>What the Hero Agent reads across your work</b> in ${where} ` +
+  for (const r of rows) stageCounts[jobStage(r)]++
+  sub.innerHTML = `${agentFace('oracle', true, 30)} <b>What the Oracle reads across your work</b> in ${where} ` +
     `&mdash; every run at every stage, private drafts included, and the artifacts each agent produced drawn as that agent. ` +
-    `${stageCounts.draft} in progress · ${stageCounts.ready} ready to approve · ${stageCounts.awaiting} with the Hero Agent · ${stageCounts.incx} in the Shared Knowledge Graph. ` +
+    `${stageCounts.draft} in progress · ${stageCounts.ready} ready to approve · ${stageCounts.awaiting} with the Oracle · ${stageCounts.incx} in the Shared Knowledge Graph. ` +
     `${capped ? `Showing the ${CAP} most recent of ${total}.` : ''}`
   // Legend mirrors the four stages exactly, so the colour tells you where the work stands.
   legend.innerHTML = `<span><span class="swatch" style="background:var(--exp)"></span>in progress (private)</span>` +
     `<span><span class="swatch" style="background:var(--ready)"></span>ready to approve</span>` +
-    `<span><span class="swatch" style="background:var(--baked)"></span>with the Hero Agent</span>` +
+    `<span><span class="swatch" style="background:var(--baked)"></span>with the Oracle</span>` +
     `<span><span class="swatch" style="background:var(--house)"></span>in the Shared Knowledge Graph</span>` +
     `<span>${agentFace('intake', true, 18)} an agent&rsquo;s artifact</span>` +
     `<span><span class="swatch" style="background:var(--ingredient)"></span>written by a person</span>` +
@@ -3172,7 +3172,7 @@ async function buildGraph () {
   const stepErrors = []
   try {
     [stepLists, handoffs] = await Promise.all([
-      Promise.all(rows.map(r => callTool('list_steps', { recipe_id: r.id }).catch(e => { stepErrors.push(`${r.title}: ${e.message}`); return [] }))),
+      Promise.all(rows.map(r => callTool('list_steps', { job_id: r.id }).catch(e => { stepErrors.push(`${r.title}: ${e.message}`); return [] }))),
       callTool('list_resources', { project: state.project, type: 'handoff-prompt' }).catch(() => [])
     ])
   } catch (e) { container.innerHTML = `<div class="empty">Failed to load: ${esc(e.message)}</div>`; return }
@@ -3193,8 +3193,8 @@ async function buildGraph () {
     sub.innerHTML += ` <span style="color:var(--reject)">${stepErrors.length} run(s) could not be read: ${esc(stepErrors[0])}${stepErrors.length > 1 ? ' …' : ''}</span>`
   }
 
-  const stepsByRecipe = {}
-  rows.forEach((r, i) => { stepsByRecipe[r.id] = stepLists[i] || [] })
+  const stepsByJob = {}
+  rows.forEach((r, i) => { stepsByJob[r.id] = stepLists[i] || [] })
   const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#1F1E1C'
   const nodes = []; const edges = []
   const tagHub = {}; const segHub = {}; const kindHub = {}
@@ -3211,12 +3211,12 @@ async function buildGraph () {
     incx: { shape: 'hexagon', size: 20, ...pal.stages.incx, width: 3 }
   }
   for (const r of rows) {
-    const stage = recipeStage(r)
+    const stage = jobStage(r)
     const vis = STAGE_VIS[stage]
-    const artifacts = stepsByRecipe[r.id]
+    const artifacts = stepsByJob[r.id]
     const steered = artifacts.some(s => s.kind === 'steering' && s.signal === 'correct')
     nodes.push({
-      id: r.id, group: 'recipe', label: r.title.length > 26 ? r.title.slice(0, 24) + '…' : r.title,
+      id: r.id, group: 'job', label: r.title.length > 26 ? r.title.slice(0, 24) + '…' : r.title,
       shape: vis.shape, size: vis.size,
       color: { background: vis.bg, border: steered ? pal.steered : vis.border },
       borderWidth: steered ? 5 : vis.width,
@@ -3242,7 +3242,7 @@ async function buildGraph () {
       const rejectHue = themeColor('reject', '#A34E35')
       nodes.push(who
         ? {
-            id: s.id, group: 'artifact', recipe: r.id, agent: who,
+            id: s.id, group: 'artifact', job: r.id, agent: who,
             label: (meta && meta.label) || who,
             shape: 'image', image: agentFaceUri(who, true), size: 16,
             font: { size: 11, color: textColor },
@@ -3252,7 +3252,7 @@ async function buildGraph () {
             title: `${(meta && meta.label) || who}\n${s.kind}` +
               (faulted ? '\nreported success, but its tool call failed' : '')
           }
-        : { id: s.id, group: 'artifact', recipe: r.id, label: s.kind, shape: 'dot', size: 7, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor }, title: `${s.kind}\nnot produced by an agent` })
+        : { id: s.id, group: 'artifact', job: r.id, label: s.kind, shape: 'dot', size: 7, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor }, title: `${s.kind}\nnot produced by an agent` })
       edges.push({ from: r.id, to: s.id, rel: 'composition', color: { color: faulted ? rejectHue : pal.edge } })
     }
     const seg = subKey ? segVal(r, subKey) : null
@@ -3262,7 +3262,7 @@ async function buildGraph () {
     edges.push({ from: r.id, to: khid, rel: 'shared-kind', dashes: true, color: { color: pal.edgeFaint } })
   }
   for (const h of handoffs) {
-    const deps = (h.linked_recipes || []).filter(id => visibleIds.has(id))
+    const deps = (h.linked_jobs || []).filter(id => visibleIds.has(id))
     if (!deps.length) continue
     nodes.push({ id: h.id, group: 'handoff', label: h.title.length > 22 ? h.title.slice(0, 20) + '…' : h.title, shape: 'triangle', size: 12, color: { background: pal.stages.awaiting.bg, border: pal.stages.awaiting.border }, font: { size: 11, color: textColor } })
     for (const dep of deps) edges.push({ from: h.id, to: dep, arrows: 'to', rel: 'lineage', color: { color: pal.stages.incx.border } })
@@ -3270,7 +3270,7 @@ async function buildGraph () {
 
   try {
     mountForceGraph(container, nodes, edges, {
-      onClick: id => { const n = nodes.find(x => x.id === id); if (!n) return; if (n.group === 'recipe') openDetail(id); else if (n.group === 'artifact') openDetail(n.recipe) }
+      onClick: id => { const n = nodes.find(x => x.id === id); if (!n) return; if (n.group === 'job') openDetail(id); else if (n.group === 'artifact') openDetail(n.job) }
     })
   } catch (e) {
     // "cannot read properties of null" on its own is unactionable. Say which
@@ -3299,8 +3299,8 @@ async function buildCx (rebuild) {
     `<span><span class="swatch" style="background:var(--ingredient)"></span>written by a person</span>` +
     `<span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
   sub.innerHTML = g.built === false || !g.generated_at
-    ? 'Shared, approved knowledge across every owner. Nothing admitted yet: bake a recipe, then have a Hero Agent admit it.'
-    : `Cross-owner, <b>approved-only</b>. ${g.recipe_count} run(s) · ${g.node_count} node(s) · ${g.edge_count} edge(s) · ${g.owners.length} owner(s). Generated ${relTime(g.generated_at)}. Drag a node; hover to trace its connections.`
+    ? 'Shared, approved knowledge across every owner. Nothing admitted yet: bake a job, then have a Oracle admit it.'
+    : `Cross-owner, <b>approved-only</b>. ${g.job_count} run(s) · ${g.node_count} node(s) · ${g.edge_count} edge(s) · ${g.owners.length} owner(s). Generated ${relTime(g.generated_at)}. Drag a node; hover to trace its connections.`
   // D84: the CX graph's filters come from the GRAPH'S OWN CONTENTS - people, domains and projects
   // that are actually in it. They previously sat next to the global project picker, which lists
   // every project including ones with nothing admitted, so the panel showed two "All projects"
@@ -3329,38 +3329,38 @@ function renderCxNetwork () {
   const fp = $('#cx-project').value; const fo = $('#cx-owner').value; const fpr = $('#cx-practice').value
   const textColor = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#1F1E1C'
   const pal = graphPalette()
-  const steeredByRecipe = {}
+  const steeredByJob = {}
   const isArtifact = (n) => n.node === 'artifact' || n.node === 'ingredient'
-  for (const n of g.nodes) if (isArtifact(n) && n.kind === 'steering' && n.signal === 'correct') steeredByRecipe[n.recipe] = true
+  for (const n of g.nodes) if (isArtifact(n) && n.kind === 'steering' && n.signal === 'correct') steeredByJob[n.job] = true
 
   const CAP = 150
-  let recipeSrc = g.nodes.filter(n => n.node === 'recipe' &&
+  let jobSrc = g.nodes.filter(n => n.node === 'job' &&
     (!fp || n.project === fp) &&
     (!fo || n.owner === fo) &&
     (!fpr || n.practice === fpr))
-  const capped = recipeSrc.length > CAP
-  if (capped) recipeSrc = recipeSrc.slice(0, CAP)
+  const capped = jobSrc.length > CAP
+  if (capped) jobSrc = jobSrc.slice(0, CAP)
 
-  const recipeVisible = new Set()
+  const jobVisible = new Set()
   const nodes = []
-  for (const n of recipeSrc) {
-    recipeVisible.add(n.id)
-    const steered = steeredByRecipe[n.id]
-    nodes.push({ id: n.id, group: 'recipe', label: (n.label || '').slice(0, 26), shape: 'hexagon', size: 20, color: { background: pal.stages.incx.bg, border: steered ? pal.steered : pal.stages.incx.border }, borderWidth: steered ? 5 : 3, font: { size: 13, color: textColor }, title: `${n.label}\n${n.owner || 'owner not recorded'}${steered ? '\nsteered' : ''}` })
+  for (const n of jobSrc) {
+    jobVisible.add(n.id)
+    const steered = steeredByJob[n.id]
+    nodes.push({ id: n.id, group: 'job', label: (n.label || '').slice(0, 26), shape: 'hexagon', size: 20, color: { background: pal.stages.incx.bg, border: steered ? pal.steered : pal.stages.incx.border }, borderWidth: steered ? 5 : 3, font: { size: 13, color: textColor }, title: `${n.label}\n${n.owner || 'owner not recorded'}${steered ? '\nsteered' : ''}` })
   }
   // Same rule as the personal graph: an agent's artifact is drawn as that
   // agent; anything a person wrote keeps its kind.
   for (const n of g.nodes) {
-    if (!isArtifact(n) || !recipeVisible.has(n.recipe)) continue
+    if (!isArtifact(n) || !jobVisible.has(n.job)) continue
     const who = stepAgent(n)
     const meta = who ? (state.systemAgents || []).find(a => a.id === who) : null
     nodes.push(who
-      ? { id: n.id, group: 'artifact', recipe: n.recipe, agent: who,
+      ? { id: n.id, group: 'artifact', job: n.job, agent: who,
           label: (meta && meta.label) || who,
           shape: 'image', image: agentFaceUri(who, true), size: 16,
           font: { size: 11, color: textColor },
           title: `${(meta && meta.label) || who}\n${n.kind}` }
-      : { id: n.id, group: 'artifact', recipe: n.recipe, label: n.kind, shape: 'dot', size: 8, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor } })
+      : { id: n.id, group: 'artifact', job: n.job, label: n.kind, shape: 'dot', size: 8, color: { background: pal.ingredientSoft, border: pal.ingredient }, font: { size: 10, color: textColor } })
   }
   for (const n of g.nodes) if (n.node === 'handoff') nodes.push({ id: n.id, group: 'handoff', label: (n.label || '').slice(0, 22), shape: 'triangle', size: 12, color: { background: pal.stages.awaiting.bg, border: pal.stages.awaiting.border }, font: { size: 11, color: textColor } })
 
@@ -3369,13 +3369,13 @@ function renderCxNetwork () {
     from: e.from, to: e.to, rel: e.rel, arrows: e.rel === 'lineage' ? 'to' : undefined, dashes: e.rel && e.rel.startsWith('shared'),
     color: { color: e.rel === 'artifact' ? pal.edge : e.rel === 'lineage' ? pal.stages.incx.border : pal.edgeFaint }
   }))
-  // drop non-recipe nodes left isolated after the project/owner filter removed their only edge
+  // drop non-job nodes left isolated after the project/owner filter removed their only edge
   const connected = new Set(edges.flatMap(e => [e.from, e.to]))
-  const finalNodes = nodes.filter(n => n.group === 'recipe' || connected.has(n.id))
+  const finalNodes = nodes.filter(n => n.group === 'job' || connected.has(n.id))
   if (capped) { const s = $('#cx-sub'); s.innerHTML += ` Showing ${CAP} of them. Narrow with the filters to see the rest.` }
   try {
     mountForceGraph(container, finalNodes, edges, {
-      onClick: id => { const n = finalNodes.find(x => x.id === id); if (!n) return; if (n.group === 'recipe') openDetail(id); else if (n.group === 'artifact') openDetail(n.recipe) }
+      onClick: id => { const n = finalNodes.find(x => x.id === id); if (!n) return; if (n.group === 'job') openDetail(id); else if (n.group === 'artifact') openDetail(n.job) }
     })
   } catch (e) {
     // "cannot read properties of null" on its own is unactionable. Say which
@@ -3462,7 +3462,7 @@ async function exportPdf (node, title) {
   const wrap = document.createElement('div'); wrap.style.padding = '20px'; wrap.style.background = '#fff'; wrap.style.color = '#1F1E1C'
   wrap.appendChild(clone)
   toast('Generating PDF…')
-  try { await html2pdf().set({ margin: 10, filename: `${(title || 'recipe').replace(/[^a-z0-9]+/gi, '-')}.pdf`, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4' } }).from(wrap).save() }
+  try { await html2pdf().set({ margin: 10, filename: `${(title || 'job').replace(/[^a-z0-9]+/gi, '-')}.pdf`, image: { type: 'jpeg', quality: 0.95 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4' } }).from(wrap).save() }
   catch (e) { banner(`PDF failed: ${e.message}`) }
 }
 
@@ -3470,10 +3470,10 @@ async function exportPdf (node, title) {
    Actions (event delegation)
    ===================================================================== */
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-open-recipe],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-view-json],[data-copy-json],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-recipe],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-unassign-step]')
+  const t = e.target.closest('[data-open-job],[data-worklog],[data-open-worklog],[data-scope-project],[data-bake-project],[data-archive-project],[data-approve-step],[data-discard-step],[data-copy-step],[data-download-step],[data-view-json],[data-copy-json],[data-copy-task],[data-done-task],[data-view-toggle],[data-bake-task],[data-bake-job],[data-submit-run],[data-cx-approve],[data-cx-reject],[data-unassign-step]')
   if (!t) return
   try {
-    if (t.dataset.openRecipe) { openDetail(t.dataset.openRecipe) }
+    if (t.dataset.openJob) { openDetail(t.dataset.openJob) }
     else if (t.dataset.openWorklog) { go('worklog'); openWorklog(t.dataset.openWorklog) }
     else if (t.dataset.worklog) { openWorklog(t.dataset.worklog) }
     else if (t.dataset.scopeProject) { setActiveProject(t.dataset.scopeProject); go('worklog') }
@@ -3492,16 +3492,16 @@ document.addEventListener('click', async (e) => {
     else if (t.dataset.doneTask) { await callTool('set_task_status', { id: t.dataset.doneTask, status: 'done' }); toast('Task marked done'); await reloadLight() }
     else if (t.dataset.viewToggle) { openDetail(t.dataset.viewToggle, t.dataset.view) }
     else if (t.dataset.bakeTask) { openConsent('bake', t.dataset.bakeTask) } // D64: bake happens from Active Tasks
-    // D84: bake from wherever a ready-but-unsubmitted recipe is shown, so the missing step is
+    // D84: bake from wherever a ready-but-unsubmitted job is shown, so the missing step is
     // actionable at the point the user notices it.
-    else if (t.dataset.bakeRecipe) { openConsent('bake', t.dataset.bakeRecipe) }
+    else if (t.dataset.bakeJob) { openConsent('bake', t.dataset.bakeJob) }
     // The single Approve control. Same underlying finalize as the cookbook's
-    // bake, renamed to what it now means: hand the run to the Hero Agent.
+    // bake, renamed to what it now means: hand the run to the Oracle.
     else if (t.dataset.submitRun) { openConsent('bake', t.dataset.submitRun) }
     // D86: assignment is the only route by which unfinished work becomes visible to a colleague.
     else if (t.dataset.unassignStep) { await callTool('unassign_step', { step_id: t.dataset.unassignStep, assignee: t.dataset.unassignWho }); toast('Assignment removed'); await refreshCurrent() }
-    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { recipe_id: t.dataset.cxApprove }); toast('Admitted to the Company CX Graph'); await reloadLight() }
-    else if (t.dataset.cxReject) { await callTool('headchef_reject', { recipe_id: t.dataset.cxReject }); toast('Held back from the CX Graph'); await reloadLight() }
+    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { job_id: t.dataset.cxApprove }); toast('Admitted to the Company CX Graph'); await reloadLight() }
+    else if (t.dataset.cxReject) { await callTool('headchef_reject', { job_id: t.dataset.cxReject }); toast('Held back from the CX Graph'); await reloadLight() }
   } catch (err) { banner(err.message) }
 })
 
@@ -3565,24 +3565,24 @@ async function copyTask (id) {
 
 async function refreshCurrent () {
   await reloadLight()
-  if (state.currentRecipe) await openWorklog(state.currentRecipe.id)
+  if (state.currentJob) await openWorklog(state.currentJob.id)
 }
 async function reloadLight () {
-  const [recipes, projects, tasks, pending, cookoff] = await Promise.all([recipesPromise().catch(() => state.recipesAll), projectsPromise().catch(() => state.projects), callTool('list_active_tasks').catch(() => state.tasks), callTool('list_cx_pending').catch(() => state.cxPending), callTool('get_cookoff').catch(() => state.cookoff)])
-  state.recipesAll = recipes; state.recipes = recipes; state.projects = projects; state.tasks = tasks; state.cxPending = pending; state.cookoff = cookoff
+  const [jobs, projects, tasks, pending, cookoff] = await Promise.all([jobsPromise().catch(() => state.jobsAll), projectsPromise().catch(() => state.projects), callTool('list_active_tasks').catch(() => state.tasks), callTool('list_cx_pending').catch(() => state.cxPending), callTool('get_cookoff').catch(() => state.cookoff)])
+  state.jobsAll = jobs; state.jobs = jobs; state.projects = projects; state.tasks = tasks; state.cxPending = pending; state.cookoff = cookoff
   renderProjectSwitcher(); renderAll()
 }
 
 /* =====================================================================
-   Auto-refresh (D55): new recipes "pop in" without a manual reload. Quiet - no
+   Auto-refresh (D55): new jobs "pop in" without a manual reload. Quiet - no
    loading text, no banner spam on a transient failure, and it never touches the
    Work Log detail, the open drawer, or in-progress Settings/Cookbook-search input.
    ===================================================================== */
 async function quietPoll () {
   if (document.hidden) return
   try {
-    const [recipes, projects, tasks, pending, cookoff] = await Promise.all([recipesPromise(), projectsPromise(), callTool('list_active_tasks'), callTool('list_cx_pending'), callTool('get_cookoff')])
-    state.recipesAll = recipes; state.recipes = recipes; state.projects = projects; state.tasks = tasks; state.cxPending = pending; state.cookoff = cookoff
+    const [jobs, projects, tasks, pending, cookoff] = await Promise.all([jobsPromise(), projectsPromise(), callTool('list_active_tasks'), callTool('list_cx_pending'), callTool('get_cookoff')])
+    state.jobsAll = jobs; state.jobs = jobs; state.projects = projects; state.tasks = tasks; state.cxPending = pending; state.cookoff = cookoff
     renderProjectSwitcher(); updateRoleUI()
     renderHome(); renderProjects(); renderWorklogList(); renderTasks(); renderCookbook(); renderAgents()
   } catch (e) { /* transient - stay silent, the next tick tries again */ }
@@ -3593,25 +3593,25 @@ setInterval(quietPoll, 20000)
 document.addEventListener('click', async (e) => {
   if (e.target.closest('#export-replay') || e.target.closest('#export-prompt')) { const btn = e.target.closest('#export-replay') || e.target.closest('#export-prompt'); exportReplay(btn.dataset.id, 'prompt') }
   else if (e.target.closest('#download-skill')) { exportReplay(e.target.closest('#download-skill').dataset.id, 'claude-skill') }
-  else if (e.target.closest('#pdf-recipe')) { exportPdf($('#worklog-detail'), state.currentRecipe ? state.currentRecipe.title : 'recipe') }
-  else if (e.target.closest('#pdf-detail')) { exportPdf($('#drawer'), 'recipe') }
+  else if (e.target.closest('#pdf-job')) { exportPdf($('#worklog-detail'), state.currentJob ? state.currentJob.title : 'job') }
+  else if (e.target.closest('#pdf-detail')) { exportPdf($('#drawer'), 'job') }
   else if (e.target.closest('#drawer-close')) { closeDrawer() }
   else if (e.target.closest('#attach-diagram')) { openAttach(e.target.closest('#attach-diagram').dataset.id) }
 })
 async function exportReplay (id, format) {
   try {
-    const ex = await callTool('export_as_skill', { recipe_id: id, format })
+    const ex = await callTool('export_as_skill', { job_id: id, format })
     if (format === 'prompt') { navigator.clipboard.writeText(ex.content); toast('Replay prompt copied') }
     else { downloadText(ex.content, ex.filename || 'SKILL.md'); toast('SKILL.md downloaded') }
   } catch (e) { banner(e.message) }
 }
 
-/* consent modal (used for recipe bake-all) */
+/* consent modal (used for job bake-all) */
 let consentCtx = null
 function openConsent (mode, id) {
   consentCtx = { mode, id }
   $('#consent-title').textContent = mode === 'bake' ? 'Approve this run' : 'Certify'
-  $('#consent-desc').textContent = mode === 'bake' ? 'Hands the run to the Hero Agent, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the shared knowledge graph.' : 'Record your consent.'
+  $('#consent-desc').textContent = mode === 'bake' ? 'Hands the run to the Oracle, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the shared knowledge graph.' : 'Record your consent.'
   $('#consent-confirm').innerHTML = `<i data-lucide="check"></i> ${mode === 'bake' ? 'Approve' : 'Certify'}`
   $('#consent-note').value = ''; $('#consent').classList.add('show'); refreshIcons(); $('#consent-note').focus()
 }
@@ -3623,17 +3623,17 @@ $('#consent-confirm').addEventListener('click', async () => {
   try {
     // D64: bake uses the artifacts already approved (no approve_all auto-approve). The server
     // rejects a bake with zero approved artifacts; surface that clearly if it happens.
-    if (consentCtx.mode === 'bake') await callTool('bake_recipe', note ? { id: consentCtx.id, note } : { id: consentCtx.id })
-    const id = consentCtx.id; closeConsent(); toast('Run approved and sent to the Hero Agent'); await reloadLight()
-    if (state.currentRecipe && state.currentRecipe.id === id) await openWorklog(id)
+    if (consentCtx.mode === 'bake') await callTool('bake_job', note ? { id: consentCtx.id, note } : { id: consentCtx.id })
+    const id = consentCtx.id; closeConsent(); toast('Run approved and sent to the Oracle'); await reloadLight()
+    if (state.currentJob && state.currentJob.id === id) await openWorklog(id)
   } catch (e) { banner(e.message); closeConsent() }
 })
 
 /* attach diagram/image modal (D57/D58) - manual fallback for artifacts the AI can't
    self-serialize; appends a scoped kind:image or kind:diagram step via the dashboard proxy. */
 let attachCtx = null
-function openAttach (recipeId) {
-  attachCtx = { recipeId }
+function openAttach (jobId) {
+  attachCtx = { jobId }
   $('#attach-file').value = ''; $('#attach-source').value = ''
   $('#attach').classList.add('show'); refreshIcons()
 }
@@ -3653,17 +3653,17 @@ $('#attach-confirm').addEventListener('click', async () => {
   const source = $('#attach-source').value.trim()
   if (!file && !source) { banner('Choose a file to upload, or paste Mermaid/SVG source'); return }
   try {
-    const recipeId = attachCtx.recipeId
+    const jobId = attachCtx.jobId
     if (file) {
       const data = await fileToBase64(file)
-      await callTool('append_step', { recipe_id: recipeId, kind: 'image', source: 'dashboard', asset: { data, mime_type: file.type || 'application/octet-stream' } })
+      await callTool('append_step', { job_id: jobId, kind: 'image', source: 'dashboard', asset: { data, mime_type: file.type || 'application/octet-stream' } })
     } else {
       const format = source.startsWith('<svg') ? 'svg' : 'mermaid'
-      await callTool('append_step', { recipe_id: recipeId, kind: 'diagram', source: 'dashboard', format, content: source })
+      await callTool('append_step', { job_id: jobId, kind: 'diagram', source: 'dashboard', format, content: source })
     }
     closeAttach(); toast('Attached'); await reloadLight()
-    if ($('#drawer').classList.contains('show')) await openDetail(recipeId)
-    if (state.currentRecipe && state.currentRecipe.id === recipeId) await openWorklog(recipeId)
+    if ($('#drawer').classList.contains('show')) await openDetail(jobId)
+    if (state.currentJob && state.currentJob.id === jobId) await openWorklog(jobId)
   } catch (e) { banner(e.message) }
 })
 
@@ -3672,16 +3672,16 @@ $('#attach-confirm').addEventListener('click', async () => {
    ===================================================================== */
 /*
  * "My Graph" described whose LOGIN it belonged to. What a person is actually
- * looking at is the Hero Agent's own view - the runs it reads across, and the
+ * looking at is the Oracle's own view - the runs it reads across, and the
  * artifacts each agent produced, drawn as those agents. Naming it after the
  * thing doing the reading says what the picture is.
  *
  * It stays scoped to your own work, private drafts included, which is why the
  * Shared Knowledge Graph is a separate panel rather than a filter on this one.
- * The headchef entry is gone: approvals moved into the Hero Agent's card in
+ * The headchef entry is gone: approvals moved into the Oracle's card in
  * Agents, so there is no panel left to title.
  */
-const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', agents: 'Agents', graph: 'Hero Agent Graph', cx: 'Shared Knowledge Graph', settings: 'Settings', connections: 'Connections' }
+const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', agents: 'Agents', graph: 'Oracle Graph', cx: 'Shared Knowledge Graph', settings: 'Settings', connections: 'Connections' }
 function activePanel () { const s = document.querySelector('section.panel.active'); return s ? s.id.replace('panel-', '') : 'home' }
 function rebuildActiveGraph () { const p = activePanel(); if (p === 'graph') buildGraph(); else if (p === 'cx') renderCxNetwork() }
 /**
@@ -3755,8 +3755,8 @@ function setTheme (theme) {
 $('#refresh-btn').addEventListener('click', async () => {
   await loadAll(true)
   rebuildActiveGraph()
-  if ($('#drawer').classList.contains('show') && state.drawerRecipeId) await openDetail(state.drawerRecipeId)
-  if (state.currentRecipe && $('#panel-worklog').classList.contains('active')) await openWorklog(state.currentRecipe.id)
+  if ($('#drawer').classList.contains('show') && state.drawerJobId) await openDetail(state.drawerJobId)
+  if (state.currentJob && $('#panel-worklog').classList.contains('active')) await openWorklog(state.currentJob.id)
   toast('Refreshed')
 })
 
@@ -3764,13 +3764,13 @@ $('#refresh-btn').addEventListener('click', async () => {
 const paletteActions = () => {
   const nav = [['home', 'Home / My Work'], ['projects', 'Projects'], ['worklog', 'Work Log'], ['tasks', 'Active Tasks'], ['cookbook', 'Cookbook'], ['graph', 'Knowledge Graph'], ['cx', 'Company CX Graph'], ['settings', 'Settings'], ['connections', 'Connections']]
   const items = nav.map(([p, l]) => ({ label: l, hint: 'panel', run: () => go(p) }))
-  // Jumping to a recipe carries the QUERY with it (D92). Arriving with the list showing everything
-  // and the opened recipe scrolled off-screen loses the context you searched in: the left column
+  // Jumping to a job carries the QUERY with it (D92). Arriving with the list showing everything
+  // and the opened job scrolled off-screen loses the context you searched in: the left column
   // should be the neighbourhood of what is on the right, not an unrelated list.
-  for (const r of state.recipes) {
+  for (const r of state.jobs) {
     items.push({
       label: r.title,
-      hint: STAGES[recipeStage(r)].label,
+      hint: STAGES[jobStage(r)].label,
       run: () => { state.worklogQuery = $('#palette-input').value.trim(); go('worklog'); openWorklog(r.id) }
     })
   }

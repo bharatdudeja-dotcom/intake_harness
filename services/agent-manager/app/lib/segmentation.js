@@ -11,7 +11,7 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Segmentation config (D39) - how recipes are organized by the unit of work.
+ * Segmentation config (D39) - how jobs are organized by the unit of work.
  * Data, not code: config/segmentation.json declares an ordered list of levels
  * ({ key, label }); the default is Project -> Epic -> Story, and a company can
  * rename or reduce them. Internal `key`s stay stable so relabeling the UI never

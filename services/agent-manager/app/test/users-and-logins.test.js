@@ -167,8 +167,8 @@ describe('create_user is admin-only and produces a working login (D81)', () => {
         const me = okJson(JSON.parse(res.body).result)
         expect(me.roles).toEqual(expect.arrayContaining(['chef', 'head-chef']))
 
-        // The practice is live too: a recipe they start inherits it with no extra effort.
-        const rec = await callWith({ 'x-cookbook-login': 'mike:test-pw-charlie-0003' }, 'start_recipe', { project: 'P', title: 'T' })
+        // The practice is live too: a job they start inherits it with no extra effort.
+        const rec = await callWith({ 'x-cookbook-login': 'mike:test-pw-charlie-0003' }, 'start_job', { project: 'P', title: 'T' })
         expect(okJson(JSON.parse(rec.body).result).practice).toBe('braze')
     })
 
@@ -233,15 +233,15 @@ describe('login lifecycle: list, reset, disable (D81)', () => {
 })
 
 describe('logins survive a content reset (D81)', () => {
-    test('admin_reset_data wipes recipes but NOT logins - a demo reset must not lock the team out', async () => {
+    test('admin_reset_data wipes jobs but NOT logins - a demo reset must not lock the team out', async () => {
         await asKey(ADMIN_KEY, 'create_user', { id: 'walter.white', password: 'zephyr-saffron-1064', email: 'walter.white@tapcxm.example', roles: ['admin'] })
-        await asKey(ADMIN_KEY, 'start_recipe', { project: 'P', title: 'Doomed recipe' })
+        await asKey(ADMIN_KEY, 'start_job', { project: 'P', title: 'Doomed job' })
 
         await asKey(ADMIN_KEY, 'admin_reset_data', { confirm: true })
 
         expect((await store.listUsers()).map(u => u.id)).toContain('walter.white')
         expect((await callWith({ 'x-cookbook-login': 'walter.white:zephyr-saffron-1064' }, 'get_my_roles')).statusCode).toBe(200)
-        expect(okJson(await asKey(ADMIN_KEY, 'list_recipes'))).toHaveLength(0)
+        expect(okJson(await asKey(ADMIN_KEY, 'list_jobs'))).toHaveLength(0)
     })
 })
 
@@ -304,57 +304,57 @@ describe('self-service password change (D82)', () => {
 })
 
 /**
- * D84: an admin needs to remove ONE bad recipe. Until this existed the only delete was
+ * D84: an admin needs to remove ONE bad job. Until this existed the only delete was
  * admin_reset_data, so cleaning up a single piece of test junk meant destroying everyone's work -
  * which in practice means the junk stays forever.
  */
-describe('delete_recipe (D84)', () => {
-    let recipeId
+describe('delete_job (D84)', () => {
+    let jobId
     beforeEach(async () => {
-        const rec = okJson(await asKey(CHEF_KEY, 'start_recipe', { project: 'P', title: 'Junk probe recipe' }))
-        recipeId = rec.id
+        const rec = okJson(await asKey(CHEF_KEY, 'start_job', { project: 'P', title: 'Junk probe job' }))
+        jobId = rec.id
     })
 
-    test('a plain chef cannot delete, even their own recipe', async () => {
-        const res = await asKey(CHEF_KEY, 'delete_recipe', { id: recipeId })
+    test('a plain chef cannot delete, even their own job', async () => {
+        const res = await asKey(CHEF_KEY, 'delete_job', { id: jobId })
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/only an admin/i)
     })
 
     test('an admin deletes it, and it is gone from the catalog', async () => {
-        const out = okJson(await asKey(ADMIN_KEY, 'delete_recipe', { id: recipeId }))
-        expect(out.deleted.id).toBe(recipeId)
-        expect(out.deleted.title).toBe('Junk probe recipe')
+        const out = okJson(await asKey(ADMIN_KEY, 'delete_job', { id: jobId }))
+        expect(out.deleted.id).toBe(jobId)
+        expect(out.deleted.title).toBe('Junk probe job')
         expect(out.deleted_by).toBeTruthy()
 
-        const listed = okJson(await asKey(ADMIN_KEY, 'list_recipes'))
-        expect(listed.map(r => r.id)).not.toContain(recipeId)
-        expect((await asKey(ADMIN_KEY, 'get_resource', { id: recipeId })).isError).toBe(true)
+        const listed = okJson(await asKey(ADMIN_KEY, 'list_jobs'))
+        expect(listed.map(r => r.id)).not.toContain(jobId)
+        expect((await asKey(ADMIN_KEY, 'get_resource', { id: jobId })).isError).toBe(true)
     })
 
     test('deleting an unknown id says so rather than pretending it worked', async () => {
-        const res = await asKey(ADMIN_KEY, 'delete_recipe', { id: 'no-such-recipe' })
+        const res = await asKey(ADMIN_KEY, 'delete_job', { id: 'no-such-job' })
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/nothing to delete/i)
     })
 
-    test('a recipe IN the CX graph is protected - other people rely on it', async () => {
-        const step = okJson(await asKey(CHEF_KEY, 'append_step', { recipe_id: recipeId, kind: 'decision', content: 'd', source: 's' }))
+    test('a job IN the CX graph is protected - other people rely on it', async () => {
+        const step = okJson(await asKey(CHEF_KEY, 'append_step', { job_id: jobId, kind: 'decision', content: 'd', source: 's' }))
         await asKey(CHEF_KEY, 'approve_step', { step_id: step.id })
-        await asKey(CHEF_KEY, 'bake_recipe', { id: recipeId })
-        await asKey(ADMIN_KEY, 'headchef_approve', { recipe_id: recipeId })
+        await asKey(CHEF_KEY, 'bake_job', { id: jobId })
+        await asKey(ADMIN_KEY, 'headchef_approve', { job_id: jobId })
 
-        const refused = await asKey(ADMIN_KEY, 'delete_recipe', { id: recipeId })
+        const refused = await asKey(ADMIN_KEY, 'delete_job', { id: jobId })
         expect(refused.isError).toBe(true)
         expect(refused.content[0].text).toMatch(/Company CX Graph/i)
 
         // force is the deliberate override, and it reports what it removed.
-        const forced = okJson(await asKey(ADMIN_KEY, 'delete_recipe', { id: recipeId, force: true }))
+        const forced = okJson(await asKey(ADMIN_KEY, 'delete_job', { id: jobId, force: true }))
         expect(forced.deleted.was_in_cx_graph).toBe(true)
     })
 
     test('a viewer is refused by the read-only gate before the admin check', async () => {
-        const res = await asKey(K_VIEWER, 'delete_recipe', { id: recipeId })
+        const res = await asKey(K_VIEWER, 'delete_job', { id: jobId })
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/read-only \(viewer\)/i)
     })
@@ -362,9 +362,9 @@ describe('delete_recipe (D84)', () => {
 
 /**
  * D86: who can see whose work. The old rule shared anything whose status canonicalised to
- * "approved", and approving a single ingredient auto-promotes its recipe, so a consultant's working
+ * "approved", and approving a single ingredient auto-promotes its job, so a consultant's working
  * draft became company-visible the moment they approved one ingredient of it. Nobody pressing
- * "approve" on an ingredient believes they are publishing the recipe.
+ * "approve" on an ingredient believes they are publishing the job.
  */
 describe('work log visibility (D86)', () => {
     const HEAD_KEY = 'k-head'
@@ -392,93 +392,93 @@ describe('work log visibility (D86)', () => {
     const titles = (result) => okJson(result).map(r => r.title)
     const DRAFT = 'Jesse private draft'
 
-    /** Jesse's recipe with one APPROVED ingredient, deliberately not baked. */
+    /** Jesse's job with one APPROVED ingredient, deliberately not baked. */
     async function jesseApprovedDraft () {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'P', title: DRAFT }))
-        const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'd', source: 's' }))
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'P', title: DRAFT }))
+        const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'd', source: 's' }))
         await as(CHEF_KEY, 'approve_step', { step_id: step.id })
         return { rec, step }
     }
 
-    test('THE FIX: approving an ingredient no longer publishes the recipe to everyone', async () => {
+    test('THE FIX: approving an ingredient no longer publishes the job to everyone', async () => {
         await jesseApprovedDraft()
-        expect(titles(await as(CHEF_KEY, 'list_recipes'))).toContain(DRAFT)        // his own
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).not.toContain(DRAFT)    // a peer
-        expect(titles(await as(K_VIEWER, 'list_recipes'))).not.toContain(DRAFT)    // a viewer
+        expect(titles(await as(CHEF_KEY, 'list_jobs'))).toContain(DRAFT)        // his own
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).not.toContain(DRAFT)    // a peer
+        expect(titles(await as(K_VIEWER, 'list_jobs'))).not.toContain(DRAFT)    // a viewer
     })
 
     test('a HEAD CHEF sees work once it is submitted for review, and not before', async () => {
         const { rec } = await jesseApprovedDraft()
-        expect(titles(await as(HEAD_KEY, 'list_recipes'))).not.toContain(DRAFT)
+        expect(titles(await as(HEAD_KEY, 'list_jobs'))).not.toContain(DRAFT)
 
-        await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
-        expect(titles(await as(HEAD_KEY, 'list_recipes'))).toContain(DRAFT)
+        await as(CHEF_KEY, 'bake_job', { id: rec.id })
+        expect(titles(await as(HEAD_KEY, 'list_jobs'))).toContain(DRAFT)
     })
 
     test('an ADMIN also sees submitted work', async () => {
         const { rec } = await jesseApprovedDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
-        expect(titles(await as(ADMIN_KEY, 'list_recipes'))).toContain(DRAFT)
+        await as(CHEF_KEY, 'bake_job', { id: rec.id })
+        expect(titles(await as(ADMIN_KEY, 'list_jobs'))).toContain(DRAFT)
     })
 
     test('a PEER still cannot see it once baked, because it is under review rather than published', async () => {
         const { rec } = await jesseApprovedDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).not.toContain(DRAFT)
+        await as(CHEF_KEY, 'bake_job', { id: rec.id })
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).not.toContain(DRAFT)
     })
 
     test('everyone sees it once a Head Chef ADMITS it to the CX graph', async () => {
         const { rec } = await jesseApprovedDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: rec.id })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).toContain(DRAFT)
-        expect(titles(await as(K_VIEWER, 'list_recipes'))).toContain(DRAFT)
+        await as(CHEF_KEY, 'bake_job', { id: rec.id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: rec.id })
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).toContain(DRAFT)
+        expect(titles(await as(K_VIEWER, 'list_jobs'))).toContain(DRAFT)
     })
 
     test('ASSIGNMENT is the one way unfinished work crosses between peers', async () => {
         const { rec, step } = await jesseApprovedDraft()
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).not.toContain(DRAFT)
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).not.toContain(DRAFT)
 
         const out = okJson(await as(CHEF_KEY, 'assign_step', {
             step_id: step.id, assignee: 'saul.goodman@tapcxm.example', note: 'needs a legal read'
         }))
         expect(out.assigned_to).toContain('saul.goodman@tapcxm.example')
 
-        // Saul can now see the whole recipe, unfinished parts included.
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).toContain(DRAFT)
-        expect(okJson(await as(SAUL_KEY, 'get_recipe', { id: rec.id })).title).toBe(DRAFT)
+        // Saul can now see the whole job, unfinished parts included.
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).toContain(DRAFT)
+        expect(okJson(await as(SAUL_KEY, 'get_job', { id: rec.id })).title).toBe(DRAFT)
         // A third party still cannot.
-        expect(titles(await as(K_VIEWER, 'list_recipes'))).not.toContain(DRAFT)
+        expect(titles(await as(K_VIEWER, 'list_jobs'))).not.toContain(DRAFT)
     })
 
     test('unassigning takes the access away again', async () => {
         const { step } = await jesseApprovedDraft()
         await as(CHEF_KEY, 'assign_step', { step_id: step.id, assignee: 'saul.goodman@tapcxm.example' })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).toContain(DRAFT)
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).toContain(DRAFT)
 
         await as(CHEF_KEY, 'unassign_step', { step_id: step.id, assignee: 'saul.goodman@tapcxm.example' })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).not.toContain(DRAFT)
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).not.toContain(DRAFT)
     })
 
     test('a DISCARDED ingredient stops granting access, since nobody is working on it', async () => {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'P', title: 'Jesse discard case' }))
-        await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'keep', source: 's' })
-        const drop = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'message', content: 'drop', source: 's' }))
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'P', title: 'Jesse discard case' }))
+        await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'keep', source: 's' })
+        const drop = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'message', content: 'drop', source: 's' }))
         await as(CHEF_KEY, 'assign_step', { step_id: drop.id, assignee: 'saul.goodman@tapcxm.example' })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).toContain('Jesse discard case')
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).toContain('Jesse discard case')
 
         await as(CHEF_KEY, 'discard_step', { step_id: drop.id })
-        expect(titles(await as(SAUL_KEY, 'list_recipes'))).not.toContain('Jesse discard case')
+        expect(titles(await as(SAUL_KEY, 'list_jobs'))).not.toContain('Jesse discard case')
     })
 
-    test('a peer cannot assign someone to a recipe that is not theirs', async () => {
+    test('a peer cannot assign someone to a job that is not theirs', async () => {
         const { step } = await jesseApprovedDraft()
         const res = await as(SAUL_KEY, 'assign_step', { step_id: step.id, assignee: 'guest@tapcxm.example' })
         expect(res.isError).toBe(true)
-        expect(res.content[0].text).toMatch(/only the recipe/i)
+        expect(res.content[0].text).toMatch(/only the job/i)
     })
 
-    test('a head chef CAN assign on another owner recipe, to pull a reviewer in', async () => {
+    test('a head chef CAN assign on another owner job, to pull a reviewer in', async () => {
         const { step } = await jesseApprovedDraft()
         const res = await as(ADMIN_KEY, 'assign_step', { step_id: step.id, assignee: 'saul.goodman@tapcxm.example' })
         expect(res.isError).toBeFalsy()
@@ -498,7 +498,7 @@ describe('work log visibility (D86)', () => {
 
         const inbox = okJson(await as(SAUL_KEY, 'list_my_assignments'))
         expect(inbox).toHaveLength(1)
-        expect(inbox[0].recipe_title).toBe(DRAFT)
+        expect(inbox[0].job_title).toBe(DRAFT)
         expect(inbox[0].assigned_by).toBe('jesse.pinkman@tapcxm.example')
         expect(inbox[0].note).toBe('needs a legal read')
 
@@ -510,16 +510,16 @@ describe('work log visibility (D86)', () => {
         const { rec } = await jesseApprovedDraft()
         expect(okJson(await as(SAUL_KEY, 'search_resources', { query: DRAFT }))).toHaveLength(0)
 
-        await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: rec.id })
+        await as(CHEF_KEY, 'bake_job', { id: rec.id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: rec.id })
         expect(okJson(await as(SAUL_KEY, 'search_resources', { query: DRAFT })).length).toBeGreaterThan(0)
     })
 })
 
 /**
  * D88: filtering the LIST was not enough. Every read-by-id path went straight to storage, so a
- * colleague's private draft was one guessable id away: ids are `recipe-<timestamp>-<slug-of-title>`
- * and get_resource / get_recipe / list_steps / export_as_skill returned the whole thing. Privacy
+ * colleague's private draft was one guessable id away: ids are `job-<timestamp>-<slug-of-title>`
+ * and get_resource / get_job / list_steps / export_as_skill returned the whole thing. Privacy
  * enforced only on enumeration is decorative.
  */
 describe('reads by id obey the same visibility rules as lists (D88)', () => {
@@ -546,13 +546,13 @@ describe('reads by id obey the same visibility rules as lists (D88)', () => {
 
     /** Jesse's private draft: one approved ingredient, never baked, never assigned. */
     async function privateDraft () {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'P', title: 'Private draft' }))
-        const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'the secret plan', source: 's' }))
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'P', title: 'Private draft' }))
+        const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'the secret plan', source: 's' }))
         await as(CHEF_KEY, 'approve_step', { step_id: step.id })
         return rec.id
     }
 
-    test.each(['get_resource', 'get_recipe'])('%s by id is refused to a peer who guessed the id', async (tool) => {
+    test.each(['get_resource', 'get_job'])('%s by id is refused to a peer who guessed the id', async (tool) => {
         const id = await privateDraft()
         const res = await as(SAUL_KEY, tool, { id })
         expect(res.isError).toBe(true)
@@ -562,53 +562,53 @@ describe('reads by id obey the same visibility rules as lists (D88)', () => {
 
     test('list_steps by id is refused too, so the ingredients cannot be read around it', async () => {
         const id = await privateDraft()
-        const res = await as(SAUL_KEY, 'list_steps', { recipe_id: id })
+        const res = await as(SAUL_KEY, 'list_steps', { job_id: id })
         expect(res.isError).toBe(true)
         expect(JSON.stringify(res)).not.toContain('the secret plan')
     })
 
     test('export_as_skill cannot be used to launder private content into a playbook', async () => {
         const id = await privateDraft()
-        const res = await as(SAUL_KEY, 'export_as_skill', { recipe_id: id })
+        const res = await as(SAUL_KEY, 'export_as_skill', { job_id: id })
         expect(res.isError).toBe(true)
         expect(JSON.stringify(res)).not.toContain('the secret plan')
     })
 
     test('the OWNER still reads their own work by id', async () => {
         const id = await privateDraft()
-        expect(okJson(await as(CHEF_KEY, 'get_recipe', { id })).title).toBe('Private draft')
+        expect(okJson(await as(CHEF_KEY, 'get_job', { id })).title).toBe('Private draft')
         expect(okJson(await as(CHEF_KEY, 'get_resource', { id })).title).toBe('Private draft')
     })
 
     test('a head chef reads it once it is SUBMITTED, and not before', async () => {
         const id = await privateDraft()
-        expect((await as(HEAD_KEY, 'get_recipe', { id })).isError).toBe(true)
+        expect((await as(HEAD_KEY, 'get_job', { id })).isError).toBe(true)
 
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        expect(okJson(await as(HEAD_KEY, 'get_recipe', { id })).title).toBe('Private draft')
+        await as(CHEF_KEY, 'bake_job', { id })
+        expect(okJson(await as(HEAD_KEY, 'get_job', { id })).title).toBe('Private draft')
         // A peer still cannot: baked means under review, not published.
-        expect((await as(SAUL_KEY, 'get_recipe', { id })).isError).toBe(true)
+        expect((await as(SAUL_KEY, 'get_job', { id })).isError).toBe(true)
     })
 
     test('an ASSIGNEE reads it by id, which is the point of assigning', async () => {
         const id = await privateDraft()
-        const steps = okJson(await as(CHEF_KEY, 'list_steps', { recipe_id: id }))
+        const steps = okJson(await as(CHEF_KEY, 'list_steps', { job_id: id }))
         await as(CHEF_KEY, 'assign_step', { step_id: steps[0].id, assignee: 'saul.goodman@tapcxm.example' })
-        expect(okJson(await as(SAUL_KEY, 'get_recipe', { id })).title).toBe('Private draft')
+        expect(okJson(await as(SAUL_KEY, 'get_job', { id })).title).toBe('Private draft')
     })
 
     test('everyone reads it once it is ADMITTED to the CX graph', async () => {
         const id = await privateDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: id })
-        expect(okJson(await as(SAUL_KEY, 'get_recipe', { id })).title).toBe('Private draft')
+        await as(CHEF_KEY, 'bake_job', { id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: id })
+        expect(okJson(await as(SAUL_KEY, 'get_job', { id })).title).toBe('Private draft')
         expect(okJson(await as(K_VIEWER, 'get_resource', { id })).title).toBe('Private draft')
     })
 
     test('the refusal does not reveal whether the id exists', async () => {
         const id = await privateDraft()
         const hidden = await as(SAUL_KEY, 'get_resource', { id })
-        const absent = await as(SAUL_KEY, 'get_resource', { id: 'recipe-0000000000000-does-not-exist' })
+        const absent = await as(SAUL_KEY, 'get_resource', { id: 'job-0000000000000-does-not-exist' })
         // Both are refusals. The hidden one must not be distinguishable as "exists but private".
         expect(hidden.isError).toBe(true)
         expect(absent.isError).toBe(true)
@@ -625,7 +625,7 @@ describe('reads by id obey the same visibility rules as lists (D88)', () => {
 /**
  * D96: the name directory. Guessing a display name from an email address only looks right until it
  * does not: "dirk-test@..." rendered as "Dirk Test", which is an account suffix wearing a surname,
- * and the guess then followed him across every recipe he authored.
+ * and the guess then followed him across every job he authored.
  */
 describe('the name directory (D96)', () => {
     beforeEach(async () => {
@@ -689,7 +689,7 @@ describe('the name directory (D96)', () => {
 /**
  * D98: administering a system is not the same as being entitled to read unfinished work.
  *
- * admin_list_recipes used to pass no visibility filter at all, so an admin read every private draft
+ * admin_list_jobs used to pass no visibility filter at all, so an admin read every private draft
  * in the company. A consultant who has not submitted something has not offered it to anyone, and
  * the reviewer allowance exists so a head chef can open a SUBMITTED candidate, not so an admin can
  * browse drafts.
@@ -716,60 +716,60 @@ describe('the admin cross-owner view still respects privacy (D98)', () => {
 
     /** A private draft of Jesse's: one approved ingredient, never baked, never assigned. */
     async function jesseDraft (title = 'Jesse private draft') {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'P', title }))
-        const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'secret', source: 's' }))
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'P', title }))
+        const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'secret', source: 's' }))
         await as(CHEF_KEY, 'approve_step', { step_id: step.id })
         return rec.id
     }
 
     test('THE FIX: an admin does NOT see another person\'s private draft', async () => {
         await jesseDraft()
-        expect(titles(await as(ADMIN_KEY, 'admin_list_recipes'))).not.toContain('Jesse private draft')
+        expect(titles(await as(ADMIN_KEY, 'admin_list_jobs'))).not.toContain('Jesse private draft')
     })
 
     test('an admin DOES see it once it is submitted for review', async () => {
         const id = await jesseDraft()
-        expect(titles(await as(ADMIN_KEY, 'admin_list_recipes'))).not.toContain('Jesse private draft')
+        expect(titles(await as(ADMIN_KEY, 'admin_list_jobs'))).not.toContain('Jesse private draft')
 
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        expect(titles(await as(ADMIN_KEY, 'admin_list_recipes'))).toContain('Jesse private draft')
+        await as(CHEF_KEY, 'bake_job', { id })
+        expect(titles(await as(ADMIN_KEY, 'admin_list_jobs'))).toContain('Jesse private draft')
     })
 
     test('an admin sees admitted work, and their own work at any stage', async () => {
-        const own = okJson(await as(ADMIN_KEY, 'start_recipe', { project: 'P', title: 'Walter own draft' }))
+        const own = okJson(await as(ADMIN_KEY, 'start_job', { project: 'P', title: 'Walter own draft' }))
         expect(own.id).toBeTruthy()
         const id = await jesseDraft('Jesse admitted')
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: id })
+        await as(CHEF_KEY, 'bake_job', { id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: id })
 
-        const seen = titles(await as(ADMIN_KEY, 'admin_list_recipes'))
+        const seen = titles(await as(ADMIN_KEY, 'admin_list_jobs'))
         expect(seen).toContain('Jesse admitted')
         expect(seen).toContain('Walter own draft')
     })
 
     test('a non-admin cannot reach the cross-owner view at all', async () => {
-        const res = await as(SAUL_KEY, 'admin_list_recipes')
+        const res = await as(SAUL_KEY, 'admin_list_jobs')
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/requires the admin role/i)
     })
 
     test('the owner filter cannot be used to pull up someone else\'s drafts', async () => {
         await jesseDraft()
-        const targeted = await as(ADMIN_KEY, 'admin_list_recipes', { owner: 'jesse.pinkman@tapcxm.example' })
+        const targeted = await as(ADMIN_KEY, 'admin_list_jobs', { owner: 'jesse.pinkman@tapcxm.example' })
         expect(titles(targeted)).not.toContain('Jesse private draft')
     })
 
     test('nor can the status filter: asking for experimental returns only your own', async () => {
         await jesseDraft()
-        const drafts = okJson(await as(ADMIN_KEY, 'admin_list_recipes', { status: 'experimental' }))
+        const drafts = okJson(await as(ADMIN_KEY, 'admin_list_jobs', { status: 'experimental' }))
         expect(drafts.every(r => r.owner === 'walter.white@tapcxm.example')).toBe(true)
     })
 
     test('assignment is still honoured in the admin view', async () => {
         const id = await jesseDraft('Jesse assigned draft')
-        const steps = okJson(await as(CHEF_KEY, 'list_steps', { recipe_id: id }))
+        const steps = okJson(await as(CHEF_KEY, 'list_steps', { job_id: id }))
         await as(CHEF_KEY, 'assign_step', { step_id: steps[0].id, assignee: 'walter.white@tapcxm.example' })
-        expect(titles(await as(ADMIN_KEY, 'admin_list_recipes'))).toContain('Jesse assigned draft')
+        expect(titles(await as(ADMIN_KEY, 'admin_list_jobs'))).toContain('Jesse assigned draft')
     })
 })
 
@@ -813,13 +813,13 @@ describe('every read path is scoped, not just the obvious ones (D99)', () => {
     const SECRET = 'Renegotiation position for a named client'
     /** Jesse's private draft, with a title that is itself sensitive. */
     async function secretDraft () {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'Confidential', title: SECRET }))
-        const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'Walk away below 12 percent.', source: 's' }))
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'Confidential', title: SECRET }))
+        const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'Walk away below 12 percent.', source: 's' }))
         await as(CHEF_KEY, 'approve_step', { step_id: step.id })
         return rec.id
     }
 
-    test('find_similar no longer surfaces a colleague\'s private recipe', async () => {
+    test('find_similar no longer surfaces a colleague\'s private job', async () => {
         await secretDraft()
         // find_similar is what an AI calls BEFORE saving, so it was a wide-open discovery channel.
         const hits = okJson(await as(SAUL_KEY, 'find_similar', { query: 'renegotiation position' }))
@@ -834,16 +834,16 @@ describe('every read path is scoped, not just the obvious ones (D99)', () => {
         expect(serialized).not.toContain('Renegotiation')
     })
 
-    test('get_active_recipe resolves YOUR active recipe, never someone else\'s', async () => {
+    test('get_active_job resolves YOUR active job, never someone else\'s', async () => {
         await secretDraft()
-        const mine = await as(SAUL_KEY, 'get_active_recipe', { project: 'Confidential' })
+        const mine = await as(SAUL_KEY, 'get_active_job', { project: 'Confidential' })
         const text = JSON.stringify(mine)
         expect(text).not.toContain(SECRET)
     })
 
     test('the Head Chef queue is for reviewers only', async () => {
         const id = await secretDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id })
+        await as(CHEF_KEY, 'bake_job', { id })
 
         const refused = await as(SAUL_KEY, 'list_cx_pending')
         expect(refused.isError).toBe(true)
@@ -856,13 +856,13 @@ describe('every read path is scoped, not just the obvious ones (D99)', () => {
 
     test('an author can still see their own submission without being a reviewer', async () => {
         const id = await secretDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        expect(okJson(await as(CHEF_KEY, 'list_recipes')).map(r => r.title)).toContain(SECRET)
+        await as(CHEF_KEY, 'bake_job', { id })
+        expect(okJson(await as(CHEF_KEY, 'list_jobs')).map(r => r.title)).toContain(SECRET)
     })
 
     test('the MCP resources/list surface is scoped too', async () => {
         await secretDraft()
-        // "approved" alone is not a sharing decision: approving one ingredient promotes the recipe.
+        // "approved" alone is not a sharing decision: approving one ingredient promotes the job.
         const body = await rpc(SAUL_KEY, 'resources/list')
         const names = (body.result.resources || []).map(r => r.name)
         expect(names).not.toContain(SECRET)
@@ -870,15 +870,15 @@ describe('every read path is scoped, not just the obvious ones (D99)', () => {
 
     test('resources/list DOES carry admitted work, so the shared surface still works', async () => {
         const id = await secretDraft()
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: id })
+        await as(CHEF_KEY, 'bake_job', { id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: id })
 
         const body = await rpc(SAUL_KEY, 'resources/list')
         expect((body.result.resources || []).map(r => r.name)).toContain(SECRET)
     })
 
     test('the duplicate-sibling warning only ever compares your OWN recent work', async () => {
-        // Jesse saves something; Saul saving a similar title must not be told about Jesse's recipe.
+        // Jesse saves something; Saul saving a similar title must not be told about Jesse's job.
         await as(CHEF_KEY, 'save_resource', { type: 'decision', title: 'Pricing ladder for a named client', content: 'x', project: 'Confidential' })
         const saul = okJson(await as(SAUL_KEY, 'save_resource', { type: 'decision', title: 'Pricing ladder for a named client', content: 'y', project: 'Confidential' }))
         expect(JSON.stringify(saul)).not.toMatch(/second artifact from the same work/)
@@ -914,64 +914,64 @@ describe('writing is a narrower permission than reading (D102)', () => {
     }
 
     const TITLE = 'Jesse original work'
-    /** Jesse's own recipe, with one ingredient on it. */
-    async function jesseRecipe () {
-        const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'Confidential', title: TITLE }))
-        const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'Jesse wrote this.', source: 's' }))
+    /** Jesse's own job, with one ingredient on it. */
+    async function jesseJob () {
+        const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'Confidential', title: TITLE }))
+        const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'Jesse wrote this.', source: 's' }))
         return { id: rec.id, stepId: step.id }
     }
 
-    test('a peer cannot overwrite a recipe by passing its id to save_resource', async () => {
-        const { id } = await jesseRecipe()
+    test('a peer cannot overwrite a job by passing its id to save_resource', async () => {
+        const { id } = await jesseJob()
         const stolen = await as(SAUL_KEY, 'save_resource', { id, type: 'decision', title: 'Saul took this over', content: 'overwritten', project: 'Confidential' })
         expect(stolen.isError).toBe(true)
         expect(stolen.content[0].text).toMatch(/not yours to change/i)
 
         // And the original is untouched, including its author still being able to read it.
-        expect(okJson(await as(CHEF_KEY, 'get_recipe', { id })).title).toBe(TITLE)
+        expect(okJson(await as(CHEF_KEY, 'get_job', { id })).title).toBe(TITLE)
     })
 
     test('an update never moves authorship to whoever touched it last', async () => {
-        const { id, stepId } = await jesseRecipe()
+        const { id, stepId } = await jesseJob()
         // Assignment is the sanctioned way in, so Saul may legitimately write here...
         await as(CHEF_KEY, 'assign_step', { step_id: stepId, assignee: 'saul.goodman@tapcxm.example' })
         const updated = await as(SAUL_KEY, 'save_resource', { id, type: 'decision', title: TITLE, content: 'Saul added a section.', project: 'Confidential' })
         expect(updated.isError).toBeFalsy()
 
         // ...without becoming its author. Jesse did the work.
-        expect(okJson(await as(CHEF_KEY, 'get_recipe', { id })).owner).toBe('jesse.pinkman@tapcxm.example')
-        expect(okJson(await as(CHEF_KEY, 'list_recipes')).map(r => r.title)).toContain(TITLE)
+        expect(okJson(await as(CHEF_KEY, 'get_job', { id })).owner).toBe('jesse.pinkman@tapcxm.example')
+        expect(okJson(await as(CHEF_KEY, 'list_jobs')).map(r => r.title)).toContain(TITLE)
     })
 
-    test('a peer cannot append an ingredient to a recipe that is not theirs', async () => {
-        const { id } = await jesseRecipe()
-        const res = await as(SAUL_KEY, 'append_step', { recipe_id: id, kind: 'decision', content: 'not mine to add', source: 's' })
+    test('a peer cannot append an ingredient to a job that is not theirs', async () => {
+        const { id } = await jesseJob()
+        const res = await as(SAUL_KEY, 'append_step', { job_id: id, kind: 'decision', content: 'not mine to add', source: 's' })
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/not yours to change/i)
     })
 
     test('a peer cannot approve or discard ingredients that are not theirs', async () => {
-        const { id, stepId } = await jesseRecipe()
+        const { id, stepId } = await jesseJob()
         expect((await as(SAUL_KEY, 'approve_step', { step_id: stepId })).isError).toBe(true)
         const discarded = await as(SAUL_KEY, 'discard_step', { step_id: stepId })
         expect(discarded.isError).toBe(true)
         expect(discarded.content[0].text).toMatch(/not yours to change/i)
         // The ingredient survived both attempts.
-        expect(okJson(await as(CHEF_KEY, 'list_steps', { recipe_id: id }))[0].status).not.toBe('discarded')
+        expect(okJson(await as(CHEF_KEY, 'list_steps', { job_id: id }))[0].status).not.toBe('discarded')
     })
 
-    test('a peer cannot bake a recipe that is not theirs, because baking publishes it to reviewers', async () => {
-        const { id, stepId } = await jesseRecipe()
+    test('a peer cannot bake a job that is not theirs, because baking publishes it to reviewers', async () => {
+        const { id, stepId } = await jesseJob()
         await as(CHEF_KEY, 'approve_step', { step_id: stepId })
-        const res = await as(SAUL_KEY, 'bake_recipe', { id })
+        const res = await as(SAUL_KEY, 'bake_job', { id })
         expect(res.isError).toBe(true)
         expect(res.content[0].text).toMatch(/not yours to change/i)
         // It never reached the review queue.
         expect(okJson(await as(HEAD_KEY, 'list_cx_pending')).map(r => r.title)).not.toContain(TITLE)
     })
 
-    test('a peer cannot certify a recipe that is not theirs into the shared cookbook', async () => {
-        const { id } = await jesseRecipe()
+    test('a peer cannot certify a job that is not theirs into the shared cookbook', async () => {
+        const { id } = await jesseJob()
         for (const tool of ['approve_resource', 'certify']) {
             const res = await as(SAUL_KEY, tool, { id })
             expect(res.isError).toBe(true)
@@ -979,37 +979,37 @@ describe('writing is a narrower permission than reading (D102)', () => {
         }
     })
 
-    test('being ADMITTED to the CX graph makes a recipe readable, not editable', async () => {
-        const { id, stepId } = await jesseRecipe()
+    test('being ADMITTED to the CX graph makes a job readable, not editable', async () => {
+        const { id, stepId } = await jesseJob()
         await as(CHEF_KEY, 'approve_step', { step_id: stepId })
-        await as(CHEF_KEY, 'bake_recipe', { id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: id })
+        await as(CHEF_KEY, 'bake_job', { id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: id })
 
         // Everyone can read it now, which is the entire point of the shared graph.
-        expect(await as(SAUL_KEY, 'get_recipe', { id })).not.toHaveProperty('isError', true)
+        expect(await as(SAUL_KEY, 'get_job', { id })).not.toHaveProperty('isError', true)
         // Nobody but its author can change it.
-        expect((await as(SAUL_KEY, 'append_step', { recipe_id: id, kind: 'decision', content: 'edit', source: 's' })).isError).toBe(true)
+        expect((await as(SAUL_KEY, 'append_step', { job_id: id, kind: 'decision', content: 'edit', source: 's' })).isError).toBe(true)
     })
 
     test('a reviewer judges work without being able to rewrite it', async () => {
-        const { id, stepId } = await jesseRecipe()
+        const { id, stepId } = await jesseJob()
         await as(CHEF_KEY, 'approve_step', { step_id: stepId })
-        await as(CHEF_KEY, 'bake_recipe', { id })
+        await as(CHEF_KEY, 'bake_job', { id })
 
         // Mike can see the submission and rule on it...
         expect(okJson(await as(HEAD_KEY, 'list_cx_pending')).map(r => r.title)).toContain(TITLE)
         // ...but editing the thing you are judging is not a reviewer's power.
-        expect((await as(HEAD_KEY, 'append_step', { recipe_id: id, kind: 'decision', content: 'reworded', source: 's' })).isError).toBe(true)
+        expect((await as(HEAD_KEY, 'append_step', { job_id: id, kind: 'decision', content: 'reworded', source: 's' })).isError).toBe(true)
         expect((await as(HEAD_KEY, 'save_resource', { id, type: 'decision', title: 'Reworded by the reviewer', content: 'x', project: 'Confidential' })).isError).toBe(true)
         // The ruling itself still works.
-        expect(await as(HEAD_KEY, 'headchef_approve', { recipe_id: id })).not.toHaveProperty('isError', true)
+        expect(await as(HEAD_KEY, 'headchef_approve', { job_id: id })).not.toHaveProperty('isError', true)
     })
 
     test('the owner is never locked out of their own work by someone else attempting a write', async () => {
-        const { id } = await jesseRecipe()
+        const { id } = await jesseJob()
         await as(SAUL_KEY, 'save_resource', { id, type: 'decision', title: 'hostile', content: 'hostile', project: 'Confidential' })
-        // The exact regression: the overwrite reassigned owner, so the author lost their recipe.
-        const after = await as(CHEF_KEY, 'get_recipe', { id })
+        // The exact regression: the overwrite reassigned owner, so the author lost their job.
+        const after = await as(CHEF_KEY, 'get_job', { id })
         expect(after).not.toHaveProperty('isError', true)
         expect(okJson(after).title).toBe(TITLE)
     })
@@ -1045,17 +1045,17 @@ describe('the Cook-off board is identical for every viewer (D106)', () => {
 
     const SECRET_TITLE = 'Renegotiation position for a named client'
 
-    /** Jesse submits two recipes and gets one of them admitted: a 50% record. */
+    /** Jesse submits two jobs and gets one of them admitted: a 50% record. */
     async function jesseSubmitsTwoGetsOneIn () {
         const ids = []
         for (const title of [SECRET_TITLE, 'A second thing Jesse submitted']) {
-            const rec = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'Confidential', title }))
-            const step = okJson(await as(CHEF_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'x', source: 's' }))
+            const rec = okJson(await as(CHEF_KEY, 'start_job', { project: 'Confidential', title }))
+            const step = okJson(await as(CHEF_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 's' }))
             await as(CHEF_KEY, 'approve_step', { step_id: step.id })
-            await as(CHEF_KEY, 'bake_recipe', { id: rec.id })
+            await as(CHEF_KEY, 'bake_job', { id: rec.id })
             ids.push(rec.id)
         }
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: ids[0] })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: ids[0] })
         return ids
     }
 
@@ -1082,14 +1082,14 @@ describe('the Cook-off board is identical for every viewer (D106)', () => {
             .toBe((await as(ADMIN_KEY, 'get_cookoff')).content[0].text)
     })
 
-    test('it publishes counts and nothing that identifies a recipe', async () => {
+    test('it publishes counts and nothing that identifies a job', async () => {
         await jesseSubmitsTwoGetsOneIn()
         const board = okJson(await as(SAUL_KEY, 'get_cookoff'))
         const serialized = JSON.stringify(board)
         // The point of the disclosure is the denominator, not the content behind it.
         expect(serialized).not.toContain(SECRET_TITLE)
         expect(serialized).not.toContain('Confidential')
-        expect(serialized).not.toMatch(/recipe-\d/)
+        expect(serialized).not.toMatch(/job-\d/)
         for (const row of board) {
             expect(Object.keys(row).sort()).toEqual(['admitted', 'owner', 'purity', 'submitted'])
         }
@@ -1100,8 +1100,8 @@ describe('the Cook-off board is identical for every viewer (D106)', () => {
         const before = okJson(await as(SAUL_KEY, 'get_cookoff')).find(r => r.owner === 'jesse.pinkman@tapcxm.example')
 
         // A draft Jesse never bakes must not move any number on the board.
-        const draft = okJson(await as(CHEF_KEY, 'start_recipe', { project: 'Confidential', title: 'Never submitted' }))
-        await as(CHEF_KEY, 'append_step', { recipe_id: draft.id, kind: 'decision', content: 'y', source: 's' })
+        const draft = okJson(await as(CHEF_KEY, 'start_job', { project: 'Confidential', title: 'Never submitted' }))
+        await as(CHEF_KEY, 'append_step', { job_id: draft.id, kind: 'decision', content: 'y', source: 's' })
 
         const after = okJson(await as(SAUL_KEY, 'get_cookoff')).find(r => r.owner === 'jesse.pinkman@tapcxm.example')
         expect(after).toEqual(before)
@@ -1114,11 +1114,11 @@ describe('the Cook-off board is identical for every viewer (D106)', () => {
     })
 
     test('a spotless record reads 100, which is the only way to cook blue', async () => {
-        const rec = okJson(await as(SAUL_KEY, 'start_recipe', { project: 'Open', title: 'Saul got it in first time' }))
-        const step = okJson(await as(SAUL_KEY, 'append_step', { recipe_id: rec.id, kind: 'decision', content: 'z', source: 's' }))
+        const rec = okJson(await as(SAUL_KEY, 'start_job', { project: 'Open', title: 'Saul got it in first time' }))
+        const step = okJson(await as(SAUL_KEY, 'append_step', { job_id: rec.id, kind: 'decision', content: 'z', source: 's' }))
         await as(SAUL_KEY, 'approve_step', { step_id: step.id })
-        await as(SAUL_KEY, 'bake_recipe', { id: rec.id })
-        await as(ADMIN_KEY, 'headchef_approve', { recipe_id: rec.id })
+        await as(SAUL_KEY, 'bake_job', { id: rec.id })
+        await as(ADMIN_KEY, 'headchef_approve', { job_id: rec.id })
 
         const row = okJson(await as(CHEF_KEY, 'get_cookoff')).find(r => r.owner === 'saul.goodman@tapcxm.example')
         expect(row.purity).toBe(100)

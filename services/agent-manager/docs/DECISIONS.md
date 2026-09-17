@@ -31,7 +31,7 @@ ours. Where a name is only a label, it is ours to choose; where it is a stored v
 
 ## D1 · Rename the visible layer; stage the plumbing
 **Decided.** Every string a person sees is renamed (Project→Programme,
-Recipe→Run, Step→Event, Chef→Marketer, Head Chef→Hero Agent, Practice→Agent,
+Job→Run, Step→Event, Chef→Marketer, Head Chef→Oracle, Practice→Agent,
 Company CX Graph→Shared Knowledge Graph, Active Tasks→Live Queue, Cook-off
 removed). Storage keys, MCP tool names and JSON field names keep their original
 names for now.
@@ -39,11 +39,11 @@ names for now.
 what every stored document already uses — renaming them is a migration plus a
 client-config change. It buys a client nothing they can see, and it would have
 meant ~500 edits across 5,300 lines with no way to run the app and check.
-**Verified.** All identifiers intact (`recipe_id`, `data-open-recipe`,
-`linked_recipes`, the `head-chef` role value) and the 2256-line inline script
+**Verified.** All identifiers intact (`job_id`, `data-open-job`,
+`linked_jobs`, the `head-chef` role value) and the 2256-line inline script
 passes `node --check`.
 **Rejected.** A blind global find-and-replace, which would have broken
-`recipe_id`, `data-open-recipe` and the stored `head-chef` role value.
+`job_id`, `data-open-job` and the stored `head-chef` role value.
 
 ## D2 · Agents carry a mark, but the registry stays the source of truth
 **Decided.** `AGENT_MARK` in the SPA decorates agent ids it recognises — intake,
@@ -56,7 +56,7 @@ is hardcoded as a source of truth.
 
 ## D3 · Where a head chef approved, a human gates
 **Decided.** The cookbook's two-tier consent stays, but the second tier becomes
-a human-only gate. The Hero Agent proposes and has no code path that approves.
+a human-only gate. The Oracle proposes and has no code path that approves.
 `promoted_by` must be a human account and is required for anything shared.
 **Why.** If a reviewer asks "who decided this was true", the answer must always
 be a person, by name. That is what makes the graph defensible to Comcast.
@@ -135,13 +135,13 @@ from object storage at the volumes expected for months.
 **Trigger condition, written down now so it is deliberate rather than
 rediscovered under pressure:** add a read-model index when a single view needs
 more than ~2s at p95, or when a filtered query has to scan more than ~2,000
-recipe documents to render one page. When that day comes it arrives as **another
+job documents to render one page. When that day comes it arrives as **another
 driver behind the same interface**, not a second persistence layer beside it.
 **Rejected.** Adding Postgres speculatively.
 
 ## D15 · Multi-domain uses the axis the cookbook already has
 **Decided.** No `domain` table. `practice` is already the domain axis, already
-wired through recipes, filters and the graph.
+wired through jobs, filters and the graph.
 
 ```
 practice            (domain)    aem | aep | campaign | workfront-intake ...

@@ -12,15 +12,15 @@ governing permissions and limitations under the License.
 */
 
 /**
- * Wrap every already-ingested flat recipe as a single-step recipe (D45, Increment 11).
+ * Wrap every already-ingested flat job as a single-step job (D45, Increment 11).
  *
- * save_resource now always keeps a recipe's step-0 in sync with its legacy flat fields
- * (actions/mcp-server/tools.js) - so re-saving a recipe with its OWN id and EXACT
+ * save_resource now always keeps a job's step-0 in sync with its legacy flat fields
+ * (actions/mcp-server/tools.js) - so re-saving a job with its OWN id and EXACT
  * existing content takes the metadata-only update path (no version bump, no re-approval,
  * status preserved) and, as a side effect, backfills its `steps` array. This script is
  * therefore just a driven re-save, same shape as scripts/migrate-to-segmentation.mjs.
  *
- * Idempotent + no duplicates by construction: a recipe that already has a `steps` array
+ * Idempotent + no duplicates by construction: a job that already has a `steps` array
  * (get_resource returns it) is skipped on a second run.
  *
  * Run: node scripts/migrate-to-steps.mjs
@@ -67,7 +67,7 @@ async function main () {
     const catalog = await callTool(mcpUrl, apiKey, 'list_resources', {})
     const validTypes = new Set((await callTool(mcpUrl, apiKey, 'list_resource_types', {})).map(t => t.type))
     console.log(`Migrating into ${mcpUrl}`)
-    console.log(`Catalog: ${catalog.length} recipes\n`)
+    console.log(`Catalog: ${catalog.length} jobs\n`)
 
     const result = { migrated: [], skipped: [], legacy: [], failed: [] }
     for (const entry of catalog) {

@@ -25,7 +25,7 @@ entry, **leave it** — they are different servers and you want both.
       "args": [
         "-y", "mcp-remote",
         "http://localhost:3000/mcp",
-        "--header", "x-cookbook-login:bharat:agentmanager-demo-2026"
+        "--header", "x-cookbook-login:admin:Tapadmin@123"
       ]
     }
   }
@@ -84,7 +84,7 @@ WHAT TO DO HERE
   a time ledger. get_intake reads one back.
 - list_agent_systems / list_system_agents show the estate. Read it, never
   assume it — an agent added upstream appears without a deploy.
-- list_recipes / get_recipe / search_resources answer "has this failed
+- list_jobs / get_job / search_resources answer "has this failed
   before", which no single run can. That is the point of the layer.
 - list_gateway_tools shows what other MCP servers are being re-exposed through
   Agent Manager.
@@ -103,7 +103,7 @@ WHAT YOU MAY WRITE
   record how a human steered or corrected a run. Corrections are the most
   valuable thing in the store.
 - approve_step / approve_steps to mark the parts of a run worth keeping, then
-  bake_recipe to hand it to the Hero Agent, which reads it against every
+  bake_job to hand it to the Oracle, which reads it against every
   earlier run and PROPOSES what should be learned. A named human always
   decides.
 
@@ -133,8 +133,8 @@ Expect all three stages and a time ledger. Then open
 <http://localhost:3000> → **Event Log** and read the artifacts. Any Workfront
 object an agent created is linked from the artifact that created it.
 
-Approvals live in **Agents → the Hero Agent card**, not a panel of their own:
-the Hero Agent proposes and a named human decides, so both sit together.
+Approvals live in **Agents → the Oracle card**, not a panel of their own:
+the Oracle proposes and a named human decides, so both sit together.
 
 **D. B1, the loop.** *"Start an intake for: we want to do something for our
 existing customers next quarter."*
@@ -169,7 +169,33 @@ wrong the container now refuses to start and says exactly this.
 The harness runs separately on `:3100` with its own Postgres. Agent Manager
 reaches it at `host.docker.internal:3100`, set in **Settings → Agent systems**.
 
-Dashboard login: `bharat` / `agentmanager-demo-2026`.
+### The shared login
+
+```
+id        admin
+password  Tapadmin@123
+roles     chef + head-chef + admin
+```
+
+The same credential works on the dashboard and in the `x-cookbook-login` header
+(`id:password`, one colon, no spaces).
+
+**It is written down here on purpose, and that has a limit.** A shared password
+in a repository is a reasonable trade for a container on a laptop or a box
+behind a VPN, where the thing it protects is a demo. It stops being reasonable
+the moment this has a public URL: anyone with read access to the repo can then
+sign in as an admin, and admin can change MCP servers, roles and settings.
+
+So before this is exposed to anything beyond the team:
+
+1. `change_my_password` on the `admin` account, and take the new one out of this
+   file.
+2. Give each person their own login with `create_user`. Runs are private per
+   user, so a shared account also means everybody sees one shared view - which
+   defeats a feature, not just a security control.
+
+Your own first account comes from `BOOTSTRAP_ADMINS`, which is why that
+variable is on the `docker run` above.
 
 ---
 
@@ -258,6 +284,8 @@ Also: the AEP sandbox is `taplondonptrsd` — Tap's, not Comcast's. Assessing
 Comcast's attributes there is not a meaningful check, and the agent surfaces the
 sandbox name so you can see that rather than assume otherwise.
 
-**Credentials still need rotating.** `walter.white / meadow-pepper-5310` (the
-old cookbook login, in plaintext in `~/.claude.json`) and Chauncey's RDS string.
-Both need a human.
+**Two credentials still need rotating, and neither is in this file.** An old
+cookbook login that was pasted into chat and still sits in plaintext in
+`~/.claude.json`, and Chauncey's RDS connection string. Both were exposed in
+conversation, both need a human to rotate them, and I have deliberately not
+written either one down here - see `docs/DECISIONS.md` for the exposure log.

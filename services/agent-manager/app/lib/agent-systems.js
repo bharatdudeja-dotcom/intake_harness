@@ -59,6 +59,7 @@ const FIELDS = [
     { key: 'agents_path', label: 'Agent catalog path', hint: 'Where its own agent list lives, e.g. /api/tasks' },
     { key: 'start_path', label: 'Start-run path', hint: 'e.g. /api/runs' },
     { key: 'run_path', label: 'Read-run path', hint: 'e.g. /api/runs/{run_id}' },
+    { key: 'gate_path', label: 'Gate-decision path', hint: 'Where an approval is recorded, e.g. /api/runs/{run_id}/gate. Blank if the harness has no gates.' },
     { key: 'input_key', label: 'Input key', hint: 'The field the brief goes in, e.g. brief' },
     { key: 'input_envelope', label: 'Input envelope', hint: 'Wrapper around the input, e.g. input. Blank for top level.' },
     { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' }
@@ -96,6 +97,7 @@ function list (overrides) {
         agents_path: s.agents_path || null,
         start_path: s.start_path || null,
         run_path: s.run_path || null,
+        gate_path: s.gate_path || null,
         input_key: s.input_key || null,
         input_envelope: s.input_envelope || null,
         auth_configured: !!s.auth,
@@ -208,7 +210,17 @@ async function getRun (system, upstreamRunId) {
     return request(url, { headers: headers(system) })
 }
 
-const TERMINAL = ['completed', 'failed', 'needs_input']
+/*
+ * States that will not change on their own, so polling should stop.
+ *
+ * 'awaiting_approval' is the one added for the gate at 1.5, and it HAS to be
+ * here: a run waiting on a human does not settle in 25 seconds, so leaving it
+ * out meant every gated run polled to the timeout and then reported
+ * `settled: false` - "the pipeline had not finished when this returned" -
+ * which reads as a slow run rather than as a run waiting for you to approve it.
+ * The distinction is the entire feature.
+ */
+const TERMINAL = ['completed', 'failed', 'needs_input', 'awaiting_approval']
 
 /**
  * Poll until the run reaches a terminal state or we run out of patience.
@@ -363,6 +375,54 @@ function findEmbeddedError (value, depth = 0) {
 }
 
 /**
+ * What the run is waiting for, if it is waiting. Null when it is not.
+ *
+ * Kept separate from the steps because it is the opposite of a step: a step is
+ * something that happened, and this is something that did not - the agent was
+ * never called. A reader who sees one stage where they expected three needs to
+ * be told the other two are behind a gate, or an absent stage reads as a lost
+ * one.
+ */
+function blockedOn (envelope) {
+    const b = envelope && envelope.run && envelope.run.blocked_on
+    return b && typeof b === 'object' ? b : null
+}
+
+/** Decisions recorded at this run's gates, oldest first. */
+function gateDecisions (envelope) {
+    const g = envelope && envelope.gates
+    return Array.isArray(g) ? g : []
+}
+
+/**
+ * Record a decision at a gate and let the upstream carry on.
+ *
+ * This does NOT approve anything in Workfront, and the wording throughout says
+ * so. Adobe's connector exposes tools to change who sits on an approval stage
+ * and none to submit a decision as a person - correctly, because an approval
+ * attributable to a service account is not an approval. A human clicks Approve
+ * in Workfront; this records that they did, with their name, and unblocks the
+ * process.
+ */
+async function decideGate (system, upstreamRunId, body) {
+    const template = system.gate_path || '/api/runs/{run_id}/gate'
+    const url = `${system.base_url}${template.replace('{run_id}', encodeURIComponent(upstreamRunId))}`
+    /*
+     * A long timeout, because opening a gate RUNS THE REST OF THE PIPELINE.
+     *
+     * The default 30s aborted midway through Agents 2 and 3 and surfaced as
+     * "Could not record the decision" - which is doubly wrong: the decision had
+     * been recorded, and the agents were still running. A caller told the
+     * approval failed would reasonably try again.
+     */
+    return request(url, {
+        method: 'POST',
+        headers: { ...headers(system), 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+    }, 180000)
+}
+
+/**
  * Normalise the upstream's steps into what we log.
  * `task_run_id` is per STEP and belongs on the event; the run's own id is the
  * join key. Both are kept - neither is a foreign key across the boundary.
@@ -404,6 +464,6 @@ module.exports = {
     merged,
     looksLikeFailure,
     registry, reset, list, get, resolve,
-    discoverAgents, startRun, getRun, waitForRun,
-    toSteps, loopCount, findEmbeddedError
+    discoverAgents, startRun, getRun, waitForRun, decideGate,
+    toSteps, loopCount, findEmbeddedError, blockedOn, gateDecisions
 }

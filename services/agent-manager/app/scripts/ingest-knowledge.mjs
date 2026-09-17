@@ -13,9 +13,9 @@ governing permissions and limitations under the License.
 
 /**
  * Dogfood ingest (Increment 7, D33/D34): loads this engagement's own knowledge
- * into the deployed connector as recipes - the connector documents itself.
+ * into the deployed connector as jobs - the connector documents itself.
  *
- * Sources -> recipes:
+ * Sources -> jobs:
  *   knowledge/DECISION-LOG.md   -> one `decision` per "### Dnn —" section
  *   knowledge/*.md (others)     -> one `architecture-doc` per document
  *   playbooks/*.yaml            -> `playbook` (yaml)
@@ -57,11 +57,11 @@ function loadEnv (path) {
     return env
 }
 
-/** @returns {object[]} every recipe item to ingest, with id/hash precomputed */
+/** @returns {object[]} every job item to ingest, with id/hash precomputed */
 function collectItems () {
     const items = []
 
-    // 1. Decision log -> one decision recipe per ### Dnn — section
+    // 1. Decision log -> one decision job per ### Dnn — section
     const decisionLogPath = join(REPO_ROOT, 'knowledge', 'DECISION-LOG.md')
     const decisionLog = readFileSync(decisionLogPath, 'utf8')
     for (const d of parseDecisionLog(decisionLog)) {
@@ -159,7 +159,7 @@ function collectItems () {
 }
 
 /** POST one save_resource tools/call to the deployed connector. */
-async function saveRecipe (item, { mcpUrl, apiKey }) {
+async function saveJob (item, { mcpUrl, apiKey }) {
     const rpc = {
         jsonrpc: '2.0',
         id: 1,
@@ -218,13 +218,13 @@ async function main () {
     const plan = planFromManifest(items, manifest)
 
     console.log(`Ingesting into ${mcpUrl}`)
-    console.log(`Sources: ${items.length} recipes | plan: ${plan.create.length} create, ${plan.update.length} update, ${plan.skip.length} skip (unchanged)\n`)
+    console.log(`Sources: ${items.length} jobs | plan: ${plan.create.length} create, ${plan.update.length} update, ${plan.skip.length} skip (unchanged)\n`)
 
     const results = { created: [], updated: [], skipped: plan.skip.map(i => i.id), failed: [] }
     for (const [label, list] of [['create', plan.create], ['update', plan.update]]) {
         for (const item of list) {
             try {
-                const saved = await saveRecipe(item, { mcpUrl, apiKey })
+                const saved = await saveJob(item, { mcpUrl, apiKey })
                 manifest[item.id] = item.hash
                 results[label === 'create' ? 'created' : 'updated'].push(item.id)
                 console.log(`  ${label === 'create' ? '+' : '~'} ${item.id} [${item.story}] -> ${saved.status}`)

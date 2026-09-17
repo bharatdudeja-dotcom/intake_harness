@@ -14,7 +14,7 @@
  * re-saves. Nothing is invented: every value is derived from the steps that are
  * already there.
  *
- * Idempotent. Safe to run twice. Run it after any change to projectRecipe or
+ * Idempotent. Safe to run twice. Run it after any change to projectJob or
  * toMetadata, which is exactly the kind of change that looks harmless and is
  * silently retroactive-by-omission.
  *
@@ -32,7 +32,7 @@ const WRITE = process.argv.includes('--write')
 
 /**
  * The same rollup the save path performs. Imported rather than reimplemented
- * would be better, but projectRecipe is not exported - so this mirrors it for
+ * would be better, but projectJob is not exported - so this mirrors it for
  * the two fields that matter here, and says so.
  */
 function agentRollup (steps) {

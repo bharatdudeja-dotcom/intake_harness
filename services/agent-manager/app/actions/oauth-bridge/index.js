@@ -146,6 +146,13 @@ function metadataDoc (bridgeUrl, config) {
  * @returns {Promise<{statusCode: number, headers: object, body: string}>}
  */
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     const logger = Core.Logger('tap-mcp-connector-oauth-bridge', { level: params.LOG_LEVEL || 'info' })
     const method = (params.__ow_method || 'get').toLowerCase()
 

@@ -170,9 +170,9 @@ describe('lib/store - OAuth login-bridge ephemeral records (D68)', () => {
  * Found by dogfooding with five personas, not by a unit test - a one-word query passes either way.
  */
 describe('lib/store - search finds prior work from a real query (D80)', () => {
-    const RECIPE = {
-        id: 'recipe-cart-canvas',
-        type: 'recipe',
+    const JOB = {
+        id: 'job-cart-canvas',
+        type: 'job',
         title: 'Abandoned-cart Canvas — the Tempering Series (3 messages)',
         project: 'Cacao & Co.',
         tags: ['braze', 'cart-recovery'],
@@ -181,8 +181,8 @@ describe('lib/store - search finds prior work from a real query (D80)', () => {
         created: '2026-08-13T00:00:00.000Z'
     }
     const ARCH = {
-        id: 'recipe-decisioning-arch',
-        type: 'recipe',
+        id: 'job-decisioning-arch',
+        type: 'job',
         title: 'Decisioning architecture — eligibility, ranking, capping and the arbitration contract',
         project: 'Gustavo',
         tags: ['decisioning'],
@@ -192,35 +192,35 @@ describe('lib/store - search finds prior work from a real query (D80)', () => {
     }
 
     beforeEach(async () => {
-        await store.saveResource({ ...RECIPE })
+        await store.saveResource({ ...JOB })
         await store.saveResource({ ...ARCH })
     })
 
-    test('a multi-word query spanning title AND content finds the recipe', async () => {
+    test('a multi-word query spanning title AND content finds the job', async () => {
         const hits = await store.searchResources('abandoned cart canvas margin')
-        expect(hits.map(r => r.id)).toContain('recipe-cart-canvas')
+        expect(hits.map(r => r.id)).toContain('job-cart-canvas')
     })
 
     test('punctuation in the title does not defeat the query', async () => {
         // Title reads "eligibility, ranking, capping" - commas must not break the match.
         const hits = await store.searchResources('decisioning eligibility ranking')
-        expect(hits.map(r => r.id)).toContain('recipe-decisioning-arch')
+        expect(hits.map(r => r.id)).toContain('job-decisioning-arch')
     })
 
     test('a conversational query still works (stopwords are dropped)', async () => {
         const hits = await store.searchResources('how do we handle the abandoned cart')
-        expect(hits.map(r => r.id)).toContain('recipe-cart-canvas')
+        expect(hits.map(r => r.id)).toContain('job-cart-canvas')
     })
 
     test('ALL terms must appear - it is AND, not OR, so results stay trustworthy', async () => {
-        // "canvas" hits the cart recipe, "arbitration" hits the other. Neither has both.
+        // "canvas" hits the cart job, "arbitration" hits the other. Neither has both.
         expect(await store.searchResources('canvas arbitration')).toHaveLength(0)
     })
 
     test('the best match ranks first: title phrase beats a content-only hit', async () => {
         await store.saveResource({
-            id: 'recipe-mentions-tempering',
-            type: 'recipe',
+            id: 'job-mentions-tempering',
+            type: 'job',
             title: 'Unrelated playbook',
             project: 'Cacao & Co.',
             content: 'Passing mention of the tempering series in a footnote.',
@@ -228,12 +228,12 @@ describe('lib/store - search finds prior work from a real query (D80)', () => {
             created: '2026-08-13T00:00:00.000Z'
         })
         const hits = await store.searchResources('tempering series')
-        expect(hits[0].id).toBe('recipe-cart-canvas')
+        expect(hits[0].id).toBe('job-cart-canvas')
     })
 
     test('single-word and tag search still behave as before', async () => {
-        expect((await store.searchResources('tempering')).map(r => r.id)).toContain('recipe-cart-canvas')
-        expect((await store.searchResources('braze')).map(r => r.id)).toContain('recipe-cart-canvas')
+        expect((await store.searchResources('tempering')).map(r => r.id)).toContain('job-cart-canvas')
+        expect((await store.searchResources('braze')).map(r => r.id)).toContain('job-cart-canvas')
     })
 
     test('a genuine miss is still a miss', async () => {
@@ -249,7 +249,7 @@ describe('lib/store - search finds prior work from a real query (D80)', () => {
 describe('lib/store - search relaxation is bounded (D80)', () => {
     test('a single incidental word overlap is NOT treated as a match', async () => {
         await store.saveResource({
-            id: 'recipe-unrelated', type: 'recipe', title: 'Dispatcher caching rules',
+            id: 'job-unrelated', type: 'job', title: 'Dispatcher caching rules',
             project: 'P', content: 'Cache invalidation for the product section.',
             author: 'walter.white@tapcxm.example', created: '2026-08-13T00:00:00.000Z'
         })
@@ -259,22 +259,22 @@ describe('lib/store - search relaxation is bounded (D80)', () => {
 
     test('an exact-coverage match suppresses the near-misses entirely', async () => {
         await store.saveResource({
-            id: 'recipe-both', type: 'recipe', title: 'Braze canvas cart recovery',
+            id: 'job-both', type: 'job', title: 'Braze canvas cart recovery',
             project: 'P', content: 'full', author: 'a@b.c', created: '2026-08-13T00:00:00.000Z'
         })
         await store.saveResource({
-            id: 'recipe-partial', type: 'recipe', title: 'Braze canvas basics',
+            id: 'job-partial', type: 'job', title: 'Braze canvas basics',
             project: 'P', content: 'Entry events and exit criteria only.', author: 'a@b.c', created: '2026-08-13T00:00:00.000Z'
         })
         const hits = await store.searchResources('braze canvas cart')
-        expect(hits.map(r => r.id)).toEqual(['recipe-both'])
+        expect(hits.map(r => r.id)).toEqual(['job-both'])
     })
 })
 
 describe('lib/store - plural/singular tolerance in search (D80)', () => {
     beforeEach(async () => {
         await store.saveResource({
-            id: 'recipe-cart', type: 'recipe', title: 'Abandoned-cart Canvas',
+            id: 'job-cart', type: 'job', title: 'Abandoned-cart Canvas',
             project: 'P', tags: ['braze'], content: 'Recovering an abandoned cart with a template.',
             author: 'jesse.pinkman@tapcxm.example', created: '2026-08-13T00:00:00.000Z'
         })
@@ -282,16 +282,16 @@ describe('lib/store - plural/singular tolerance in search (D80)', () => {
 
     test('a plural query term finds singular content ("carts" -> "cart")', async () => {
         const hits = await store.searchResources('abandoned carts')
-        expect(hits.map(r => r.id)).toContain('recipe-cart')
+        expect(hits.map(r => r.id)).toContain('job-cart')
     })
 
     test('plural tolerance works mid-query too ("templates" -> "template")', async () => {
         const hits = await store.searchResources('abandoned cart templates')
-        expect(hits.map(r => r.id)).toContain('recipe-cart')
+        expect(hits.map(r => r.id)).toContain('job-cart')
     })
 
     test('plural stripping never truncates a term down to a single letter', async () => {
-        // 'ies' must NOT become 'i' - that would match essentially every recipe ever written.
+        // 'ies' must NOT become 'i' - that would match essentially every job ever written.
         // (Substring matching is deliberately loose, so this asserts the guard, not the looseness:
         // 'ies' appears nowhere in the fixture, so any hit here would mean over-eager stripping.)
         expect(await store.searchResources('ies')).toHaveLength(0)

@@ -140,6 +140,13 @@ async function storeToken (serverId, token, extra) {
 }
 
 async function main (params) {
+  /*
+   * Runtime passes configuration as PARAMETERS; this code reads process.env.
+   * Bridge them before anything else runs - lib/storage, lib/auth and the MCP
+   * gateway all read the environment at first use, and on this host that was
+   * empty. See lib/params-env.js.
+   */
+  require('../../lib/params-env').applyParams(params)
     logger = Core.Logger('cx-agent-manager-mcp-connect', { level: params.LOG_LEVEL || 'info' })
     const path = String(params.__ow_path || '').replace(/^\/+/, '')
     const q = query(params)

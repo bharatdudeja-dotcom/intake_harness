@@ -94,7 +94,7 @@ function controlsWithoutColour (css) {
     const offenders = []
     for (const m of css.matchAll(/^([^@{}\n][^{}\n]*)\{([^}]*)\}/gm)) {
         const [, selector, body] = m
-        if (!/(^|[\s,>])(button|input|select|textarea)\b|\.recipe-item|\.btn\b|\.chip\b|\.switcher|\.field/.test(selector)) continue
+        if (!/(^|[\s,>])(button|input|select|textarea)\b|\.job-item|\.btn\b|\.chip\b|\.switcher|\.field/.test(selector)) continue
         // Skip state and variant rules (:hover, [aria-current], .primary...): they change one
         // property and correctly inherit colour from the base rule, which is what gets checked.
         if (/[:[]/.test(selector)) continue

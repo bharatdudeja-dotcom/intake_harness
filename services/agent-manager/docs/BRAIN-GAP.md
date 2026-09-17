@@ -7,7 +7,7 @@ What the central brain is being asked to do, what exists, and what is missing.
 | Source | Status |
 |---|---|
 | `Blockers_and_Agent_Intervention_Points-4.pdf` (David Ross) | **Read.** v4 — newer than the v2 the brief asked for. Includes the full end-to-end flow diagram and all nine blockers. |
-| `Agentic Hero's Journey Master Presentation` (Josh Smith) | **Read.** |
+| `Agentic Oracle's Journey Master Presentation` (Josh Smith) | **Read.** |
 | `chaunceyplum/intake_harness` source + live API | **Read.** |
 | `chaunceyplum/mcp` source | **Read.** |
 | Story Coach Report 2, TAP Analyst Playbook, Story Coach skill zip | **Not found.** Not in Downloads, not in any readable SharePoint or OneDrive. |
