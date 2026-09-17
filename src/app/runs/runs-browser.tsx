@@ -204,7 +204,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-12">
+    <div className="flex max-w-4xl flex-col gap-6 px-8 py-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Runs</h1>

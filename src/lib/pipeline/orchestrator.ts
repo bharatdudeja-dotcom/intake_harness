@@ -253,3 +253,40 @@ export async function listTaskRuns(taskId: string, limit = 50): Promise<TaskRunR
     [taskId, limit],
   );
 }
+
+export interface RunStats {
+  total: number;
+  running: number;
+  needsInput: number;
+  completed: number;
+  failed: number;
+  approved: number;
+  promoted: number;
+}
+
+/** Dashboard tile counts. Cast to ::int so the pg driver returns numbers, not bigint strings. */
+export async function getRunStats(): Promise<RunStats> {
+  const [row] = await query<{
+    total: number; running: number; needs_input: number;
+    completed: number; failed: number; approved: number; promoted: number;
+  }>(`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status = 'running')::int AS running,
+      COUNT(*) FILTER (WHERE status = 'needs_input')::int AS needs_input,
+      COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+      COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+      COUNT(*) FILTER (WHERE approved)::int AS approved,
+      COUNT(*) FILTER (WHERE promoted)::int AS promoted
+    FROM runs
+  `);
+  return {
+    total: row.total,
+    running: row.running,
+    needsInput: row.needs_input,
+    completed: row.completed,
+    failed: row.failed,
+    approved: row.approved,
+    promoted: row.promoted,
+  };
+}

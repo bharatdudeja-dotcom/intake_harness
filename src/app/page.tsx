@@ -1,21 +1,50 @@
 import Link from "next/link";
 import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
+import { getRunStats } from "@/lib/pipeline/orchestrator";
 import { SubmitRunForm } from "./submit-run-form";
 
-export default function Home() {
+// The stat tiles read `runs` on every request, so this can't be statically
+// prerendered at build time (when DATABASE_URL generally isn't set) — same
+// reason every /api/* route here is dynamic.
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const stats = await getRunStats();
+  const tiles: { label: string; value: number }[] = [
+    { label: "total runs", value: stats.total },
+    { label: "needs input", value: stats.needsInput },
+    { label: "failed", value: stats.failed },
+    { label: "approved", value: stats.approved },
+    { label: "promoted", value: stats.promoted },
+  ];
+
   return (
     <div className="min-h-full bg-zinc-50 dark:bg-black">
-      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-6 py-16">
+      <main className="flex max-w-5xl flex-col gap-8 px-8 py-10">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-            Agentic Harness
+            Home
           </h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Submits a request through the 3-agent pipeline, one HTTP call per
             agent, in order. A 4th agent handles escalation if a run fails.
             See every run in the database on the{" "}
-            <Link href="/runs" className="underline">Runs</Link> page.
+            <Link href="/runs" className="underline">Runs</Link> page, or the
+            curated ones on the{" "}
+            <Link href="/graph" className="underline">Shared Graph</Link> page.
           </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {tiles.map((tile) => (
+            <div
+              key={tile.label}
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <p className="text-2xl font-bold text-black dark:text-zinc-50">{tile.value}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">{tile.label}</p>
+            </div>
+          ))}
         </div>
 
         <ol className="flex flex-col gap-2">
