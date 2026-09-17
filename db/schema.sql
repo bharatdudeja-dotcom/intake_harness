@@ -83,6 +83,17 @@ ALTER TABLE runs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_runs_promoted ON runs(promoted) WHERE promoted;
 
+-- Per-agent human approval gate, mirroring how a tool call waits for
+-- permission before it runs. A run now stops after EVERY successfully
+-- completed step (not just a "needs_input"/"failed" one) and sits in
+-- "awaiting_approval" until POST /api/runs/[runId]/continue advances it to
+-- the next agent. Widens the CHECK constraint the original CREATE TABLE
+-- shipped with — DROP + re-ADD is the only idempotent way to change a CHECK
+-- in place, so this stays safe to re-run.
+ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
+ALTER TABLE runs ADD CONSTRAINT runs_status_check
+    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

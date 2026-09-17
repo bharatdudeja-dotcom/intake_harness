@@ -1,0 +1,346 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
+import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
+import { StatusBadge } from "./status-badge";
+
+type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
+type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
+
+function agentLabel(taskId: AgentName): string {
+  return PIPELINE.find((a) => a.name === taskId)?.label ?? (taskId === "escalation" ? ESCALATION.label : taskId);
+}
+
+/** A step's output, loosely — every field here is optional because each agent's shape differs. */
+type StepOutput = {
+  message?: string;
+  questions?: PendingQuestion[];
+  grounding?: { grounded: boolean; reason: string | null; hits?: unknown };
+  workfront?: { created?: boolean } & Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+/**
+ * A conversational front end for the whole pipeline, one agent per turn —
+ * modeled on how Claude Code itself shows a run: the marketer's request,
+ * each agent's tool calls surfaced inline rather than hidden, and an
+ * explicit approval prompt before the next agent runs rather than the
+ * whole pipeline firing off unattended. Backed entirely by
+ * src/lib/pipeline/orchestrator.ts's per-step gate (runPipeline only ever
+ * runs the next agent; POST .../continue is what approves the next one).
+ */
+export function PipelineChat() {
+  const [brief, setBrief] = useState("");
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [runDetail, busy]);
+
+  async function loadDetail(runId: string) {
+    const res = await fetch(`/api/runs/${runId}`);
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setError(data?.error ?? `Failed to load run (HTTP ${res.status}).`);
+      return;
+    }
+    setRunDetail(data as RunDetail);
+    setAnswers({});
+  }
+
+  async function startRun() {
+    const text = brief.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setBusyLabel(agentLabel("intake"));
+    setError(null);
+    try {
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { brief: text } }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await loadDetail(data.run.run_id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setBusyLabel(null);
+    }
+  }
+
+  async function submitAnswers() {
+    if (!runDetail) return;
+    setBusy(true);
+    setBusyLabel(agentLabel("intake"));
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${runDetail.run.run_id}/resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await loadDetail(runDetail.run.run_id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setBusyLabel(null);
+    }
+  }
+
+  async function approveNext() {
+    if (!runDetail) return;
+    const next = PIPELINE[runDetail.run.current_step];
+    setBusy(true);
+    setBusyLabel(next?.label ?? "next agent");
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${runDetail.run.run_id}/continue`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await loadDetail(runDetail.run.run_id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      setBusyLabel(null);
+    }
+  }
+
+  function reset() {
+    setBrief("");
+    setRunDetail(null);
+    setAnswers({});
+    setError(null);
+    setExpanded({});
+  }
+
+  const run = runDetail?.run ?? null;
+  const taskRuns = runDetail?.taskRuns ?? [];
+  const lastStep = taskRuns[taskRuns.length - 1];
+  const pendingQuestions =
+    run?.status === "needs_input" ? ((lastStep?.output as StepOutput | null)?.questions ?? []) : [];
+  const readyToSend = pendingQuestions.every((q) => (answers[q.key] ?? "").trim() !== "");
+
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex max-h-[32rem] flex-col gap-3 overflow-y-auto p-4">
+        {!run && (
+          <p className="text-sm text-zinc-400">
+            Describe the campaign or audience you need. Each agent runs one at a time — you&apos;ll see what it did
+            and approve before the next one runs.
+          </p>
+        )}
+
+        {run && (
+          <div className="flex justify-end">
+            <p className="max-w-[85%] rounded-2xl bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-100 dark:text-black">
+              {(run.input as { brief?: string })?.brief ?? JSON.stringify(run.input)}
+            </p>
+          </div>
+        )}
+
+        {taskRuns.map((tr, i) => {
+          const output = (tr.output ?? {}) as StepOutput;
+          const isOpen = expanded[tr.task_run_id] ?? false;
+          const icon = tr.status === "completed" ? "✓" : tr.status === "failed" ? "✕" : "?";
+          const dot =
+            tr.status === "completed"
+              ? "bg-green-600"
+              : tr.status === "failed"
+                ? "bg-red-600"
+                : "bg-amber-500";
+
+          return (
+            <div key={tr.task_run_id} className="flex flex-col gap-1.5 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${dot}`}>
+                  {icon}
+                </span>
+                <span className="font-medium text-black dark:text-zinc-50">{agentLabel(tr.task_id)}</span>
+                <span className="text-xs text-zinc-400">{tr.duration_ms}ms</span>
+                <button
+                  onClick={() => setExpanded((e) => ({ ...e, [tr.task_run_id]: !isOpen }))}
+                  className="ml-auto text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
+                  {isOpen ? "Hide details" : "Details"}
+                </button>
+              </div>
+
+              {tr.message && (
+                <p className={`pl-7 text-xs ${tr.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                  {tr.message}
+                </p>
+              )}
+
+              {/* Tool calls this step made, surfaced the way Claude Code shows one — a
+                  named call with its outcome, not buried in a raw JSON blob. */}
+              {output.grounding && (
+                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                  <span>🔍</span>
+                  <span className="font-mono">search_adobe_knowledge</span>
+                  <span className={output.grounding.grounded ? "text-green-600" : "text-amber-600"}>
+                    {output.grounding.grounded ? "grounded" : `ungrounded — ${output.grounding.reason}`}
+                  </span>
+                </div>
+              )}
+              {output.workfront && (
+                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+                  <span>🛠️</span>
+                  <span className="font-mono">create_workfront_intake</span>
+                  <span className={output.workfront.created ? "text-green-600" : "text-amber-600"}>
+                    {output.workfront.created ? "created" : "dry run — not created"}
+                  </span>
+                </div>
+              )}
+
+              {isOpen && (
+                <pre className="ml-7 overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
+                  {JSON.stringify(tr.output, null, 2)}
+                </pre>
+              )}
+
+              {/* The needs_input turn's questions, live, only on the current pending step. */}
+              {i === taskRuns.length - 1 && run?.status === "needs_input" && pendingQuestions.length > 0 && (
+                <div className="ml-7 mt-1 flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+                  {pendingQuestions.map((q) => (
+                    <label key={q.key} className="flex flex-col gap-1 text-xs text-amber-900 dark:text-amber-300">
+                      {q.ask ?? q.label}
+                      {q.options && q.options.length > 0 ? (
+                        <select
+                          className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-black dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                          value={answers[q.key] ?? ""}
+                          onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+                        >
+                          <option value="" disabled>
+                            Select {q.label.toLowerCase()}…
+                          </option>
+                          {q.options.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          className="rounded border border-amber-300 bg-white px-2 py-1 text-sm text-black dark:border-amber-800 dark:bg-zinc-950 dark:text-zinc-50"
+                          value={answers[q.key] ?? ""}
+                          onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.target.value }))}
+                          placeholder={q.label}
+                        />
+                      )}
+                    </label>
+                  ))}
+                  <button
+                    onClick={submitAnswers}
+                    disabled={busy || !readyToSend}
+                    className="self-start rounded-full bg-amber-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* The approval gate — the whole point of this view. Nothing after the
+            step above ran without this being clicked. */}
+        {run?.status === "awaiting_approval" && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
+            <p className="text-blue-900 dark:text-blue-300">
+              Ready to run <span className="font-medium">{PIPELINE[run.current_step]?.label}</span> next.
+            </p>
+            <button
+              onClick={approveNext}
+              disabled={busy}
+              className="shrink-0 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Approve
+            </button>
+          </div>
+        )}
+
+        {busy && (
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
+            Running {busyLabel}…
+          </div>
+        )}
+
+        {run?.status === "completed" && (
+          <p className="text-sm text-green-700 dark:text-green-400">
+            ✓ Pipeline complete. Full trace on the{" "}
+            <Link href={`/runs/${run.run_id}`} className="underline">
+              run&apos;s page
+            </Link>
+            .
+          </p>
+        )}
+        {run?.status === "failed" && (
+          <p className="text-sm text-red-600">
+            This run failed and Escalation was invoked — see the{" "}
+            <Link href={`/runs/${run.run_id}`} className="underline">
+              full trace
+            </Link>
+            .
+          </p>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-zinc-200 p-4 dark:border-zinc-800">
+        {!run ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              className="flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm text-black outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+              placeholder="Describe the campaign / audience brief…"
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && startRun()}
+              disabled={busy}
+            />
+            <button
+              onClick={startRun}
+              disabled={busy || !brief.trim()}
+              className="rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-black"
+            >
+              Send
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              run_id: <span className="font-mono">{run.run_id.slice(0, 8)}</span> · <StatusBadge status={run.status} />
+            </p>
+            {(run.status === "completed" || run.status === "failed") && (
+              <button
+                onClick={reset}
+                className="rounded-full border border-zinc-300 px-4 py-1.5 text-xs text-zinc-700 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-600"
+              >
+                Start a new request
+              </button>
+            )}
+          </div>
+        )}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </div>
+    </div>
+  );
+}

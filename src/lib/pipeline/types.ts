@@ -50,7 +50,13 @@ export interface AgentResponse<TOutput = unknown> {
 /** One row in `runs` — a single pipeline invocation. */
 export interface RunRow {
   run_id: string;
-  status: "running" | "completed" | "failed" | "needs_input";
+  /**
+   * "awaiting_approval" — a step just completed and there's a next agent to
+   * run, but the orchestrator stops and waits for
+   * POST /api/runs/[runId]/continue rather than calling it automatically.
+   * The per-agent equivalent of a tool-use permission prompt.
+   */
+  status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
   current_step: number;
   input: unknown;
   created_at: string;

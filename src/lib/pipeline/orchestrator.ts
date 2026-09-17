@@ -3,46 +3,125 @@ import { ESCALATION, PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
 /**
- * Runs the pipeline for a single submission: calls each agent's own API
- * route in order over real HTTP (not a direct function call), so every
- * agent stays an independently testable, independently deployable endpoint
- * — a dev can `curl localhost:3000/api/agents/audience-creation` on its own
- * without spinning up the rest of the pipeline.
+ * Runs exactly the NEXT agent for a run — never more than one — over real
+ * HTTP to that agent's own route (a dev can `curl
+ * localhost:3000/api/agents/audience-creation` on its own without spinning
+ * up the rest of the pipeline). Every call is recorded as a task_runs row.
  *
- * Every call is recorded as a task_runs row (run_id, task_id, step_index,
- * started_at/finished_at) — the traceability trail: what ran, per run, and
- * when. Stops at the first "needs_input" or "failed" step, matching the
- * doc's finding that most of the process is fine and the real problem is
- * silent waiting — a paused run is visible in `runs`, not a black box.
+ * The pipeline stops after every step, not just a failed/paused one: a
+ * step that completes with more agents left to run puts the run into
+ * "awaiting_approval" rather than calling the next agent automatically —
+ * the per-agent equivalent of a tool call waiting for permission before it
+ * runs. POST /api/runs/[runId]/continue is what actually advances it.
  *
- * Each agent also only ever receives the slice of `priorOutputs` its
- * registry entry declares via `contextAccess` — this function filters the
- * full accumulated history down to that allowlist before every HTTP call,
- * so an agent never receives a prior agent's output it isn't scoped to see
- * (paired with the tool allowlist enforced in lib/mcp-client.ts).
+ * Each agent only ever receives the slice of `priorOutputs` its registry
+ * entry declares via `contextAccess` — filtered from the full accumulated
+ * history before every HTTP call, so an agent never receives a prior
+ * agent's output it isn't scoped to see (paired with the tool allowlist
+ * enforced in lib/mcp-client.ts).
  *
- * A "failed" step additionally triggers Agent 4 — Escalation (B9 in the
- * requirements doc: "the process terminates without an audience, and
- * nothing is captured"). "needs_input" does NOT trigger it — that's an
- * expected, resumable pause, not a terminated run.
+ * A "failed" step additionally triggers Agent 4 — Escalation (B9: "the
+ * process terminates without an audience, and nothing is captured").
+ * "needs_input" does NOT trigger it — that's an expected, resumable pause.
  */
+async function advanceOneStep(
+  run: RunRow,
+  stepIndex: number,
+  currentInput: unknown,
+  priorOutputs: Partial<Record<AgentName, unknown>>,
+  baseUrl: string,
+): Promise<RunRow> {
+  const agent = PIPELINE[stepIndex];
+  const startedAt = new Date();
+
+  const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
+  for (const visibleAgent of agent.contextAccess) {
+    if (visibleAgent in priorOutputs) {
+      scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
+    }
+  }
+
+  let response: AgentResponse;
+  try {
+    response = await callAgent(baseUrl, agent.path, {
+      runId: run.run_id,
+      input: currentInput,
+      priorOutputs: scopedPriorOutputs,
+    });
+  } catch (err) {
+    response = { status: "failed", message: (err as Error).message };
+  }
+
+  const finishedAt = new Date();
+  const durationMs = finishedAt.getTime() - startedAt.getTime();
+
+  await query<TaskRunRow>(
+    `INSERT INTO task_runs
+       (run_id, task_id, step_index, status, input, output, message, metadata,
+        started_at, finished_at, duration_ms)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+    [
+      run.run_id,
+      agent.name,
+      stepIndex,
+      response.status,
+      JSON.stringify(currentInput),
+      JSON.stringify(response.output ?? null),
+      response.message ?? null,
+      JSON.stringify(response.metadata ?? {}),
+      startedAt.toISOString(),
+      finishedAt.toISOString(),
+      durationMs,
+    ],
+  );
+
+  if (response.status !== "completed") {
+    if (response.status === "failed") {
+      await runEscalation(run.run_id, baseUrl, {
+        failedTask: agent.name,
+        failedStepIndex: stepIndex,
+        message: response.message ?? null,
+        input: currentInput,
+      }, priorOutputs, stepIndex + 1);
+    }
+
+    const [updated] = await query<RunRow>(
+      `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
+       WHERE run_id = $1 RETURNING *`,
+      [run.run_id, response.status, stepIndex],
+    );
+    return updated;
+  }
+
+  const nextStepIndex = stepIndex + 1;
+  const isLastStep = nextStepIndex >= PIPELINE.length;
+  const [updated] = await query<RunRow>(
+    `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
+     WHERE run_id = $1 RETURNING *`,
+    [run.run_id, isLastStep ? "completed" : "awaiting_approval", nextStepIndex],
+  );
+  return updated;
+}
+
+/** Starts a run and executes only its first agent (Intake). */
 export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
   const [run] = await query<RunRow>(
     `INSERT INTO runs (input) VALUES ($1::jsonb) RETURNING *`,
     [JSON.stringify(initialInput)],
   );
 
-  return advancePipeline(run, 0, initialInput, {}, baseUrl);
+  return advanceOneStep(run, 0, initialInput, {}, baseUrl);
 }
 
 /**
- * Answers a paused run's "needs_input" step and continues from there — the
- * "a human resolves it and the run is resumed" half of the needs_input
- * contract (see types.ts), which runPipeline alone never implemented: it
- * only ever starts a fresh run at step 0. Re-enters at the exact step that
- * paused (`run.current_step`), rebuilding `priorOutputs` from every already-
+ * Answers a paused run's "needs_input" step and re-runs that SAME step —
+ * the "a human resolves it and the run is resumed" half of the needs_input
+ * contract (see types.ts). Re-enters at the exact step that paused
+ * (`run.current_step`), rebuilding `priorOutputs` from every already-
  * completed task_run so a resumed run sees the same context a same-request
- * run would have.
+ * run would have. If the answer resolves it, the run lands in
+ * "awaiting_approval" like any other completed step — answering a question
+ * is not the same act as approving the next agent.
  */
 export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: string): Promise<RunRow> {
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
@@ -53,6 +132,46 @@ export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: s
     throw new Error(`Run ${runId} is "${run.status}", not "needs_input" — nothing to resume.`);
   }
 
+  const { priorOutputs } = await completedTaskRunsFor(runId);
+
+  const [running] = await query<RunRow>(
+    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    [runId],
+  );
+
+  return advanceOneStep(running, running.current_step, resumedInput, priorOutputs, baseUrl);
+}
+
+/**
+ * Approves an "awaiting_approval" run and runs the next agent — the actual
+ * "yes, go ahead" action behind the per-agent approval gate. `current_step`
+ * already points at the next agent to run (advanceOneStep advanced it past
+ * the one that just completed), and its input is that prior agent's output.
+ */
+export async function continueRun(runId: string, baseUrl: string): Promise<RunRow> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) {
+    throw new Error(`No run found for run_id ${runId}.`);
+  }
+  if (run.status !== "awaiting_approval") {
+    throw new Error(`Run ${runId} is "${run.status}", not "awaiting_approval" — nothing to approve.`);
+  }
+
+  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const currentInput = lastCompleted ? lastCompleted.output : run.input;
+
+  const [running] = await query<RunRow>(
+    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    [runId],
+  );
+
+  return advanceOneStep(running, running.current_step, currentInput, priorOutputs, baseUrl);
+}
+
+/** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
+async function completedTaskRunsFor(
+  runId: string,
+): Promise<{ priorOutputs: Partial<Record<AgentName, unknown>>; lastCompleted: TaskRunRow | undefined }> {
   const completedTaskRuns = await query<TaskRunRow>(
     `SELECT * FROM task_runs WHERE run_id = $1 AND status = 'completed' ORDER BY step_index`,
     [runId],
@@ -61,99 +180,7 @@ export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: s
   for (const taskRun of completedTaskRuns) {
     priorOutputs[taskRun.task_id] = taskRun.output;
   }
-
-  const [running] = await query<RunRow>(
-    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
-    [runId],
-  );
-
-  return advancePipeline(running, running.current_step, resumedInput, priorOutputs, baseUrl);
-}
-
-/** Shared step loop for both a fresh run (step 0) and a resumed one (the step that paused). */
-async function advancePipeline(
-  run: RunRow,
-  startStepIndex: number,
-  initialCurrentInput: unknown,
-  initialPriorOutputs: Partial<Record<AgentName, unknown>>,
-  baseUrl: string,
-): Promise<RunRow> {
-  let currentInput: unknown = initialCurrentInput;
-  const priorOutputs: Partial<Record<AgentName, unknown>> = { ...initialPriorOutputs };
-
-  for (let stepIndex = startStepIndex; stepIndex < PIPELINE.length; stepIndex++) {
-    const agent = PIPELINE[stepIndex];
-    const startedAt = new Date();
-
-    const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
-    for (const visibleAgent of agent.contextAccess) {
-      if (visibleAgent in priorOutputs) {
-        scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
-      }
-    }
-
-    let response: AgentResponse;
-    try {
-      response = await callAgent(baseUrl, agent.path, {
-        runId: run.run_id,
-        input: currentInput,
-        priorOutputs: scopedPriorOutputs,
-      });
-    } catch (err) {
-      response = { status: "failed", message: (err as Error).message };
-    }
-
-    const finishedAt = new Date();
-    const durationMs = finishedAt.getTime() - startedAt.getTime();
-
-    await query<TaskRunRow>(
-      `INSERT INTO task_runs
-         (run_id, task_id, step_index, status, input, output, message, metadata,
-          started_at, finished_at, duration_ms)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
-      [
-        run.run_id,
-        agent.name,
-        stepIndex,
-        response.status,
-        JSON.stringify(currentInput),
-        JSON.stringify(response.output ?? null),
-        response.message ?? null,
-        JSON.stringify(response.metadata ?? {}),
-        startedAt.toISOString(),
-        finishedAt.toISOString(),
-        durationMs,
-      ],
-    );
-
-    if (response.status !== "completed") {
-      if (response.status === "failed") {
-        await runEscalation(run.run_id, baseUrl, {
-          failedTask: agent.name,
-          failedStepIndex: stepIndex,
-          message: response.message ?? null,
-          input: currentInput,
-        }, priorOutputs, stepIndex + 1);
-      }
-
-      const [updated] = await query<RunRow>(
-        `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
-         WHERE run_id = $1 RETURNING *`,
-        [run.run_id, response.status, stepIndex],
-      );
-      return updated;
-    }
-
-    priorOutputs[agent.name] = response.output;
-    currentInput = response.output;
-  }
-
-  const [completed] = await query<RunRow>(
-    `UPDATE runs SET status = 'completed', current_step = $2, updated_at = NOW()
-     WHERE run_id = $1 RETURNING *`,
-    [run.run_id, PIPELINE.length],
-  );
-  return completed;
+  return { priorOutputs, lastCompleted: completedTaskRuns[completedTaskRuns.length - 1] };
 }
 
 /**

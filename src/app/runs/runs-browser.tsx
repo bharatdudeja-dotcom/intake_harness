@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
+import { PIPELINE } from "@/lib/pipeline/registry";
 import { StatusBadge } from "../status-badge";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
@@ -115,6 +116,26 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     const output = pendingTaskRun?.output as { questions?: PendingQuestion[] } | null | undefined;
     return output?.questions ?? [];
   }, [pendingTaskRun]);
+
+  const [advancing, setAdvancing] = useState(false);
+
+  async function approveNext() {
+    if (!selectedRunId) return;
+    setAdvancing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${selectedRunId}/continue`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Failed to continue run (HTTP ${res.status}).`);
+        return;
+      }
+      await loadDetail(selectedRunId);
+      await refresh();
+    } finally {
+      setAdvancing(false);
+    }
+  }
 
   async function submitAnswers() {
     if (!selectedRunId) return;
@@ -321,6 +342,21 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       {detail.run.promoted ? "Promoted to Shared Graph" : "Promote to Shared Graph"}
                     </button>
                   </div>
+                </div>
+              )}
+
+              {detail.run.status === "awaiting_approval" && (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
+                  <p className="text-blue-900 dark:text-blue-300">
+                    Ready to run <span className="font-medium">{PIPELINE[detail.run.current_step]?.label}</span> next.
+                  </p>
+                  <button
+                    onClick={approveNext}
+                    disabled={advancing}
+                    className="shrink-0 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {advancing ? "Running…" : "Approve"}
+                  </button>
                 </div>
               )}
 
