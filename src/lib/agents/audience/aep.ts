@@ -22,6 +22,7 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
+import type { TaskId } from "@/lib/pipeline/types";
 
 /**
  * Attributes we can recognise, matched against SCHEMA FIELD NAMES.
@@ -202,9 +203,21 @@ export type SegmentMatch = {
  * rework window. It is also the only way to get a real count without writing
  * anything, so it is tried first.
  */
-export async function findExistingSegment(terms: string[]): Promise<SegmentMatch> {
+export async function findExistingSegment(
+  terms: string[],
+  /*
+   * Which agent is asking, for the MCP tool allowlist.
+   *
+   * 2.3 ("Audience exists?") belongs to phase 2 and therefore to Agent 2, while
+   * 3.1 onwards belongs to Agent 3. Both read the same catalog. Passing the
+   * caller through means each does so under its own least-privilege scope -
+   * hardcoding "audience_creation" here would have let Agent 2 borrow Agent 3's
+   * permissions, which is exactly the hole the allowlist exists to close.
+   */
+  taskId: TaskId = "audience_creation",
+): Promise<SegmentMatch> {
   try {
-    const result = await callMcpTool<unknown>("audience_creation", "adobe_list_segments", { limit: "50" });
+    const result = await callMcpTool<unknown>(taskId, "adobe_list_segments", { limit: "50" });
     const rows = (Array.isArray(result) ? result : ((result as { segments?: unknown[]; data?: unknown[] })?.segments
       || (result as { data?: unknown[] })?.data || [])) as Array<Record<string, unknown>>;
 
@@ -388,4 +401,22 @@ export function nightlyCutoff(now = new Date()): {
       : `The 21:45 run has passed (${Math.abs(minutes)} minute(s) ago). Anything from here lands tomorrow night, ` +
         "so batch the outstanding fixes rather than spending a night on each.",
   };
+}
+
+
+/**
+ * The attributes an audience of this shape needs to exist in AEP.
+ *
+ * Lives here because TWO steps read it and they must not disagree: 2.6 gathers
+ * the data requirements (Agent 2) and 2.7 checks whether AEP holds them
+ * (Agent 3). If 2.6 gathered one list and 2.7 checked another, the GTO request
+ * 2.7's "No" opens would be for a different set of attributes than the one the
+ * process said it needed - and that request is the quarter-long tail in B4.
+ */
+export function requiredAttributes(fields: Record<string, string>): string[] {
+  const needed = new Set<string>(["customer_type", "line_of_business"]);
+  if (fields.lifecycle_journey) needed.add("lifecycle_journey");
+  if (fields.channels) needed.add("channels");
+  if (/northeast|region|state|market/i.test(Object.values(fields).join(" "))) needed.add("region");
+  return [...needed];
 }

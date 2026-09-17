@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep secrets out of it.
+#
+# .env.local holds DATABASE_URL and the gateway service key. It must never be
+# copied into an image: an image is pushed to a registry and pulled by anything
+# entitled to that registry, so a credential baked into one has effectively been
+# published. Every value it holds is supplied at run time instead.
+.env
+.env.*
+!.env.local.example
+
+node_modules
+.next
+npm-debug.log*
+
+.git
+.gitignore
+
+# The throwaway local Agent 1, which is deliberately not part of this repo.
+local/
+
+README.md
+*.md
+!db/*.md

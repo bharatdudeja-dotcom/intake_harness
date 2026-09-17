@@ -1,0 +1,500 @@
+/**
+ * 2.7 "Attributes available?", answered from the fields AEP actually has.
+ *
+ * WHY THE OLD ANSWER WAS ALWAYS "UNDETERMINED"
+ *
+ * probeSchemas read `adobe_list_schemas` and then `adobe_get_schema`. A schema
+ * document does not contain its fields: it contains `allOf` with `$ref`s to the
+ * FIELD GROUPS that hold them, and the connector does not expand them. So the
+ * probe opened three schemas, found no field definitions, and correctly refused
+ * to conclude anything - every run reporting `undetermined` and every audience
+ * unbuildable, for want of one more call.
+ *
+ * `adobe_get_union_schema` looked like the fix and is not: there is no profile
+ * union in this sandbox (404, "unions resource ... is not found"), which is its
+ * own finding. But `adobe_list_field_groups` + `adobe_get_field_group` return
+ * the real thing. Read live from taplondonptrsd, 20 field groups, including:
+ *
+ *   Xfinity Product Holdings   _taplondonptrsd.xfinityTV        boolean
+ *                              _taplondonptrsd.xfinityInternet  boolean
+ *                              _taplondonptrsd.state            string
+ *                              _taplondonptrsd.customerEmail    string
+ *
+ * Those are exactly the attributes a "TV-only, upsell Internet" audience needs.
+ * They were there the whole time.
+ *
+ * WHAT COUNTS AS A REQUIRED ATTRIBUTE, WHICH IS WHERE THIS USED TO GO WRONG
+ *
+ * The old requirement list was the BRIEF's fields: customer_type,
+ * line_of_business, lifecycle_journey, channels, region. Most of those are
+ * routing metadata about the request, not predicates about a person - no AEP
+ * sandbox has a field called "line of business" - so 2.7 could never say yes and
+ * every run was headed for the 2.7a GTO request.
+ *
+ * 2.6 says "gather data requirements NEEDED". What an audience needs is the
+ * attributes its DEFINITION tests: which products someone holds, where they
+ * are, and how to reach them. That is what is checked here.
+ */
+
+import { callMcpTool } from "@/lib/mcp-client";
+import type { TaskId } from "@/lib/pipeline/types";
+
+export type SandboxField = {
+  /** The full XDM path, which is what a PQL expression addresses. */
+  path: string;
+  type: string;
+  /** Which field group it came from, so a reader can find it in the UI. */
+  group: string;
+};
+
+export type FieldRead = {
+  read: boolean;
+  error: string | null;
+  /** The IMS tenant that prefixes custom field paths. NOT a sandbox name. */
+  tenant: string | null;
+  fields: SandboxField[];
+  groupCount: number;
+};
+
+/** Every leaf field in a field-group document, with its XDM path. */
+function leafFields(doc: unknown, group: string): SandboxField[] {
+  const out: SandboxField[] = [];
+  const walk = (node: unknown, path: string, depth: number) => {
+    if (depth > 12 || node == null || typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    const props = o.properties;
+    if (props && typeof props === "object") {
+      for (const [key, value] of Object.entries(props as Record<string, unknown>)) {
+        const here = path ? `${path}.${key}` : key;
+        const v = value as Record<string, unknown>;
+        if (v && typeof v === "object" && v.properties) {
+          walk(v, here, depth + 1);
+        } else {
+          out.push({ path: here, type: String((v && v.type) || "unknown"), group });
+        }
+      }
+    }
+    // allOf / oneOf / definitions nest the same shape.
+    for (const [key, value] of Object.entries(o)) {
+      if (key === "properties") continue;
+      if (value && typeof value === "object") walk(value, path, depth + 1);
+    }
+  };
+  walk(doc, "", 0);
+  return out;
+}
+
+/**
+ * Read the sandbox's real profile fields.
+ *
+ * Reads every tenant field group. That is more calls than reading one schema,
+ * and it is the difference between an answer and "undetermined" - so it is
+ * worth them. A group that fails to read is skipped and counted, never allowed
+ * to fail the whole probe: a partial field list still answers most questions,
+ * and saying "I found these 30 of 40" beats saying nothing.
+ */
+export async function readSandboxFields(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
+  let groups: Array<{ title: string; altId: string }> = [];
+  try {
+    const list = await callMcpTool<{ results?: Array<Record<string, unknown>> }>(
+      taskId,
+      "adobe_list_field_groups",
+      {},
+    );
+    groups = (list?.results || []).map((r) => ({
+      title: String(r.title || "untitled"),
+      altId: String(r["meta:altId"] || r.$id || ""),
+    })).filter((g) => g.altId);
+  } catch (err) {
+    return { read: false, error: (err as Error).message, tenant: null, fields: [], groupCount: 0 };
+  }
+
+  const fields: SandboxField[] = [];
+  let tenant: string | null = null;
+  for (const g of groups) {
+    /*
+     * This is the TENANT namespace, not the sandbox, and confusing the two cost
+     * an afternoon.
+     *
+     * Every altId reads `_taplondonptrsd.mixins.xxxx`, so `taplondonptrsd`
+     * looks like the sandbox name. It is not - it is the IMS tenant id that
+     * prefixes every custom field path. The sandbox this connector actually
+     * talks to is `tapdemo` (visible in any adobe_list_merge_policies
+     * response). Passing the tenant as `sandbox` sent adobe_create_segment at a
+     * sandbox that does not exist, and the API answered with a bare
+     * `400 Bad Request` naming nothing - so the failure looked like bad PQL for
+     * as long as we believed the label.
+     *
+     * It is named `tenant` here so it cannot be handed to a `sandbox` parameter
+     * again by someone reading the type.
+     */
+    if (!tenant) tenant = g.altId.replace(/^_/, "").split(".")[0] || null;
+    try {
+      const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId });
+      fields.push(...leafFields(doc, g.title));
+    } catch {
+      // One unreadable group must not lose the others.
+    }
+  }
+
+  return {
+    read: true,
+    error: fields.length ? null : "read the field groups but none of them yielded field definitions",
+    tenant,
+    fields,
+    groupCount: groups.length,
+  };
+}
+
+/**
+ * A thing the audience definition has to be able to test.
+ *
+ * `synonyms` are matched against the LEAF of a field path, loosely. Loose on
+ * purpose: a tenant calls it `xfinityTV`, `tvSubscriber` or `hasTV` and all
+ * three mean the same thing to a marketer. A false match here is visible -
+ * the matched field name is reported next to the requirement - which is the
+ * check that makes looseness safe.
+ */
+export type Requirement = {
+  key: string;
+  label: string;
+  synonyms: string[];
+  /** Why the audience needs it, for the artifact and for a GTO request. */
+  why: string;
+};
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * What THIS audience needs, derived from the brief.
+ *
+ * Only predicates. A requirement is added when the brief gives a reason to test
+ * it, so a simple audience is not blocked on attributes it never uses.
+ */
+export function audienceRequirements(fields: Record<string, string>): Requirement[] {
+  const all = Object.values(fields).join(" ").toLowerCase();
+  const reqs: Requirement[] = [];
+
+  if (/internet|tv|mobile|video|broadband|voice|bundle|upsell|cross-?sell|upgrade|only\b/.test(all)) {
+    reqs.push({
+      key: "product_holding",
+      label: "Product holdings",
+      synonyms: ["xfinitytv", "xfinityinternet", "producthold", "product", "subscription", "service", "holding"],
+      why: "the audience is defined by what the customer already has, and what they do not - an upsell needs both halves",
+    });
+  }
+
+  if (/\b(state|region|market|county|city|zip|postal|radius|northeast|southeast|midwest|west|detroit|michigan)\b/.test(all)) {
+    reqs.push({
+      key: "geography",
+      label: "Geography",
+      synonyms: ["state", "region", "zip", "postal", "city", "market", "dma", "county", "country"],
+      why: "the brief targets a place, so the definition has to be able to filter on one",
+    });
+  }
+
+  if (/\bemail\b/.test(all)) {
+    reqs.push({
+      key: "email_contact",
+      label: "Email address",
+      synonyms: ["email", "emailaddress", "customeremail"],
+      why: "an email campaign needs a reachable address on the profile, or the audience cannot be activated",
+    });
+  }
+
+  if (/\b(sms|text|mobile message)\b/.test(all)) {
+    reqs.push({
+      key: "sms_contact",
+      label: "Mobile number",
+      synonyms: ["phone", "mobile", "msisdn", "sms", "telephone"],
+      why: "an SMS campaign needs a mobile number on the profile",
+    });
+  }
+
+  return reqs;
+}
+
+export type AttributeCheck = {
+  /** False only when the field list could not be read at all. */
+  conclusive: boolean;
+  /** True when every requirement is satisfied by a real field. */
+  available: boolean;
+  satisfied: Array<{
+    key: string;
+    label: string;
+    /** The best match, for reporting. */
+    field: string;
+    type: string;
+    group: string;
+    /**
+     * EVERY field that matched, not just the first.
+     *
+     * "TV-only" needs two product fields - holds TV, does not hold Internet -
+     * and reporting only the first match silently dropped the `xfinityTV = true`
+     * half of the definition. The resulting segment was everyone without
+     * Internet, which is a different and much larger population than
+     * TV-subscribers without Internet, sized and sent to the marketer as though
+     * it were the audience they asked for.
+     */
+    allFields: string[];
+  }>;
+  missing: Requirement[];
+  /**
+   * The question to put to a human, when something is missing.
+   *
+   * This exists because the reported gap was exactly its absence: Agent 3
+   * returned needs_input and NOTHING anywhere said what it needed. A status
+   * without a question is unactionable, and it sent a reader to the Workfront
+   * record, the comment streams and the run payload, all of which were silent.
+   */
+  question: string | null;
+  /** The tenant namespace, for reporting. Never a sandbox name. */
+  tenant: string | null;
+  fieldsSeen: number;
+};
+
+/** Match each requirement against the sandbox's real fields. */
+export function checkAttributes(reqs: Requirement[], read: FieldRead): AttributeCheck {
+  if (!read.read || !read.fields.length) {
+    return {
+      conclusive: false,
+      available: false,
+      satisfied: [],
+      missing: reqs,
+      question:
+        `Could not check what customer data is available: ${read.error || "no fields were returned"}. ` +
+        "Nothing has been built, and no data request has been raised either - raising one because the " +
+        "check failed would start a long piece of work for a question nobody has actually asked. " +
+        `Someone with Adobe Experience Platform access needs to confirm whether ${reqs.map((r) => r.label).join(", ")} ` +
+        "are held before this can go further.",
+      tenant: read.tenant,
+      fieldsSeen: 0,
+    };
+  }
+
+  const satisfied: AttributeCheck["satisfied"] = [];
+  const missing: Requirement[] = [];
+
+  for (const req of reqs) {
+    const hits = read.fields.filter((f) => {
+      const leaf = norm(f.path.split(".").pop() || "");
+      return req.synonyms.some((s) => leaf.includes(norm(s)) || norm(s).includes(leaf));
+    });
+    if (hits.length) {
+      satisfied.push({
+        key: req.key,
+        label: req.label,
+        field: hits[0].path,
+        type: hits[0].type,
+        group: hits[0].group,
+        allFields: hits.map((h) => h.path),
+      });
+    } else {
+      missing.push(req);
+    }
+  }
+
+  const available = missing.length === 0;
+
+  return {
+    conclusive: true,
+    available,
+    satisfied,
+    missing,
+    question: available
+      ? null
+      : `This audience cannot be built yet: ${missing.length} piece(s) of customer data it needs ` +
+        "are not held in Adobe Experience Platform. " +
+        missing.map((m) => `${m.label} - ${m.why}`).join("; ") +
+        ". A data request needs to be raised with the data team to add them. " +
+        `What IS held and will be used: ` +
+        (satisfied.length ? satisfied.map((s) => `${s.label} (${s.field})`).join(", ") : "nothing") +
+        `. ${read.fields.length} field(s) were checked across ${read.groupCount} group(s), so this is a real ` +
+        "absence rather than a failed check - the request can name exactly what to add.",
+    tenant: read.tenant,
+    fieldsSeen: read.fields.length,
+  };
+}
+
+export type Expression = {
+  pql: string;
+  /** Every predicate in words, so a human can check the logic before it runs. */
+  explain: string[];
+  /** Things the brief asked for that could NOT be expressed, named. */
+  ungrounded: string[];
+};
+
+/** US states the brief might name, and the two-letter code AEP data usually holds. */
+const STATES: Record<string, string> = {
+  michigan: "MI", pennsylvania: "PA", illinois: "IL", georgia: "GA", florida: "FL",
+  california: "CA", texas: "TX", colorado: "CO", washington: "WA", oregon: "OR",
+  massachusetts: "MA", newjersey: "NJ", newyork: "NY", maryland: "MD", virginia: "VA",
+  ohio: "OH", indiana: "IN", tennessee: "TN", minnesota: "MN", wisconsin: "WI",
+};
+
+/**
+ * Turn the brief into a PQL expression over fields that actually exist.
+ *
+ * ONLY grounded predicates are emitted. Anything the brief asks for that cannot
+ * be expressed in a real field is returned in `ungrounded` and left OUT of the
+ * definition - never approximated. A segment that silently drops the exclusion
+ * is the one failure mode worse than no segment: it produces a plausible number
+ * for the wrong population, and 3.4 sends that number to the marketer.
+ */
+export function buildExpression(check: AttributeCheck, fields: Record<string, string>): Expression | null {
+  const all = Object.values(fields).join(" ").toLowerCase();
+  const predicates: string[] = [];
+  const explain: string[] = [];
+  const ungrounded: string[] = [];
+
+  const byKey = (k: string) => check.satisfied.find((s) => s.key === k);
+
+  // --- Product holdings. The upsell shape: has A, does not have B. ---------
+  if (byKey("product_holding")) {
+    /*
+     * The upsell shape: HOLDS the base product, DOES NOT HOLD the target.
+     *
+     * The field paths are looked up by name from what the sandbox actually
+     * returned rather than written in - a hardcoded `_taplondonptrsd.xfinityTV`
+     * is correct in exactly one tenant and silently wrong in the next.
+     */
+    const productFields = check.satisfied.find((s) => s.key === "product_holding")?.allFields ?? [];
+    const holding = (needle: string) =>
+      productFields.find((f) => norm(f).includes(norm(needle))) || null;
+    const tv = holding("xfinityTV") || holding("tv");
+    const internet = holding("xfinityInternet") || holding("internet") || holding("broadband");
+
+    const targetsInternet = /internet|broadband/.test(all);
+    const tvOnly = /tv[- ]only|only have tv|tv only|without internet|no internet|don'?t have internet/.test(all);
+
+    if (targetsInternet && tvOnly && tv && internet) {
+      predicates.push(`${tv} = true`);
+      predicates.push(`${internet} = false`);
+      explain.push(`holds TV (${tv} = true)`);
+      explain.push(`does NOT hold Internet (${internet} = false) - the exclusion that defines the upsell`);
+    } else if (targetsInternet && internet) {
+      predicates.push(`${internet} = false`);
+      explain.push(`does NOT hold Internet (${internet} = false)`);
+    } else {
+      ungrounded.push(
+        "which product the customer must already hold and which they must not. The brief names products but " +
+        "not the have/have-not shape, so NO product predicate was added rather than a guessed one - a segment " +
+        "that quietly drops the exclusion returns a plausible count for the wrong population",
+      );
+    }
+  }
+
+  // --- Geography. Only when the brief names a place we can map to a value. --
+  const geo = byKey("geography");
+  if (geo) {
+    const named = Object.keys(STATES).find((s) => all.replace(/[^a-z]/g, "").includes(s));
+    if (named) {
+      predicates.push(`${geo.field} = "${STATES[named]}"`);
+      explain.push(`is in ${named.replace(/^(\w)/, (c) => c.toUpperCase())} (${geo.field} = "${STATES[named]}")`);
+    } else {
+      ungrounded.push(
+        `a geography was asked for but the brief names no state this can map to a value in ${geo.field}. ` +
+        "A radius around a city cannot be expressed against a state field, so no geographic filter was applied - " +
+        "the count below is therefore NOT limited to that area.",
+      );
+    }
+  }
+
+  // --- Reachability. An audience you cannot contact is not activatable. -----
+  const email = byKey("email_contact");
+  if (email) {
+    // `!= null`, not `exists`. PQL has no bare `exists` operator for an
+    // attribute path, and AEP rejects the whole definition with a bare 400 that
+    // names nothing - so one invalid operator costs the entire audience.
+    predicates.push(`${email.field} != null`);
+    explain.push(`has an email address (${email.field} != null)`);
+  }
+
+  if (!predicates.length) return null;
+
+  return { pql: predicates.join(" and "), explain, ungrounded };
+}
+
+export type BuildResult = {
+  created: boolean;
+  segmentId: string | null;
+  name: string;
+  pql: string;
+  count: number | null;
+  countBasis: string;
+  error: string | null;
+};
+
+/**
+ * 3.1a - create the audience in the AEP rule builder, then size it.
+ *
+ * This WRITES, and until now this agent deliberately did not. The read-only
+ * stance was right while 2.7 could never be answered - a segment built on
+ * unverified attributes is worse than none - but the map puts "Agent creates
+ * audience in AEP rule builder" at 3.1a, and a count is the whole point of B3.
+ * So it builds once the attributes are CONFIRMED present, and the count goes to
+ * the marketer at 3.4 for the approval the map keeps at 3.5.
+ */
+export async function createAudience(
+  taskId: TaskId,
+  /*
+   * No `sandbox` parameter, deliberately.
+   *
+   * The connector defaults to the sandbox it is configured for, and the only
+   * value we had to offer was the tenant id, which is not a sandbox and made
+   * every create fail. Omitting it is both correct and the thing that cannot be
+   * got wrong: the fields were read from that same default sandbox, so the
+   * segment is built where the attributes live.
+   */
+  args: { name: string; pql: string; description: string; mergePolicyId?: string | null },
+): Promise<BuildResult> {
+  const base: BuildResult = {
+    created: false, segmentId: null, name: args.name, pql: args.pql,
+    count: null, countBasis: "not attempted", error: null,
+  };
+
+  let segmentId: string | null = null;
+  try {
+    const made = await callMcpTool<Record<string, unknown>>(taskId, "adobe_create_segment", {
+      name: args.name,
+      pql_expression: args.pql,
+      description: args.description,
+      ...(args.mergePolicyId ? { merge_policy_id: args.mergePolicyId } : {}),
+    });
+    const text = JSON.stringify(made ?? {});
+    segmentId =
+      String((made?.id as string) || (made?.segmentId as string) || "") ||
+      text.match(/"id"\s*:\s*"([^"]+)"/)?.[1] ||
+      null;
+    if (!segmentId) {
+      return { ...base, error: `the create returned no segment id. Response: ${text.slice(0, 300)}` };
+    }
+  } catch (err) {
+    return { ...base, error: (err as Error).message };
+  }
+
+  // The count. A failure here leaves a REAL segment with no size, which is a
+  // partial success and is reported as one - not as a failed build.
+  let count: number | null = null;
+  let basis = "";
+  try {
+    const started = await callMcpTool<Record<string, unknown>>(taskId, "adobe_create_segment_estimate", {
+      segment_id: segmentId,
+    });
+    const estimateId = String(started?.estimateId || started?.id || "") || undefined;
+    const got = await callMcpTool<Record<string, unknown>>(taskId, "adobe_get_segment_estimate", {
+      segment_id: segmentId,
+      ...(estimateId ? { estimate_id: estimateId } : {}),
+    });
+    const text = JSON.stringify(got ?? {});
+    const n = text.match(/"(?:estimatedSize|profileCount|totalRows|size)"\s*:\s*(\d+)/);
+    count = n ? Number(n[1]) : null;
+    basis = count != null
+      ? `estimated by AEP for segment ${segmentId}`
+      : `the estimate was requested but returned no size yet - segment estimates are asynchronous, so poll adobe_get_segment_estimate for ${segmentId}`;
+  } catch (err) {
+    basis = `the segment exists but could not be sized: ${(err as Error).message}`;
+  }
+
+  return { created: true, segmentId, name: args.name, pql: args.pql, count, countBasis: basis, error: null };
+}
