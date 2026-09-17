@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json<AgentResponse>({
       status: clean ? "completed" : "needs_input",
       message: clean
-        ? undefined
+        ? pre.summary
         : `Before this reaches the review queue: ${pre.findings.map((f) => f.ask).join(" ")}`,
       output: {
         ...input,

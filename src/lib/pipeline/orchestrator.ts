@@ -66,8 +66,8 @@ async function advanceOneStep(
     await query<TaskRunRow>(
       `INSERT INTO task_runs
          (run_id, task_id, step_index, status, input, output, message, metadata,
-          started_at, finished_at, duration_ms)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+          tokens_used, model, started_at, finished_at, duration_ms)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
       [
         run.run_id,
         agent.name,
@@ -77,6 +77,8 @@ async function advanceOneStep(
         JSON.stringify(response.output ?? null),
         response.message ?? null,
         JSON.stringify(response.metadata ?? {}),
+        response.usage?.tokens ?? null,
+        response.usage?.model ?? null,
         startedAt.toISOString(),
         finishedAt.toISOString(),
         durationMs,
@@ -267,8 +269,8 @@ async function runEscalation(
   await query<TaskRunRow>(
     `INSERT INTO task_runs
        (run_id, task_id, step_index, status, input, output, message, metadata,
-        started_at, finished_at, duration_ms)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11)`,
+        tokens_used, model, started_at, finished_at, duration_ms)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
     [
       runId,
       ESCALATION.name,
@@ -278,6 +280,8 @@ async function runEscalation(
       JSON.stringify(response.output ?? null),
       response.message ?? null,
       JSON.stringify(response.metadata ?? {}),
+      response.usage?.tokens ?? null,
+      response.usage?.model ?? null,
       startedAt.toISOString(),
       finishedAt.toISOString(),
       finishedAt.getTime() - startedAt.getTime(),

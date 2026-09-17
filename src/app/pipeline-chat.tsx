@@ -190,6 +190,11 @@ export function PipelineChat() {
                 </span>
                 <span className="font-medium text-black dark:text-zinc-50">{agentLabel(tr.task_id)}</span>
                 <span className="text-xs text-zinc-400">{tr.duration_ms}ms</span>
+                {tr.tokens_used != null && (
+                  <span className="text-xs text-zinc-400">
+                    · {tr.tokens_used.toLocaleString()} tokens{tr.model ? ` (${tr.model})` : ""}
+                  </span>
+                )}
                 <button
                   onClick={() => setExpanded((e) => ({ ...e, [tr.task_run_id]: !isOpen }))}
                   className="ml-auto text-xs text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"

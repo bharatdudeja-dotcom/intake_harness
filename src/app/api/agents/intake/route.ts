@@ -169,9 +169,16 @@ export async function POST(req: NextRequest) {
    * success and wrote nothing.
    */
   const outcome = await createIntakeRequest({ intake: parsed.fields, brief });
+  const stated = parsed.extracted.filter((f) => f.from === "stated").length;
+  const message =
+    `Extracted ${stated} stated and ${parsed.inferred.length} inferred field(s) from the brief. ` +
+    (outcome.created
+      ? `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
+      : `Dry run — did not create the Workfront request: ${outcome.reason}`);
 
   return NextResponse.json<AgentResponse>({
     status: "completed",
+    message,
     output: {
       brief,
       ...summarise(parsed),

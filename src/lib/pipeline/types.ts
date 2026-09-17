@@ -36,7 +36,13 @@ export interface AgentResponse<TOutput = unknown> {
   status: AgentStatus;
   /** Present when status is "completed"; becomes the next agent's `input`. */
   output?: TOutput;
-  /** Present when status is "failed" or "needs_input". */
+  /**
+   * A plain-English explanation of what this step did, for a human reading
+   * the run — not just for "failed"/"needs_input" anymore. Every current
+   * agent already computes something like this internally (Audience
+   * Creation's statusMessage, Escalation's summary); the fix was surfacing
+   * it here on success too, not adding a new field.
+   */
   message?: string;
   /**
    * Free-form health/observability data, persisted alongside the task run
@@ -45,6 +51,14 @@ export interface AgentResponse<TOutput = unknown> {
    * { predictedCount, identityGap } for B3/B6, { requestAgeSeconds } for B7.
    */
   metadata?: Record<string, unknown>;
+  /**
+   * Only set this when an agent genuinely called a model — none of the
+   * four today do (they're deterministic parsers and MCP/tool calls), so
+   * this is deliberately never fabricated. It exists so a future agent
+   * that does call one has somewhere real to report it, and the UI shows
+   * it only when present rather than a permanent fake "0 tokens".
+   */
+  usage?: { tokens: number; model?: string };
 }
 
 /** One row in `runs` — a single pipeline invocation. */
@@ -92,6 +106,9 @@ export interface TaskRunRow {
   output: unknown;
   message: string | null;
   metadata: Record<string, unknown>;
+  /** Null on every agent today — see AgentResponse.usage. */
+  tokens_used: number | null;
+  model: string | null;
   started_at: string;
   finished_at: string;
   duration_ms: number;

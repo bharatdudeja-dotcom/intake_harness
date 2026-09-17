@@ -230,7 +230,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json<AgentResponse<AudienceCreationOutput>>({
     status,
     output,
-    message: status === "needs_input" ? attrState.note : undefined,
+    message: status === "needs_input" ? attrState.note : statusMessage,
     metadata: {
       buildPathReason: path.reason,
       schemasRead: probe.read,

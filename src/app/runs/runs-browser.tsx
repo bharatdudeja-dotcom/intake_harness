@@ -467,11 +467,20 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                         task_run_id: {taskRun.task_run_id}
                       </span>
                       <StatusBadge status={taskRun.status} />
+                      {taskRun.tokens_used != null && (
+                        <span className="text-xs text-zinc-400">
+                          {taskRun.tokens_used.toLocaleString()} tokens{taskRun.model ? ` (${taskRun.model})` : ""}
+                        </span>
+                      )}
                       <span className="ml-auto text-xs text-zinc-400">
                         {new Date(taskRun.started_at).toLocaleTimeString()} · {taskRun.duration_ms}ms
                       </span>
                     </div>
-                    {taskRun.message && <p className="text-xs text-red-600">{taskRun.message}</p>}
+                    {taskRun.message && (
+                      <p className={`text-xs ${taskRun.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                        {taskRun.message}
+                      </p>
+                    )}
                     <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                       {JSON.stringify(taskRun.output, null, 2)}
                     </pre>

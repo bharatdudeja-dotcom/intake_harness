@@ -94,6 +94,13 @@ ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
 ALTER TABLE runs ADD CONSTRAINT runs_status_check
     CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
 
+-- Model usage, when an agent genuinely reports it. NULL on every agent
+-- today — none of the four call a model, they're deterministic parsers and
+-- MCP/tool calls — so this stays empty rather than holding a fabricated 0.
+-- It exists for the day an agent does call one, via AgentResponse.usage.
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.
