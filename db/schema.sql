@@ -166,6 +166,18 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
+-- Parity with Agent Manager's settings override (D48) beyond retention:
+-- segmentation_labels/kind_labels rename what things are CALLED (internal
+-- keys — "programme", each resources.type value — never change, only their
+-- display label, so relabeling never breaks stored data or filters, same
+-- principle as that D48 override). promote_admins is the "Hero Agents"
+-- roster (D64): the subset of ADMIN_NAMES allowed to promote into the
+-- Shared Graph. NULL/empty means "any admin may promote" — today's
+-- behavior — so this is purely additive until an admin actually sets one.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS segmentation_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS kind_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS promote_admins TEXT[];
+
 -- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
 -- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
 -- it's the one place both agree on task_id.

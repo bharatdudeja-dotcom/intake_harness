@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
 import { getRunStats } from "@/lib/pipeline/orchestrator";
+import { getSettings, programmeLabel } from "@/lib/settings";
 import { PipelineChat } from "./pipeline-chat";
 
 // The stat tiles read `runs` on every request, so this can't be statically
@@ -9,7 +10,7 @@ import { PipelineChat } from "./pipeline-chat";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const stats = await getRunStats();
+  const [stats, settings] = await Promise.all([getRunStats(), getSettings()]);
   const tiles: { label: string; value: number }[] = [
     { label: "total runs", value: stats.total },
     { label: "needs input", value: stats.needsInput },
@@ -47,7 +48,7 @@ export default async function Home() {
           ))}
         </div>
 
-        <PipelineChat />
+        <PipelineChat programmeLabel={programmeLabel(settings)} />
 
         <details className="rounded-lg border border-zinc-200 bg-white text-sm dark:border-zinc-800 dark:bg-zinc-950">
           <summary className="cursor-pointer px-4 py-3 font-medium text-black dark:text-zinc-50">

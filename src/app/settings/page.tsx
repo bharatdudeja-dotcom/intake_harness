@@ -1,14 +1,17 @@
 import { listAdmins } from "@/lib/admins";
 import { getRunStats } from "@/lib/pipeline/orchestrator";
-import { countPurgeable, getSettings } from "@/lib/settings";
+import { countPurgeable, getSettings, programmeLabel } from "@/lib/settings";
 import { RetentionSettings } from "./retention-settings";
+import { LabelSettings } from "./label-settings";
+import { PromoteAdminsSettings } from "./promote-admins-settings";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Settings — ADMIN_NAMES is still read-only (an env var, not a DB-backed
- * setting — nothing here to save), but retention/purge is now real: see
- * retention-settings.tsx for the editable half.
+ * setting — nothing here to save). Everything else on this page ported
+ * from Agent Manager's settings override (D48) is real: retention/purge,
+ * vocabulary labels, and the Hero Agents promote roster.
  */
 export default async function SettingsPage() {
   const [admins, stats, settings, purgeableCount] = await Promise.all([
@@ -29,11 +32,15 @@ export default async function SettingsPage() {
 
       <RetentionSettings initialSettings={settings} initialPurgeableCount={purgeableCount} />
 
+      <LabelSettings initialSettings={settings} programmeLabel={programmeLabel(settings)} />
+
+      <PromoteAdminsSettings initialSettings={settings} admins={admins} />
+
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-sm font-semibold text-black dark:text-zinc-50">Admins</h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          From <code className="text-xs">ADMIN_NAMES</code> — the only names that can approve or promote a run or
-          resource.
+          From <code className="text-xs">ADMIN_NAMES</code> — the only names that can approve a run or resource, and
+          (unless the Hero Agents roster above narrows it) the only names that can promote one.
         </p>
         {admins.length === 0 ? (
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">

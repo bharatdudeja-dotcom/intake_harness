@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { isAdmin } from "@/lib/admins";
+import { canPromote } from "@/lib/settings";
 import type { RunRow } from "@/lib/pipeline/types";
 
 /**
@@ -22,6 +23,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
   }
   if (!isAdmin(adminName)) {
     return NextResponse.json({ error: `"${adminName}" is not in ADMIN_NAMES.` }, { status: 403 });
+  }
+  if (!(await canPromote(adminName))) {
+    return NextResponse.json({ error: `"${adminName}" is not on the Hero Agents roster that may promote.` }, { status: 403 });
   }
 
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
