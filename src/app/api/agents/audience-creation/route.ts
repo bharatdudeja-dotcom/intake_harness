@@ -7,7 +7,20 @@ import {
   identityGap,
   decideBuildPath,
   nightlyCutoff,
+  // 2.6 gathers the data requirements and 2.7 checks them. One list, shared
+  // with Agent 2, because two lists would mean the GTO request opened by 2.7's
+  // "No" was for a different set of attributes than the process asked for.
+  requiredAttributes,
 } from "@/lib/agents/audience/aep";
+import {
+  readSandboxFields,
+  checkAttributes,
+  audienceRequirements,
+  buildExpression,
+  createAudience,
+  type BuildResult,
+  type Expression,
+} from "@/lib/agents/audience/attributes";
 
 /**
  * Agent 3 - Audience Creation.
@@ -31,10 +44,24 @@ import {
  *   B6 (3.3)  the nightly job runs at 21:45 and every cycle after it costs a
  *             full day, so validate and predict BEFORE the cutoff.
  *
- * READ-ONLY, DELIBERATELY. Everything here is an AEP read. It will report that
- * it cannot predict a count rather than create a segment definition to produce
- * one - see lib/agents/audience/aep.ts. A number is the point of B3; a number
- * obtained by silently writing to a client's sandbox is not worth having.
+ * IT NOW WRITES, UNDER ONE CONDITION.
+ *
+ * This was read-only, and the reasoning was sound at the time: 2.7 could never
+ * be answered, and a segment built on unverified attributes is worse than no
+ * segment, because it yields a plausible count for an unknown population.
+ *
+ * What changed is that 2.7 can now be answered. The attributes were always
+ * there - xfinityTV, xfinityInternet, state, customerEmail - but the probe read
+ * schema documents, which contain $refs to field groups rather than fields, so
+ * it never saw them. Reading the FIELD GROUPS answers the question, and once
+ * the attributes are CONFIRMED the map's own step applies: 3.1a, "Agent creates
+ * audience in AEP rule builder".
+ *
+ * So the condition is exact: it builds only when the attribute check was
+ * conclusive AND every requirement matched a real field AND there is no
+ * existing audience to reuse. Anything less and it reports what it needs.
+ * The count then goes to the marketer at 3.4, and the approval at 3.5 stays a
+ * human's - see lib/agents/audience/attributes.ts.
  */
 
 export interface AudienceCreationInput {
@@ -70,15 +97,19 @@ export interface AudienceCreationOutput {
   identityGap: { hasGap: boolean; details: string | null };
   /** Marketer-visible status string - the thing B4 says must never be silence. */
   statusMessage: string;
-}
-
-/** The attributes an audience of this shape needs to exist in AEP. */
-function neededAttributes(fields: Record<string, string>): string[] {
-  const needed = new Set<string>(["customer_type", "line_of_business"]);
-  if (fields.lifecycle_journey) needed.add("lifecycle_journey");
-  if (fields.channels) needed.add("channels");
-  if (/northeast|region|state|market/i.test(Object.values(fields).join(" "))) needed.add("region");
-  return [...needed];
+  /** 3.1a: the audience, once one has been built. Null when none was. */
+  audience: {
+    created: boolean;
+    segmentId: string | null;
+    name: string;
+    /** The PQL, so a human can check the definition and not just the count. */
+    definition: string;
+    /** Each predicate in words. */
+    reads: string[];
+    /** What the brief asked for that could NOT be expressed. Never silent. */
+    notExpressed: string[];
+    error: string | null;
+  } | null;
 }
 
 /**
@@ -141,8 +172,42 @@ export async function POST(req: NextRequest) {
   const input = body.input || {};
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
 
-  const needed = neededAttributes(fields);
-  const probe = await probeSchemas(needed);
+  /*
+   * 2.6 and 2.7, answered from the sandbox's real fields.
+   *
+   * probeSchemas is kept for its schema-level read but it can never answer 2.7
+   * on its own: a schema document holds $refs to field groups, not fields, so
+   * every run came back "undetermined". readSandboxFields reads the field
+   * groups, which is where the attributes actually are - and in this tenant
+   * they are there: xfinityTV, xfinityInternet, state, customerEmail.
+   *
+   * The old requirement list was the BRIEF's fields (line_of_business,
+   * lifecycle_journey...), which are routing metadata about the request rather
+   * than predicates about a person. No AEP sandbox has a field called "line of
+   * business", so 2.7 could never say yes and every run was headed for 2.7a.
+   * audienceRequirements asks instead what the DEFINITION has to test.
+   */
+  const requirements = audienceRequirements(fields);
+  const fieldRead = await readSandboxFields("audience_creation");
+  const check = checkAttributes(requirements, fieldRead);
+
+  const needed = requirements.map((r) => r.label);
+  const probe = {
+    read: fieldRead.read,
+    conclusive: check.conclusive,
+    error: check.question ?? fieldRead.error,
+    sandbox: null,
+    tenant: check.tenant,
+    schemaCount: fieldRead.groupCount,
+    schemasInspected: fieldRead.groupCount,
+    fieldCount: check.fieldsSeen,
+    found: Object.fromEntries(
+      requirements.map((r) => [r.label, !check.missing.some((m) => m.key === r.key)]),
+    ),
+    // The matched field for every satisfied requirement, so a reader can check
+    // the match rather than take it on trust.
+    evidence: check.satisfied.map((s) => `${s.label} -> ${s.field} (${s.type}, in "${s.group}")`),
+  };
 
   /*
    * AN INCONCLUSIVE PROBE IS NOT A MISSING ATTRIBUTE.
@@ -174,7 +239,42 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .map(String);
   const existing = await findExistingSegment(terms);
-  const estimate = await estimateCount(existing.id);
+  let estimate = await estimateCount(existing.id);
+
+  /*
+   * 3.1a - BUILD IT.
+   *
+   * Only when 2.7 said yes conclusively, and only when there is nothing to
+   * reuse. Reuse first is not a preference, it is the cheapest good outcome in
+   * the whole map: an existing audience needs no build, no nightly cycle, and
+   * already has a real count.
+   *
+   * This agent used to be read-only and that was right while 2.7 could never be
+   * answered - a segment built on unverified attributes is worse than none. Now
+   * that the attributes are confirmed against real fields, the map's own step
+   * applies: "Agent creates audience in AEP rule builder". The count then goes
+   * to the marketer at 3.4 and the approval at 3.5 stays a human's.
+   */
+  let build: BuildResult | null = null;
+  let expression: Expression | null = null;
+  if (check.available && !existing.id) {
+    expression = buildExpression(check, fields);
+    if (expression) {
+      build = await createAudience("audience_creation", {
+        name: String(fields.campaign_name || "Audience").slice(0, 80),
+        pql: expression.pql,
+        description:
+          `Built by Agent 3 at step 3.1a from the approved intake. ` +
+          expression.explain.join("; ") +
+          (expression.ungrounded.length ? ` NOT expressed: ${expression.ungrounded.join(" ")}` : ""),
+      });
+      if (build.created && build.count != null) {
+        estimate = { count: build.count, basis: build.countBasis, segmentId: build.segmentId };
+      } else if (build.created) {
+        estimate = { count: null, basis: build.countBasis, segmentId: build.segmentId };
+      }
+    }
+  }
 
   // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
   // opening the 2.7a branch because we failed to look is the quarter-long tail
@@ -187,9 +287,9 @@ export async function POST(req: NextRequest) {
       : "AEP rule builder: " + path.reason,
     probe.conclusive
       ? `Checked ${probe.fieldCount} field(s) across ${probe.schemasInspected} profile schema(s)` +
-        (probe.sandbox ? ` in sandbox "${probe.sandbox}"` : "") + "."
+        (probe.tenant ? ` in tenant "${probe.tenant}"` : "") + "."
       : `Attribute availability is UNDETERMINED: ${probe.error}` +
-        (probe.sandbox ? ` (sandbox "${probe.sandbox}")` : "") +
+        (probe.tenant ? ` (tenant "${probe.tenant}")` : "") +
         ". No attribute request has been opened on the strength of that.",
     existing.id
       ? `Reusing existing audience "${existing.name}".`
@@ -215,6 +315,26 @@ export async function POST(req: NextRequest) {
     predictedCount: estimate.count,
     identityGap: gap,
     statusMessage,
+    /*
+     * The audience itself, when one was built.
+     *
+     * On the output rather than only in metadata, because metadata is not passed
+     * to the next agent and a built audience is the one thing everything
+     * downstream needs. The PQL is included so a human can read the definition
+     * and say whether it is the audience they asked for - which is 2.5/3.5, and
+     * they cannot do it from a count alone.
+     */
+    audience: build
+      ? {
+          created: build.created,
+          segmentId: build.segmentId,
+          name: build.name,
+          definition: build.pql,
+          reads: expression?.explain ?? [],
+          notExpressed: expression?.ungrounded ?? [],
+          error: build.error,
+        }
+      : null,
   };
 
   /*
@@ -225,12 +345,86 @@ export async function POST(req: NextRequest) {
    * reported-success-while-failing pattern the whole review layer exists to
    * catch, and it is why escalation has never fired on this pipeline.
    */
-  const status = attrState.status === "open" ? "needs_input" : "completed";
+  /*
+   * WHAT THIS AGENT IS ALLOWED TO CALL A SUCCESS.
+   *
+   * This was `attrState.status === "open" ? "needs_input" : "completed"`, and on
+   * the live tenant it reported `completed` on a run where it had:
+   *
+   *   - failed to confirm AEP holds the attributes it needs (3 schemas opened,
+   *     no field definitions found -> "undetermined"),
+   *   - found no existing audience to reuse,
+   *   - built no segment, deliberately, because it is read-only,
+   *   - and produced no predicted count.
+   *
+   * Nothing happened, and it said `completed`. B3's entire value is a predicted
+   * count before the marketer sees one, so a pass with no count is a pass with
+   * no product. The rule now: `completed` requires an OUTCOME - either a count,
+   * or an existing audience to reuse.
+   *
+   * The three ways it legitimately does not complete are each reported as
+   * themselves, because they need different things to happen next:
+   */
+  // An audience that now EXISTS because this agent built it is an outcome, and
+  // the most important one - it is the only way a real count ever appears.
+  const hasOutcome = estimate.count != null || existing.id != null || build?.created === true;
+
+  let status: "completed" | "needs_input" | "failed";
+  let blockedReason: string | null = null;
+
+  if (build && !build.created) {
+    /*
+     * 2.7 said yes, the expression was grounded, and the WRITE failed.
+     *
+     * That is a failure, not a pause. There is nothing for a human to answer -
+     * the request is complete and the attributes are there - so reporting
+     * needs_input would put a question to the marketer that they cannot act on
+     * while hiding a broken AEP write from whoever can.
+     */
+    status = "failed";
+    blockedReason =
+      `The audience could not be created in Adobe Experience Platform: ${build.error}. ` +
+      `The definition was ready and is kept here so nothing is lost: ${build.pql}`;
+  } else if (attrState.status === "open") {
+    // 2.7a. A GTO attribute request is open and the audience cannot be built
+    // until it returns. B4's quarter-long tail.
+    status = "needs_input";
+    blockedReason = attrState.note;
+  } else if (attributesAvailable === "undetermined" || (check.conclusive && !check.available)) {
+    /*
+     * 2.7 could not be answered, or was answered NO.
+     *
+     * Either way the question travels with the status. This is the gap that was
+     * reported from a real run: Agent 3 returned needs_input, and get_intake,
+     * the Workfront record and both comment streams were all silent about what
+     * it needed. A status with no question is unactionable - and for the 2.7a
+     * GTO request it is worse than that, because the request has to NAME the
+     * attributes being asked for or the GTO team starts from zero.
+     */
+    status = "needs_input";
+    blockedReason =
+      check.question ||
+      `Could not confirm what customer data is available: ${probe.error}. ` +
+      "Nothing has been built and no data request has been raised, because raising one because the " +
+      "check failed would start a long piece of work for a question nobody asked. Someone with Adobe " +
+      "Experience Platform access needs to confirm whether " + needed.join(", ") + " are held.";
+  } else if (!hasOutcome) {
+    // Attributes are there, and still no count. Say which of the two reads
+    // failed rather than leaving the reader to infer it.
+    status = "needs_input";
+    blockedReason =
+      "The customer data needed is available, but this produced no size estimate and found no " +
+      `existing audience to reuse. ${estimate.basis} ` +
+      (existing.read ? "" : `The audience catalogue could not be read either: ${existing.error}. `) +
+      "Without a number there is nothing yet for you to check.";
+  } else {
+    status = "completed";
+  }
 
   return NextResponse.json<AgentResponse<AudienceCreationOutput>>({
     status,
     output,
-    message: status === "needs_input" ? attrState.note : statusMessage,
+    message: blockedReason ?? undefined,
     metadata: {
       buildPathReason: path.reason,
       schemasRead: probe.read,
@@ -242,12 +436,15 @@ export async function POST(req: NextRequest) {
       // Which AEP sandbox answered. Assessing Comcast's attributes against a
       // sandbox that is not Comcast's is a meaningless check, and the reader
       // needs to be able to see that for themselves.
-      sandbox: probe.sandbox,
+      sandbox: probe.tenant,
       attributesNeeded: needed,
       attributesMissing: missing,
       schemaEvidence: probe.evidence,
       existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
       countBasis: estimate.basis,
+      // The one-line honest summary of this stage, for a reader who only looks
+      // at metadata: did it produce anything at all?
+      producedAnOutcome: hasOutcome,
       nightlyCutoff: cutoff,
     },
   });

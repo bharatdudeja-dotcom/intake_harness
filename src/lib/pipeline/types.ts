@@ -73,6 +73,28 @@ export interface RunRow {
   status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
   current_step: number;
   input: unknown;
+  /**
+   * What the run is waiting FOR, when the wait is a gate rather than a pause.
+   *
+   * Two different reasons a run sits at "awaiting_approval":
+   *   - a step finished and the next one wants a click (the per-agent loop);
+   *   - a PROCESS gate is shut, e.g. the request has not been approved in
+   *     Workfront, so the next agent must not run at all.
+   *
+   * Only the second sets this. It carries the explanation the marketer sees
+   * and the record they have to go and act on - being told to approve
+   * something without being told where is what stops approvals happening.
+   */
+  blocked_on: {
+    gate_id: string;
+    map_step: string;
+    label: string;
+    step_index: number;
+    agent: AgentName;
+    awaiting: string;
+    needs: "approval" | "upstream";
+    ref?: { objCode: string; objId: string };
+  } | null;
   created_at: string;
   updated_at: string;
   /** Optional grouping — see src/lib/programmes.ts. Set via an optional `programme` name on the submission. */
