@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { ESCALATION, PIPELINE } from "./registry";
+import { decisionFor, gateFor, type GateDecision, type GateId } from "./gates";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
 /**
@@ -203,6 +204,153 @@ export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: s
   return advanceOneStep(running, running.current_step, resumedInput, priorOutputs, baseUrl);
 }
 
+
+/**
+ * The process gate, in front of the per-agent loop.
+ *
+ * Returns null when the next agent may run, or the blocked_on record when it
+ * may not. A blocked agent is NOT called and writes NO task_runs row, so an
+ * absent stage cannot be mistaken for a finished one.
+ */
+async function gateBlocking(
+  runId: string,
+  stepIndex: number,
+  currentInput: unknown,
+  priorOutputs: Partial<Record<AgentName, unknown>>,
+): Promise<NonNullable<RunRow["blocked_on"]> | null> {
+  const agent = PIPELINE[stepIndex];
+  if (!agent) return null;
+  const gate = gateFor(agent.name);
+  if (!gate) return null;
+
+  const verdict = gate.check({ decisions: await listDecisions(runId), input: currentInput, priorOutputs });
+  if (verdict.open) return null;
+
+  return {
+    gate_id: gate.id,
+    map_step: gate.mapStep,
+    label: gate.label,
+    step_index: stepIndex,
+    agent: agent.name,
+    awaiting: verdict.awaiting,
+    needs: verdict.needs,
+    ref: verdict.ref,
+  };
+}
+
+/** Park the run at a gate. Nothing ran, so nothing is recorded as having run. */
+async function block(runId: string, blockedOn: NonNullable<RunRow["blocked_on"]>): Promise<RunRow> {
+  const [updated] = await query<RunRow>(
+    `UPDATE runs SET status = 'awaiting_approval', current_step = $2,
+            blocked_on = $3::jsonb, updated_at = NOW()
+     WHERE run_id = $1 RETURNING *`,
+    [runId, blockedOn.step_index, JSON.stringify(blockedOn)],
+  );
+  return updated;
+}
+
+/** Every decision recorded for this run, oldest first. */
+export async function listDecisions(runId: string): Promise<GateDecision[]> {
+  return query<GateDecision>(
+    `SELECT gate_id, step_index, decision, decided_by, reason, evidence, decided_at
+       FROM run_gates WHERE run_id = $1 ORDER BY decided_at, gate_run_id`,
+    [runId],
+  );
+}
+
+/**
+ * Attach the decision that opened a gate to the agent's input.
+ *
+ * Agent 2 has two jobs and the decision picks between them: approved goes to
+ * the conversion, rejected goes to triage. Carrying the reason means it does
+ * not have to hunt for the rejection in a comment stream it may not be able to
+ * read - which the blockers doc calls the largest unclaimed gap in the map.
+ */
+function withGateDecision(input: unknown, gateId: GateId | undefined, decisions: GateDecision[]): unknown {
+  if (!gateId) return input;
+  const decided = decisionFor(decisions, gateId);
+  if (!decided) return input;
+  if (input == null || typeof input !== "object" || Array.isArray(input)) return input;
+  return {
+    ...(input as Record<string, unknown>),
+    gateDecision: {
+      gate_id: decided.gate_id,
+      decision: decided.decision,
+      decided_by: decided.decided_by,
+      reason: decided.reason,
+      decided_at: decided.decided_at,
+    },
+    ...(decided.decision === "rejected" && decided.reason ? { rejectionReason: decided.reason } : {}),
+  };
+}
+
+/**
+ * Record a decision at a gate, then let the run continue by ONE step.
+ *
+ * Decided once: two approvals thirty seconds apart, from a client abort and a
+ * retry, each advanced the pipeline, and Agent 3 ran twice. Since the agents
+ * write to Workfront, a non-idempotent approve is a duplicate-record generator.
+ */
+export async function decideGate(
+  runId: string,
+  input: {
+    gateId?: string;
+    decision: "approved" | "rejected";
+    decidedBy: string;
+    reason?: string | null;
+    evidence?: Record<string, unknown>;
+  },
+  baseUrl: string,
+): Promise<{ run: RunRow; decision: GateDecision }> {
+  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+  if (!run) throw new Error(`No run ${runId}`);
+
+  const gateId = input.gateId || run.blocked_on?.gate_id;
+  if (!gateId) {
+    throw new Error(
+      `Run ${runId} is not waiting at a gate (status "${run.status}"), so there is nothing to decide.`,
+    );
+  }
+
+  const already = decisionFor(await listDecisions(runId), gateId as GateId);
+  if (already) {
+    if (already.decision !== input.decision) {
+      throw new Error(
+        `Gate ${gateId} was already ${already.decision} by ${already.decided_by} at ${already.decided_at}. ` +
+        "The pipeline has acted on that; start a new run if the request has changed.",
+      );
+    }
+    const [current] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
+    return { run: current, decision: already };
+  }
+
+  const [decision] = await query<GateDecision>(
+    `INSERT INTO run_gates (run_id, gate_id, step_index, decision, decided_by, reason, evidence)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+     RETURNING gate_id, step_index, decision, decided_by, reason, evidence, decided_at`,
+    [
+      runId,
+      gateId,
+      run.blocked_on?.step_index ?? run.current_step,
+      input.decision,
+      input.decidedBy,
+      input.reason ?? null,
+      JSON.stringify(input.evidence ?? {}),
+    ],
+  );
+
+  /*
+   * Clear the block, then advance exactly ONE step.
+   *
+   * The gate is a precondition on Continue, not a replacement for it - so a
+   * decision does not run the pipeline to completion, it unlocks the next
+   * agent and stops again like every other step.
+   */
+  await query(`UPDATE runs SET blocked_on = NULL WHERE run_id = $1`, [runId]);
+  const resumed = await continueRun(runId, baseUrl);
+  return { run: resumed, decision };
+}
+
 /**
  * Approves an "awaiting_approval" run and runs the next agent — the actual
  * "yes, go ahead" action behind the per-agent approval gate. `current_step`
@@ -221,12 +369,28 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
   const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
   const currentInput = lastCompleted ? lastCompleted.output : run.input;
 
+  /*
+   * A CLICK IS NOT AN APPROVAL.
+   *
+   * Continue means "yes, run the next agent". It does not mean the review queue
+   * approved the request - only Workfront knows that - and conflating the two
+   * is what let Agent 2 run on an unapproved brief and report completed. If a
+   * process gate is shut, the run goes back to awaiting_approval with
+   * blocked_on set and no agent is called.
+   */
+  const blocked = await gateBlocking(runId, run.current_step, currentInput, priorOutputs);
+  if (blocked) return block(runId, blocked);
+
   const [running] = await query<RunRow>(
-    `UPDATE runs SET status = 'running', updated_at = NOW() WHERE run_id = $1 RETURNING *`,
+    `UPDATE runs SET status = 'running', blocked_on = NULL, updated_at = NOW() WHERE run_id = $1 RETURNING *`,
     [runId],
   );
 
-  return advanceOneStep(running, running.current_step, currentInput, priorOutputs, baseUrl);
+  // The decision that opened the gate travels with the input.
+  const gate = gateFor(PIPELINE[running.current_step]?.name);
+  const input = withGateDecision(currentInput, gate?.id, await listDecisions(runId));
+
+  return advanceOneStep(running, running.current_step, input, priorOutputs, baseUrl);
 }
 
 /** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
@@ -341,14 +505,16 @@ async function callAgent(baseUrl: string, path: string, body: AgentRequest): Pro
 }
 
 /** A single run plus every task_runs row recorded for it, in step order. */
-export async function getRun(runId: string): Promise<{ run: RunRow; taskRuns: TaskRunRow[] } | null> {
+export async function getRun(runId: string): Promise<{ run: RunRow; taskRuns: TaskRunRow[]; gates: GateDecision[] } | null> {
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) return null;
   const taskRuns = await query<TaskRunRow>(
     `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index`,
     [runId],
   );
-  return { run, taskRuns };
+  // The decisions too: a reader who sees one stage and no second needs
+  // to be told the second is behind a gate, or absent reads as lost.
+  return { run, taskRuns, gates: await listDecisions(runId) };
 }
 
 /** Most recent runs, for a status/observability listing. */

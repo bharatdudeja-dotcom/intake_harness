@@ -66,10 +66,65 @@ function getPool(): Pool {
   return pool;
 }
 
+/**
+ * Why this does not just await the pool.
+ *
+ * When Postgres is unreachable, `pg` rejects with an **AggregateError** - one
+ * error per address it tried, IPv6 and IPv4. An AggregateError's own `.message`
+ * is the empty string: the detail lives in `.errors[]`. So every route that
+ * reported `(err as Error).message` returned:
+ *
+ *     {"error":""}
+ *
+ * A container whose database is switched off answering with a blank error is
+ * the worst possible thing to hand an operator, and it cost real time here: the
+ * app looked broken when the only fault was a stopped Postgres. It is also
+ * precisely the failure mode this project exists to argue against - an error
+ * that reports nothing is indistinguishable from one that was never raised.
+ *
+ * So the aggregate is flattened into something that names the cause and, where
+ * it can, what to check. The host and port come from DATABASE_URL rather than
+ * from the error, because the error does not carry them either.
+ */
+function describeDbError(err: unknown): Error {
+  const e = err as { name?: string; message?: string; code?: string; errors?: unknown[] };
+  if (e?.name !== "AggregateError" || !Array.isArray(e.errors) || !e.errors.length) {
+    return err as Error;
+  }
+
+  const parts = e.errors.map((inner) => {
+    const i = inner as { code?: string; message?: string; address?: string; port?: number };
+    const where = i.address ? ` (${i.address}${i.port ? `:${i.port}` : ""})` : "";
+    return `${i.code || "error"}${where}${i.message ? `: ${i.message}` : ""}`;
+  });
+
+  let target = "";
+  try {
+    const u = new URL(String(process.env.DATABASE_URL || "").trim().replace(/^['"]|['"]$/g, ""));
+    target = ` Postgres at ${u.hostname}:${u.port || 5432}${u.pathname}`;
+  } catch {
+    target = " Postgres (DATABASE_URL is unset or unparseable)";
+  }
+
+  const refused = parts.some((p) => p.startsWith("ECONNREFUSED"));
+  return new Error(
+    `Could not reach${target} - ${parts.join("; ")}.` +
+      (refused
+        ? " Nothing is listening there. Check the database is running and that this host can " +
+          "reach it: from a container, the host's own ports are not `localhost` - " +
+          "use host.docker.internal locally, or the RDS endpoint when deployed."
+        : ""),
+  );
+}
+
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const { rows } = await getPool().query<T>(text, params);
-  return rows;
+  try {
+    const { rows } = await getPool().query<T>(text, params);
+    return rows;
+  } catch (err) {
+    throw describeDbError(err);
+  }
 }
