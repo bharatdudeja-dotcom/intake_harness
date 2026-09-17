@@ -56,10 +56,14 @@ async function groundQuestions(missingLabels: string[]) {
     return { grounded: false, reason: "nothing missing to ground", hits: null as unknown };
   }
   try {
+    // search_adobe_knowledge takes only { query, topic? } (see chaunceyplum/mcp
+    // mcp_server/lambda_handler.py) — "agent" is hardcoded to "adobe" inside the
+    // tool itself, not a caller param, and there is no top_k on this tool at all.
+    // Passing either produced "<lambda>() got an unexpected keyword argument
+    // 'agent'" on every call, so grounding silently failed on every run.
     const hits = await callMcpTool("intake", "search_adobe_knowledge", {
       query: `Adobe Experience Platform profile attributes and schema fields for ${missingLabels.join(", ")}`,
-      agent: "adobe",
-      top_k: 3,
+      topic: "aep",
     });
     return { grounded: true, reason: null, hits };
   } catch (err) {
