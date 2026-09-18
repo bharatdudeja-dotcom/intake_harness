@@ -2014,7 +2014,11 @@ function registerTools (server, context = {}) {
                         }
                     }))
                 }
-                projectRecipe(full, full.steps, new Date().toISOString())
+                // projectJob, not the old name. The recipe->job rename happened; these two
+        // calls did not, so every capture through them threw ReferenceError into a
+        // catch that said nothing - which is why answering a question and advancing
+        // a run recorded no stages at all, while approving one did.
+        projectJob(full, full.steps, new Date().toISOString())
                 full.content_hash = contentHash(full.content)
                 await store.saveResource(full)
             } catch (e) {
@@ -2146,7 +2150,11 @@ async function captureStages (runId, system, steps) {
             added++
         }
         if (!added) return { added: 0, error: null }
-        projectRecipe(full, full.steps, new Date().toISOString())
+        // projectJob, not the old name. The recipe->job rename happened; these two
+        // calls did not, so every capture through them threw ReferenceError into a
+        // catch that said nothing - which is why answering a question and advancing
+        // a run recorded no stages at all, while approving one did.
+        projectJob(full, full.steps, new Date().toISOString())
         full.content_hash = contentHash(full.content)
         await store.saveResource(full)
         return { added, error: null }
