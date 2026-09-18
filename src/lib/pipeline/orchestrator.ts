@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import { ESCALATION, PIPELINE } from "./registry";
+import { ALL_TASKS, ESCALATION, PIPELINE } from "./registry";
 import { decisionFor, gateFor, type GateDecision, type GateId } from "./gates";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
@@ -305,10 +305,24 @@ export async function decideGate(
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) throw new Error(`No run ${runId}`);
 
-  const gateId = input.gateId || run.blocked_on?.gate_id;
+  /*
+   * Which gate is being decided.
+   *
+   * blocked_on is set only when OUR gate check parked the run. But the
+   * per-agent loop also parks a run at awaiting_approval after every completed
+   * step, with blocked_on null - so after intake finishes, the run is waiting
+   * to run Agent 2 and has no blocked_on at all. Reading only blocked_on made
+   * approve_intake answer 409 "not waiting at a gate" for a request that
+   * Workfront had genuinely approved, and the pipeline could never leave
+   * step 1. The gate that matters is the one in front of the step the run is
+   * about to take, whichever mechanism parked it there.
+   */
+  const nextAgent = PIPELINE[run.current_step]?.name;
+  const gateId = input.gateId || run.blocked_on?.gate_id || (nextAgent ? gateFor(nextAgent)?.id : undefined);
   if (!gateId) {
     throw new Error(
-      `Run ${runId} is not waiting at a gate (status "${run.status}"), so there is nothing to decide.`,
+      `Run ${runId} is at step ${run.current_step} (status "${run.status}") and nothing there is gated, ` +
+      "so there is no decision to record. Use /continue to advance it.",
     );
   }
 
@@ -524,7 +538,26 @@ export async function listRuns(limit = 50): Promise<RunRow[]> {
 
 /** The static task catalog (see db/schema.sql — kept in sync with registry.ts). */
 export async function listTasks(): Promise<TaskRow[]> {
-  return query<TaskRow>(`SELECT * FROM tasks ORDER BY task_id`);
+  const rows = await query<TaskRow>(`SELECT * FROM tasks`);
+
+  /*
+   * PIPELINE ORDER, not alphabetical.
+   *
+   * `ORDER BY task_id` gave audience_creation, escalation, intake, review -
+   * so anything that treats this catalog as the running order puts Escalation
+   * second. The dashboard did exactly that: a job that had only finished Intake
+   * reported "Agent 4 - Escalation, step 2 of 4", and the progress bar coloured
+   * the wrong segments. Escalation is not step 2 of anything; it is not in the
+   * pipeline at all, it is what runs when the pipeline fails.
+   *
+   * The registry is the one place that knows the order, so it decides here too.
+   * Anything not in it sorts to the end rather than being dropped - a task
+   * added upstream should still appear.
+   */
+  const order = new Map(ALL_TASKS.map((t, i) => [t.name as string, i]));
+  return rows.sort((a, b) =>
+    (order.get(a.task_id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.task_id) ?? Number.MAX_SAFE_INTEGER) ||
+    a.task_id.localeCompare(b.task_id));
 }
 
 /** Every execution of a single task across all runs — "when did audience_creation run, and how did it go each time." */
