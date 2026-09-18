@@ -72,6 +72,22 @@ export const PIPELINE: AgentDefinition[] = [
     allowedTools: [
       "search_adobe_knowledge",
       ...allWorkfrontToolNames(),
+      // triage.ts's "wrong_data_source" finding (FAC vs. the AEP profile
+      // store, the most expensive classification this agent makes) is a
+      // guess without being able to check AEP itself: whether the attribute
+      // actually lives in a profile-enabled schema, whether an audience
+      // already exists for this ask, and roughly how big the candidate
+      // profile dataset is. All read-only — Review triages and asks; it
+      // does not create/update anything in AEP (that's Agent 3's job).
+      "adobe_list_schemas",
+      "adobe_get_schema",
+      "adobe_list_segments",
+      "adobe_get_segment",
+      // Catalog metadata is how you tell a profile-enabled dataset from any
+      // other (its schema's union/profile behavior). No Query Service access —
+      // that's a much bigger permission (arbitrary SQL) than this stub needs
+      // just to triage a rejection.
+      "adobe_list_datasets",
     ],
     // Empty today: this stub doesn't read priorOutputs at all, and its
     // `input` already IS intake's output. Widen this only when a real
