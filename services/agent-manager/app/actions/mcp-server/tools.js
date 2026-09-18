@@ -2359,11 +2359,18 @@ async function captureStages (runId, system, steps) {
              * asked. A verifier that only works when our own bookkeeping is
              * complete is a second thing to fail in front of a customer.
              */
-            if (!refs.length && ref && ref.run_id) {
+            /*
+             * resource.upstream, not `ref` - a later `const ref` in this block
+             * shadows the outer one, so naming it here hits the temporal dead
+             * zone and throws "Cannot access 'ref' before initialization".
+             * node --check does not see that; only running it does.
+             */
+            const upstreamRef = resource.upstream
+            if (!refs.length && upstreamRef && upstreamRef.run_id) {
                 try {
-                    const { system } = agentSystems.resolve(ref.system_id, undefined, settings.agentSystems())
+                    const { system } = agentSystems.resolve(upstreamRef.system_id, undefined, settings.agentSystems())
                     if (system) {
-                        const upstream = await agentSystems.getRun(system, ref.run_id)
+                        const upstream = await agentSystems.getRun(system, upstreamRef.run_id)
                         for (const st of agentSystems.toSteps(upstream)) {
                             for (const r of narrate.findWorkfrontRefs(st.output)) {
                                 if (!refs.some(x => x.objId === r.objId)) refs.push(r)
