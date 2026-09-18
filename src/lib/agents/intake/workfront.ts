@@ -25,6 +25,7 @@ import { callMcpTool } from "@/lib/mcp-client";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
 import { writeCustomFields } from "@/lib/agents/shared/workfront-write";
+import { planFormWrites, questionsFromPlan } from "@/lib/agents/intake/form-plan";
 import { fieldByKey } from "@/lib/agents/shared/campaign-brief";
 
 /**
@@ -113,6 +114,17 @@ export type CreateOutcome =
       customFieldsWritten: string[];
       /** And which did not, with the reason. */
       customFieldsRejected: Array<{ field: string; reason: string }>;
+      /**
+       * What the form could hold and the brief did not answer, in a marketer's
+       * words. Reported, never blocking: this tenant's Region field accepts
+       * uk, de and us, so any US state is a permanent mismatch and stopping
+       * every run to ask which country describes New York would be worse than
+       * the gap it reports.
+       */
+      formNotes: string[];
+      /** How many of the form's own fields were filled, and how many exist. */
+      formFilled: number;
+      formFieldsSeen: number;
       fieldNames: FieldNames;
     }
   | {
@@ -303,8 +315,34 @@ export async function createIntakeRequest(args: {
    * that flag travels with the outcome - a payload nobody can tell apart from a
    * verified one is how the bug survived.
    */
-  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, INTAKE_OBJECT === "PROJ" ? "project" : "issue", "intake");
+  const entity = INTAKE_OBJECT === "PROJ" ? "project" : "issue";
+  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, entity, "intake");
   const { fields, customFields, dropped, coerced, uncoercible } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
+
+  /*
+   * EVERYTHING ELSE THE FORM CAN HOLD.
+   *
+   * The map above matches OUR field names to the form's. This asks the other
+   * question - what does this form have, and does the brief answer it - which
+   * is how a Workfront administrator fills an intake. On this tenant that is
+   * Audience, Primary Channel, Region, Type and Product Name, none of which we
+   * were offering.
+   *
+   * The planner wins where the two disagree, because it checked the value
+   * against the field's own list of allowed values rather than sending prose
+   * at an enumeration.
+   */
+  const plan = await planFormWrites("intake", entity, args.intake).catch(() => null);
+  const formQuestions: string[] = [];
+  if (plan) {
+    for (const [name, value] of Object.entries(plan.writes)) customFields[name] = value;
+    /*
+     * What the form asks and the brief does not answer, in the marketer's
+     * terms. Asked here it costs one exchange; found by a reviewer two days
+     * later it costs a cycle, which is B2 on the blockers map.
+     */
+    formQuestions.push(...questionsFromPlan(plan));
+  }
 
   /*
    * An issue belongs to a project. `fields.projectID` is already set if the
@@ -407,5 +445,20 @@ export async function createIntakeRequest(args: {
     customFieldsWritten,
     customFieldsRejected,
     fieldNames: { verified: fieldMap.verified, source: fieldMap.source, dropped },
+    /*
+     * What the form could hold and the brief did not answer - reported, not
+     * asked.
+     *
+     * Blocking on these would stop every run on this tenant: its Region field
+     * accepts uk, de and us, so any US state is a permanent mismatch, and
+     * asking the marketer to choose a country to describe New York is not a
+     * question worth a round trip. It is worth SAYING, because a reviewer
+     * opening the request should know that the region they can see in the
+     * brief is not in the region field, and an administrator should know the
+     * form cannot express it.
+     */
+    formNotes: formQuestions,
+    formFilled: plan ? Object.keys(plan.writes).length : 0,
+    formFieldsSeen: plan ? plan.formFieldCount : 0,
   };
 }
