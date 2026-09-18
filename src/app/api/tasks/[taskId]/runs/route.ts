@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listTaskRuns } from "@/lib/pipeline/orchestrator";
+import { apiError } from "@/lib/api-error";
 
 /** Every execution of one task across all pipeline runs — trace a single agent's history independent of any one run_id. */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ taskId: string }> }) {
@@ -10,6 +11,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ task
     const taskRuns = await listTaskRuns(taskId, limit);
     return NextResponse.json({ taskRuns });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

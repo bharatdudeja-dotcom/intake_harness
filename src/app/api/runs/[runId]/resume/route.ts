@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resumeRun } from "@/lib/pipeline/orchestrator";
 import { query } from "@/lib/db";
 import type { TaskRunRow } from "@/lib/pipeline/types";
+import { apiError } from "@/lib/api-error";
 
 /**
  * POST: answers a paused ("needs_input") run and re-runs the pipeline from
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
   const { runId } = await params;
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object" || typeof body.answers !== "object" || body.answers === null) {
-    return NextResponse.json({ error: 'Body must be { "answers": <object> }' }, { status: 400 });
+    return apiError('Body must be { "answers": <object> }', "VALIDATION_ERROR", 400);
   }
 
   const [pausedTaskRun] = await query<TaskRunRow>(
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     [runId],
   );
   if (!pausedTaskRun) {
-    return NextResponse.json({ error: `Run ${runId} has no paused step to answer.` }, { status: 400 });
+    return apiError(`Run ${runId} has no paused step to answer.`, "VALIDATION_ERROR", 400);
   }
 
   const pausedOutput = (pausedTaskRun.output ?? {}) as {
@@ -45,9 +46,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     (q) => String(mergedFields[q.key] ?? "").trim() === "",
   );
   if (stillBlank.length) {
-    return NextResponse.json(
-      { error: `Still blank: ${stillBlank.map((q) => q.label).join(", ")}. Answer every asked question before resuming.` },
-      { status: 400 },
+    return apiError(
+      `Still blank: ${stillBlank.map((q) => q.label).join(", ")}. Answer every asked question before resuming.`,
+      "VALIDATION_ERROR",
+      400,
     );
   }
 
@@ -62,6 +64,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     const run = await resumeRun(runId, resumedInput, baseUrl);
     return NextResponse.json({ run });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

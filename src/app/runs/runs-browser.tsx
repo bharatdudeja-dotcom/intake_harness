@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { PIPELINE } from "@/lib/pipeline/registry";
 import { StatusBadge } from "../status-badge";
+import { ToolCallTrace, type ToolCallOutput } from "../tool-call-trace";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 
@@ -35,6 +36,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const [selectedAdmin, setSelectedAdmin] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
   const [curating, setCurating] = useState(false);
+  const [runningAgain, setRunningAgain] = useState(false);
 
   useEffect(() => {
     fetch("/api/admins")
@@ -75,6 +77,33 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       await refresh();
     } finally {
       setCurating(false);
+    }
+  }
+
+  /**
+   * Starts a brand-new run from this run's original input — the exact
+   * submission, not a resume/retry of THIS run_id. Useful for checking
+   * whether agent behavior changed since, without retyping the brief.
+   */
+  async function runAgain() {
+    if (!detail) return;
+    setRunningAgain(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: detail.run.input }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Failed to start a new run (HTTP ${res.status}).`);
+        return;
+      }
+      await loadDetail(data.run.run_id);
+      await refresh();
+    } finally {
+      setRunningAgain(false);
     }
   }
 
@@ -282,6 +311,14 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     Approved by {detail.run.approved_by}
                   </span>
                 )}
+                <button
+                  onClick={runAgain}
+                  disabled={runningAgain}
+                  title="Start a brand-new run with this run's original input"
+                  className="ml-auto rounded-full border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-600"
+                >
+                  {runningAgain ? "Starting…" : "Run again"}
+                </button>
               </div>
 
               {detail.run.status === "completed" && (
@@ -431,6 +468,9 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                         {taskRun.message}
                       </p>
                     )}
+                    <div className="flex flex-col gap-1.5">
+                      <ToolCallTrace output={(taskRun.output ?? {}) as ToolCallOutput} />
+                    </div>
                     <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                       {JSON.stringify(taskRun.output, null, 2)}
                     </pre>

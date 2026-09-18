@@ -233,6 +233,19 @@ function mcpHeaders(): Record<string, string> {
   return headers;
 }
 
+/**
+ * A bare "HTTP 403" with nothing else is nearly useless for debugging a
+ * gateway/API Gateway misconfiguration — the body usually says exactly why
+ * (missing API key, an authorizer's rejection reason, a proxy's own error
+ * page). Truncated to 300 chars so a stray HTML error page doesn't flood
+ * the thrown error.
+ */
+async function describeError(res: Response): Promise<string> {
+  const bodyText = await res.text().catch(() => "");
+  const preview = bodyText ? ` — ${bodyText.slice(0, 300)}` : "";
+  return `HTTP ${res.status} (${res.statusText})${preview}`;
+}
+
 let requestCounter = 0;
 
 function assertToolAllowed(taskId: TaskId, name: string): void {
@@ -294,7 +307,7 @@ export async function callMcpTool<T = unknown>(
 
   if (!res.ok) {
     throw new McpError(
-      `MCP endpoint returned HTTP ${res.status} for tool "${name}"`,
+      `MCP endpoint returned an error for tool "${name}": ${await describeError(res)}`,
       res.status,
     );
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { continueRun } from "@/lib/pipeline/orchestrator";
+import { apiError } from "@/lib/api-error";
 
 /**
  * POST: the "approve" action for a run sitting in "awaiting_approval" —
@@ -13,6 +14,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     const run = await continueRun(runId, baseUrl);
     return NextResponse.json({ run });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

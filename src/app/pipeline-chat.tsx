@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
 import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "./status-badge";
+import { ToolCallTrace, type ToolCallOutput } from "./tool-call-trace";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
@@ -14,12 +15,9 @@ function agentLabel(taskId: AgentName): string {
 }
 
 /** A step's output, loosely — every field here is optional because each agent's shape differs. */
-type StepOutput = {
+type StepOutput = ToolCallOutput & {
   message?: string;
   questions?: PendingQuestion[];
-  grounding?: { grounded: boolean; reason: string | null; hits?: unknown };
-  workfront?: { created?: boolean } & Record<string, unknown>;
-  [key: string]: unknown;
 };
 
 /**
@@ -211,26 +209,9 @@ export function PipelineChat() {
                 </p>
               )}
 
-              {/* Tool calls this step made, surfaced the way Claude Code shows one — a
-                  named call with its outcome, not buried in a raw JSON blob. */}
-              {output.grounding && (
-                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  <span>🔍</span>
-                  <span className="font-mono">search_adobe_knowledge</span>
-                  <span className={output.grounding.grounded ? "text-green-600" : "text-amber-600"}>
-                    {output.grounding.grounded ? "grounded" : `ungrounded — ${output.grounding.reason}`}
-                  </span>
-                </div>
-              )}
-              {output.workfront && (
-                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  <span>🛠️</span>
-                  <span className="font-mono">create_workfront_intake</span>
-                  <span className={output.workfront.created ? "text-green-600" : "text-amber-600"}>
-                    {output.workfront.created ? "created" : "dry run — not created"}
-                  </span>
-                </div>
-              )}
+              <div className="ml-7 flex flex-col gap-1.5">
+                <ToolCallTrace output={output} />
+              </div>
 
               {isOpen && (
                 <pre className="ml-7 overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">

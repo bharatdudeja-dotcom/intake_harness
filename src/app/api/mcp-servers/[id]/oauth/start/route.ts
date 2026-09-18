@@ -3,6 +3,7 @@ import { isAdmin } from "@/lib/admins";
 import { getServer, saveOAuthTransaction } from "@/lib/mcp-servers";
 import { authorizeUrl, challengeFor, discover, randomState, randomVerifier, register } from "@/lib/mcp-oauth";
 import { callbackRedirectUri } from "@/lib/mcp-oauth-redirect";
+import { apiError } from "@/lib/api-error";
 
 const TXN_TTL_MS = 10 * 60 * 1000;
 
@@ -17,12 +18,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const adminName = req.nextUrl.searchParams.get("adminName")?.trim() || "";
   if (!adminName || !isAdmin(adminName)) {
-    return NextResponse.json({ error: `"${adminName}" is not in ADMIN_NAMES.` }, { status: 403 });
+    return apiError(`"${adminName}" is not in ADMIN_NAMES.`, "FORBIDDEN", 403);
   }
 
   const server = await getServer(id);
-  if (!server) return NextResponse.json({ error: `No MCP server registered with id '${id}'.` }, { status: 404 });
-  if (!server.endpoint) return NextResponse.json({ error: "Set this server's endpoint before signing in." }, { status: 400 });
+  if (!server) return apiError(`No MCP server registered with id '${id}'.`, "NOT_FOUND", 404);
+  if (!server.endpoint) return apiError("Set this server's endpoint before signing in.", "VALIDATION_ERROR", 400);
 
   try {
     const redirectUri = callbackRedirectUri(req);
@@ -56,6 +57,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     });
     return NextResponse.redirect(url, { status: 302, headers: { "Cache-Control": "no-store" } });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 502 });
+    return apiError((err as Error).message, "UPSTREAM_ERROR", 502);
   }
 }

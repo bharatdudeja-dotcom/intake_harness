@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPipeline, listRuns } from "@/lib/pipeline/orchestrator";
+import { apiError } from "@/lib/api-error";
 
 /**
  * POST: kicks off a full pipeline run: intake -> review -> audience_creation,
@@ -17,7 +18,7 @@ import { runPipeline, listRuns } from "@/lib/pipeline/orchestrator";
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object" || !("input" in body)) {
-    return NextResponse.json({ error: 'Body must be { "input": <object> }' }, { status: 400 });
+    return apiError('Body must be { "input": <object> }', "VALIDATION_ERROR", 400);
   }
 
   const baseUrl = req.nextUrl.origin;
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
     const run = await runPipeline(body.input, baseUrl);
     return NextResponse.json({ run });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }
 
@@ -36,6 +37,6 @@ export async function GET(req: NextRequest) {
     const runs = await listRuns(limit);
     return NextResponse.json({ runs });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }
