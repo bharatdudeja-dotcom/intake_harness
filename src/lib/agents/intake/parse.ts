@@ -247,13 +247,31 @@ function findCampaignName(brief: string): ExtractedField | null {
     }
   }
 
+  /*
+   * `[^.:;
+]`, not `.` - a campaign name does not contain a full stop.
+   *
+   * With a permissive dot this matched from the first "for" straight across a
+   * sentence boundary: "Growth/Upsell for existing residential subscribers.
+   * Request type: Audience + Campaign Execution" captured everything up to the
+   * word "Campaign", and the Workfront issue was created titled
+   * "existing residential subscribers. Request type: Audience +".
+   *
+   * The lazy quantifier is no defence - it still crosses punctuation if it is
+   * allowed to, and the sentence after a name is exactly where the next one
+   * begins. A garbled title is not cosmetic: the issue name is what the review
+   * queue reads, and what a marketer searches for to find their own request.
+   */
   const framed = text.match(
-    /\bfor (?:the )?(.{3,60}?)\s+(?:push|campaign|launch|programme|program|initiative|activation)\b/i,
-  ) || text.match(/\b(?:campaign|push|programme|program)\s+(?:called|named)\s+"?(.{3,60}?)"?(?:[.,]|$)/i);
+    /\bfor (?:the )?([^.:;\n]{3,60}?)\s+(?:push|campaign|launch|programme|program|initiative|activation)\b/i,
+  ) || text.match(/\b(?:campaign|push|programme|program)\s+(?:called|named)\s+"?([^.:;\n]{3,60}?)"?(?:[.,]|$)/i);
 
   if (framed) {
-    const name = framed[1].trim().replace(/^(our|the|a)\s+/i, "");
-    if (name && name.split(/\s+/).length <= 8) {
+    const name = framed[1].trim().replace(/^(our|the|a)\s+/i, "").replace(/[,+&\/]+$/, "").trim();
+    // Six words, not eight. A campaign has a name; a clause describing the
+    // audience does not, and the longer a capture runs the more likely it is
+    // the latter - "existing residential subscribers, Audience +" is seven.
+    if (name && name.split(/\s+/).length <= 6) {
       return { key: "campaign_name", label: "Campaign name", value: name, from: "derived", evidence: framed[0] };
     }
   }

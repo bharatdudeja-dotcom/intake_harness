@@ -37,6 +37,7 @@ import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap } from "@/lib/agents/intake/workfront-fields";
 import { writeCustomFields, describeFieldWrite } from "@/lib/agents/shared/workfront-write";
 import { findExistingSegment, requiredAttributes } from "@/lib/agents/audience/aep";
+import { postComment } from "@/lib/agents/shared/workfront-comment";
 
 /**
  * The project custom form the brief is written onto.
@@ -130,13 +131,17 @@ async function linkBack(projectId: string, issueId: string, projectName: string)
     const relationError = (err as Error).message;
 
     try {
-      await callMcpTool("review", set.createComment, {
-        objID: issueId,
-        objCode: "OPTASK",
-        message:
-          `Converted to project "${projectName}" (PROJ ${projectId}) at step 2.1. ` +
-          "The campaign brief's fields live on the project form, not the issue form, so the brief is recorded there.",
-      });
+      await postComment(
+        "review",
+        "OPTASK",
+        issueId,
+        `This request has been converted to the project "${projectName}".
+
+` +
+          "The campaign brief's fields are recorded on the project, not on this request - " +
+          "the request form and the project form carry different fields, and the brief needs the project's. " +
+          "Work the project from here; this request stays as the record of how it was raised.",
+      );
       return {
         ok: true,
         how: "a comment on the issue naming the project - the convertedOpTaskID relation was refused, so this is prose rather than a relation",
