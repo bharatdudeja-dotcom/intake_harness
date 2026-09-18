@@ -71,6 +71,21 @@ export type GateVerdict =
     };
 
 export type GateContext = {
+  /*
+   * EVERY attempt each stage made, in order, whatever its status.
+   *
+   * priorOutputs carries the last COMPLETED output per agent, which is the
+   * right thing to hand an agent. It is the wrong thing to judge a gate on: a
+   * stage can run more than once, and a later run does not undo what an
+   * earlier one did.
+   *
+   * On run 9b8e39ee the review that created the project is marked needs_input
+   * - it also asked the marketer a question - and the row marked completed is
+   * a lighter preflight pass with no conversion in it. Judging the 2.7 gate on
+   * completed rows alone told a marketer the request had never been through
+   * review, in front of the project it had just created.
+   */
+  allOutputs?: Partial<Record<AgentName, unknown[]>>;
   /** Every decision recorded for this run so far, oldest first. */
   decisions: GateDecision[];
   /** What would be passed to the agent as its input. */
@@ -164,7 +179,7 @@ const AUDIENCE_BUILD_2_7: Gate = {
   id: "audience_build_2_7",
   mapStep: "2.7",
   label: "Audience needs building, and the attributes exist",
-  check: ({ decisions, priorOutputs }) => {
+  check: ({ decisions, priorOutputs, allOutputs }) => {
     const approval = decisionFor(decisions, "approval_1_5");
     if (approval && approval.decision === "rejected") {
       return {
@@ -176,7 +191,24 @@ const AUDIENCE_BUILD_2_7: Gate = {
       };
     }
 
-    const phase2 = priorOutputs.review as
+    /*
+     * WHICHEVER ATTEMPT DID THE CONVERSION.
+     *
+     * This read priorOutputs.review and required mode === "phase2", which was
+     * only ever a proxy for "the request has been converted to a project
+     * carrying the brief". When review runs twice - once doing the conversion
+     * and asking a question, once as a preflight - the completed row is the
+     * preflight, and the proxy said no.
+     *
+     * So: the real evidence, from any attempt review made.
+     */
+    const reviewAttempts = [...((allOutputs?.review as unknown[] | undefined) ?? []), priorOutputs.review];
+    const didPhase2 = reviewAttempts.find((o) => {
+      const r = o as { mode?: string; converted?: { created?: boolean } } | null | undefined;
+      return r && (r.mode === "phase2" || r.converted?.created === true);
+    });
+
+    const phase2 = (didPhase2 ?? priorOutputs.review) as
       | {
           mode?: string;
           converted?: { created?: boolean; objCode?: string; objId?: string };
