@@ -396,6 +396,25 @@ ALWAYS report provenance on anything you do write: model, tokens_used, and sourc
 client you are, e.g. "desktop-ai", "ide-agent"). An omitted tokens_used is recorded as "not
 reported", never as zero, and shows in the dashboard as missing telemetry.
 
+THE APPROVAL IS NOT YOURS TO GIVE
+
+A request waits for a named person to click Approve inside Workfront. That is a
+manual step, on purpose, and it is the one place in this pipeline where a human
+decision is load-bearing: everything downstream - the project, the audience, the
+spend - proceeds on the strength of it.
+
+So when a job is waiting for approval, do not offer to approve it, do not ask
+whether the person wants you to, and do not present "approve and continue
+anyway" as an option. There is no version of that which is correct. Say what was
+created, give the Workfront link, say it needs their approval there, and stop.
+
+approve_intake exists to RECORD an approval that already happened. It reads the
+record back from Workfront and refuses unless Workfront itself reports the
+approval has cleared - so offering to approve does not just misrepresent your
+role, it proposes something that will fail.
+
+The same goes for rejecting.
+
 WRITING A COMMENT INTO WORKFRONT
 
 Two rules, both learned the hard way on a live tenant.
@@ -2454,13 +2473,21 @@ async function captureStages (runId, system, steps) {
 
     server.tool(
         'approve_intake',
-        'THE PROCESS APPROVAL AT STEP 1.5. Use this when a human says they have approved an intake ' +
-        'request - including when they name a Workfront object id, e.g. "approved 6aac001e...". It opens ' +
-        'the gate so Agent 2 runs (2.1, issue converted to project form) and the campaign proceeds. ' +
+        'RECORDS AN APPROVAL THAT HAS ALREADY HAPPENED IN WORKFRONT. Use it only after a human tells you ' +
+        'they have approved the request - including when they name a Workfront object id, e.g. ' +
+        '"approved 6aac001e...". It opens the gate so Agent 2 runs, converting the request into a project ' +
+        'that carries the brief, and the campaign proceeds. ' +
+        'NEVER OFFER TO APPROVE, and never present approving as a choice the person can ask you to make - ' +
+        'not "shall I approve it", not "approve and continue anyway". The approval is a named person ' +
+        'clicking Approve in Workfront, and there is nothing you can do in its place. When a job is ' +
+        'waiting here, the whole of the correct response is: give the Workfront link, say plainly that it ' +
+        'needs their approval there, and stop. Then wait to be told. ' +
         'It does NOT approve anything inside Workfront: a named person clicks Approve in Workfront\'s own ' +
         'Approvals tab, and this records that they did so the pipeline can move. ' +
         'DO NOT confuse this with certify / bake_job / approve_step - those promote the RECORD of a run ' +
         'into Playbooks for the Oracle to learn from, and none of them makes the pipeline advance. ' +
+        'Do not repeat our step numbers - 1.5, 2.1, 2.7 - to anyone. They are coordinates on an internal ' +
+        'process map and mean nothing to a marketer. Say what is happening instead. ' +
         'If a job is sitting at awaiting_approval, this is the tool that moves it. IT VERIFIES: it reads the record back from Workfront and REFUSES unless Workfront itself reports the approval has cleared. Saying that the user approved it is not enough and never will be - the last time this was taken on trust, a job reported three completed stages while the Workfront request was still Pending Approval.',
         {
             run_id: z.string().optional().describe('The Agent Manager run id from start_intake'),
@@ -2474,7 +2501,8 @@ async function captureStages (runId, system, steps) {
 
     server.tool(
         'reject_intake',
-        'THE PROCESS REJECTION AT STEP 1.5, i.e. step 1.5a - sent back to the marketer as rework. ' +
+        'RECORDS A REJECTION THAT HAS ALREADY HAPPENED IN WORKFRONT - the request goes back to the ' +
+        'marketer as rework. Same rule as approve_intake: never offer to reject on anyone\'s behalf. ' +
         'Agent 2 reads the reason and translates it into the specific missing field or wrong data source, ' +
         'then proposes a redraft for the marketer to confirm. A reason is REQUIRED: an unexplained ' +
         'rejection sends the marketer back to a form with eleven fields to guess at, which is the ' +
