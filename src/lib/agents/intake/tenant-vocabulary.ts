@@ -91,6 +91,78 @@ const SYNONYMS: Record<string, string[]> = {
   "Revision / Edit  to existing": ["revision", "edit", "amend", "change to existing", "update existing"],
 };
 
+/**
+ * The same place, described more broadly each time.
+ *
+ * Narrowest first, so a field that can hold the exact place gets it, and only
+ * a field that cannot is offered something coarser. Each step carries the words
+ * to explain itself, because a value quietly widening is the failure worth
+ * catching: a state filed under a country is a fact, a state filed under the
+ * wrong continent is a bug.
+ *
+ * Only places this can be sure about. A city it does not know widens no
+ * further, and the field refuses rather than guessing.
+ */
+function widerPlaces(raw: string): Array<{ as: string; level: string; because: string; missing: string }> {
+  const out: Array<{ as: string; level: string; because: string; missing: string }> = [
+    { as: raw, level: "as written", because: "", missing: "" },
+  ];
+
+  const state = findState(raw);
+  if (state) {
+    out.push({ as: state.name, level: "state", because: "is a US state", missing: "state-level" });
+    out.push({ as: state.code, level: "state code", because: "is a US state", missing: "state-level" });
+    for (const us of ["us", "usa", "united states", "united states of america", "north america", "namer"]) {
+      out.push({ as: us, level: "country", because: "is in the US", missing: "state-level" });
+    }
+    return out;
+  }
+
+  const KNOWN: Array<{ test: RegExp; wider: string[]; because: string }> = [
+    {
+      test: /\b(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland|london|manchester|birmingham|glasgow|leeds)\b/i,
+      wider: ["uk", "gb", "united kingdom", "great britain", "europe", "emea"],
+      because: "is in the United Kingdom",
+    },
+    {
+      test: /\b(de|germany|deutschland|berlin|munich|m[uü]nchen|hamburg|frankfurt|cologne|k[oö]ln)\b/i,
+      wider: ["de", "germany", "deutschland", "europe", "emea"],
+      because: "is in Germany",
+    },
+    {
+      test: /\b(fr|france|paris|lyon|marseille)\b/i,
+      wider: ["fr", "france", "europe", "emea"],
+      because: "is in France",
+    },
+    {
+      test: /\b(ca|canada|toronto|vancouver|montreal|ontario|quebec)\b/i,
+      wider: ["ca", "canada", "north america", "namer"],
+      because: "is in Canada",
+    },
+    {
+      test: /\b(in|india|mumbai|delhi|bengaluru|bangalore|chennai|hyderabad)\b/i,
+      wider: ["in", "india", "apac", "asia"],
+      because: "is in India",
+    },
+    {
+      test: /\b(au|australia|sydney|melbourne|brisbane|perth)\b/i,
+      wider: ["au", "australia", "apac", "oceania"],
+      because: "is in Australia",
+    },
+  ];
+
+  for (const k of KNOWN) {
+    if (k.test.test(raw)) {
+      for (const w of k.wider) {
+        out.push({ as: w, level: "country", because: k.because, missing: "city-level or state-level" });
+      }
+      return out;
+    }
+  }
+
+  return out;
+}
+
 /** Every field the form exposes for this entity, with its allowed values. */
 export async function readFormFields(taskId: TaskId, entity: "issue" | "project"): Promise<FormField[]> {
   /*
@@ -184,35 +256,36 @@ export function mapValue(field: FormField, given: unknown): MappedValue {
   if (exact) return { ok: true, field, value: exact, note: null };
 
   /*
-   * A COUNTRY LIST ASKED A PLACE QUESTION.
+   * THE PLACE IS WIDENED UNTIL THE FIELD RECOGNISES ONE.
    *
-   * This field offers uk, de and us, and the brief says New York. Refusing left
-   * a filter a reviewer would use empty, and New York being in the US is a
-   * fact rather than a judgement about the client's data model.
+   * A Region field is whatever the client made it. This tenant offers uk, de
+   * and us; the next might offer north_america | emea | apac, or a list of
+   * states, or country names in full. Keying off the shape of the list fit
+   * exactly one of those.
    *
-   * So the country is written - and the caller still gets the note saying the
-   * form cannot express the state, because the thing that would actually be
-   * wrong is letting "New York" quietly become "us" with nobody told.
+   * So "New York" is widened to NY, then the US, then North America, and each
+   * step is offered to the field narrowest first. A list of states matches at
+   * step one, country codes at step three, continents at step four - and a
+   * list with none of them refuses, which is the right answer.
+   *
+   * The note always says which step matched: "New York" filed under
+   * "north_america" is a fact worth stating, and under "emea" would be a bug
+   * worth seeing.
    */
-  const looksLikeCountryList = field.allowed.every((a) => /^[a-z]{2}$/i.test(a));
-  if (looksLikeCountryList) {
-    const state = findState(raw);
-    if (state && field.allowed.some((a) => norm(a) === "us")) {
-      const us = field.allowed.find((a) => norm(a) === "us") as string;
+  for (const wider of widerPlaces(raw)) {
+    const hit =
+      field.allowed.find((a) => norm(a) === norm(wider.as)) ||
+      field.allowed.find((a) => norm(a).replace(/\s+/g, "") === norm(wider.as).replace(/\s+/g, ""));
+    if (hit) {
       return {
         ok: true,
         field,
-        value: us,
-        note: `${state.name} is in the US, so this is filed under "${us}" - this form has no state-level field, so the state itself travels in the brief`,
+        value: hit,
+        note:
+          wider.level === "as written"
+            ? `matched "${raw}" to "${hit}"`
+            : `${raw} ${wider.because}, so this is filed under "${hit}" - this form has no ${wider.missing} field, so that detail travels in the brief`,
       };
-    }
-    const UK = /\b(uk|united kingdom|great britain|england|scotland|wales|london|manchester|birmingham)\b/i;
-    const DE = /\b(de|germany|deutschland|berlin|munich|m[uü]nchen|hamburg)\b/i;
-    if (UK.test(raw) && field.allowed.some((a) => norm(a) === "uk")) {
-      return { ok: true, field, value: field.allowed.find((a) => norm(a) === "uk") as string, note: `read "${raw}" as the UK` };
-    }
-    if (DE.test(raw) && field.allowed.some((a) => norm(a) === "de")) {
-      return { ok: true, field, value: field.allowed.find((a) => norm(a) === "de") as string, note: `read "${raw}" as Germany` };
     }
   }
 
