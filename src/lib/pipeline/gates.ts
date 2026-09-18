@@ -58,7 +58,14 @@ export type GateVerdict =
   | {
       open: false;
       awaiting: string;
-      needs: "approval" | "upstream";
+      /*
+       * "decision" is a person choosing between two valid outcomes -
+       * reuse this audience or build another - as distinct from "approval",
+       * which is a person approving the request in Workfront. Telling them
+       * apart matters: an assistant that reads "approval" sends someone to
+       * Workfront, and at 2.7 there is nothing there to click.
+       */
+      needs: "approval" | "upstream" | "decision";
       /**
        * The record a human has to go and look at, when there is one.
        *
@@ -227,14 +234,48 @@ const AUDIENCE_BUILD_2_7: Gate = {
     }
 
     if (phase2.audienceExists === true) {
+      /*
+       * A CHOICE, NOT A DEAD END.
+       *
+       * This blocked with needs "upstream", which means "waiting on an earlier
+       * step" - so nothing ever looked for a human decision here, and a
+       * marketer who said "build a new one anyway" had nowhere to put it. It
+       * happened on four consecutive runs and Agent 3 never ran on any of them.
+       *
+       * Reuse is still what this recommends, and saying so is right: an
+       * existing audience needs no build, no nightly cycle and no second copy
+       * to keep in step. But recommending is not deciding.
+       */
+      const chosen = decisionFor(decisions, "audience_build_2_7");
+      if (chosen && chosen.decision === "approved") {
+        return {
+          open: true,
+          note:
+            `2.7 decided by ${chosen.decided_by}: proceed` +
+            (chosen.reason ? ` - ${chosen.reason}` : "") + ".",
+        };
+      }
+      if (chosen && chosen.decision === "rejected") {
+        return {
+          open: false,
+          needs: "decision",
+          awaiting:
+            `${chosen.decided_by} decided not to build an audience for this request` +
+            (chosen.reason ? `: ${chosen.reason}` : "") +
+            ". Nothing further will run until that changes.",
+        };
+      }
+
       const name = phase2.existingAudience?.name || phase2.existingAudience?.id || "an existing audience";
       return {
         open: false,
-        needs: "upstream",
+        needs: "decision",
         awaiting:
-          `An audience for this already exists - "${name}" - so nothing needs building. ` +
-          "Confirm it is the right one and it can be activated. Reusing an existing audience is the " +
-          "best outcome here, not a gap.",
+          `An audience for this already exists - "${name}". Reusing it is the better outcome: no ` +
+          "build, no nightly cycle, and no second copy to keep in step with the first. Confirm it " +
+          "is the right one and this can be activated against it. If a separate audience is wanted " +
+          "anyway - a different launch, a holdout, a name the business needs - say so and one will " +
+          "be built.",
       };
     }
 

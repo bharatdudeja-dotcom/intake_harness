@@ -386,6 +386,32 @@ export async function decideGate(
    * agent and stops again like every other step.
    */
   await query(`UPDATE runs SET blocked_on = NULL WHERE run_id = $1`, [runId]);
+
+  /*
+   * A DECISION TO BUILD A NEW AUDIENCE HAS TO REACH AGENT 3.
+   *
+   * Opening the gate is not enough: Agent 3 searches the catalogue and would
+   * find the same audience again, reuse it, and the marketer who asked for a
+   * separate one would get the same answer with extra steps.
+   *
+   * force_new is set on the run's input so the next step carries it. Read from
+   * the evidence when a caller states it, and from the reason otherwise -
+   * because "build a new one" is how a person says it.
+   */
+  if (gateId === "audience_build_2_7" && input.decision === "approved") {
+    const ev = (input.evidence ?? {}) as Record<string, unknown>;
+    const saidNew =
+      ev.build_new === true ||
+      ev.force_new === true ||
+      /\b(new|fresh|separate|another|do not reuse|don'?t reuse)\b/i.test(String(input.reason ?? ""));
+    if (saidNew) {
+      await query(
+        `UPDATE runs SET input = jsonb_set(coalesce(input, '{}'::jsonb), '{force_new}', 'true'::jsonb) WHERE run_id = $1`,
+        [runId],
+      );
+    }
+  }
+
   const resumed = await continueRun(runId, baseUrl);
   return { run: resumed, decision };
 }
