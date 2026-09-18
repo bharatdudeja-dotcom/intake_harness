@@ -224,7 +224,7 @@ const WRITE_TOOLS = new Set([
      * The D79 guard test caught this being absent, which is exactly what it is
      * for - the gate is only as good as its completeness.
      */
-    'approve_intake', 'reject_intake', 'answer_intake',
+    'approve_intake', 'reject_intake', 'answer_intake', 'continue_job',
     // Changes which MCP servers agents can reach, and which upstreams execute them.
     'set_mcp_server', 'set_agent_system'
 ])
@@ -395,6 +395,45 @@ Only things about a run that already exists:
 ALWAYS report provenance on anything you do write: model, tokens_used, and source (which
 client you are, e.g. "desktop-ai", "ide-agent"). An omitted tokens_used is recorded as "not
 reported", never as zero, and shows in the dashboard as missing telemetry.
+
+THE APPROVAL IS NOT YOURS TO GIVE
+
+A request waits for a named person to click Approve inside Workfront. That is a
+manual step, on purpose, and it is the one place in this pipeline where a human
+decision is load-bearing: everything downstream - the project, the audience, the
+spend - proceeds on the strength of it.
+
+So when a job is waiting for approval, do not offer to approve it, do not ask
+whether the person wants you to, and do not present "approve and continue
+anyway" as an option. There is no version of that which is correct. Say what was
+created, give the Workfront link, say it needs their approval there, and stop.
+
+approve_intake exists to RECORD an approval that already happened. It reads the
+record back from Workfront and refuses unless Workfront itself reports the
+approval has cleared - so offering to approve does not just misrepresent your
+role, it proposes something that will fail.
+
+The same goes for rejecting.
+
+WRITING A COMMENT INTO WORKFRONT
+
+Two rules, both learned the hard way on a live tenant.
+
+PLAIN TEXT ONLY. Workfront's comment stream is not an HTML field. A comment sent as
+"<p><strong>Correction to the intake capture:</strong>..." rendered with the tags visible,
+on one line, in the middle of a thread real people were reading. No markdown either - no
+**bold**, no bullets with "*". Line breaks work; nothing else does.
+
+SAY WHICH AGENT WROTE IT. The tenant holds ONE Adobe token, so every comment this gateway
+writes shows the name of whoever authenticated the server - a real employee - on comments no
+human typed. A reviewer then replies to a colleague who never wrote it, and the audit trail
+records a person asserting what an agent asserted. So open the comment with the agent that
+produced the content, e.g. "Agent 1 - Intake (automated)", and say plainly that it was
+posted by the pipeline. If the content is yours rather than an agent's, say that instead;
+do not borrow an agent's name for your own correction.
+
+Never put internal step numbers - 1.5, 2.1, 2.7 - in anything a marketer or reviewer reads.
+They are coordinates on our process map and mean nothing to them. Say what happened.
 
 HANDING WORK TO ANOTHER TOOL
 
@@ -1697,22 +1736,10 @@ function registerTools (server, context = {}) {
             }
 
             for (const st of steps) {
-                // Markdown, not a JSON dump. A record nobody can read is not a
-                // record - see lib/narrate.js.
-                /*
-                 * Cost and model, where the upstream reports them. It mostly does
-                 * not, and an absent value is recorded as ABSENT rather than as
-                 * zero: "not reported" and "free" are different claims, and
-                 * quietly turning one into the other is how a token total stops
-                 * meaning anything. Read defensively - metadata is inconsistently
-                 * shaped between stages (see agent-systems.loopCount).
-                 */
-                const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
-                const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
-                const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
-                const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
-                    ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
-                const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
+
+                // One reader for all four capture paths, so a token figure cannot
+                // come to mean different things on different screens - see stageUsage.
+                const { tokens, model, modelCalled } = stageUsage(st)
 
                 addStep('doc', narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }), {
                     format: 'md',
@@ -1720,6 +1747,7 @@ function registerTools (server, context = {}) {
                     source: st.agent_id,
                     model,
                     tokens_used: tokens,
+                    model_called: modelCalled,
                     tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
                     provenance: {
                         upstream_task_run_id: st.upstream_task_run_id,
@@ -1946,7 +1974,7 @@ function registerTools (server, context = {}) {
                 const already = new Set(
                     full.steps.map(x => x.provenance && x.provenance.upstream_task_run_id).filter(Boolean).map(String)
                 )
-                full.steps.push(stepsLib.make({
+                full.steps.push(stepsLib.make(runId, stepsLib.nextOrder(full.steps), {
                     kind: 'steering',
                     signal: 'correct',
                     content: `**Answered** ${Object.entries(answers || {}).map(([k, v]) => `${k}: ${v}`).join('; ')}`,
@@ -1957,19 +1985,18 @@ function registerTools (server, context = {}) {
                 }))
                 for (const st of steps) {
                     if (st.upstream_task_run_id && already.has(String(st.upstream_task_run_id))) continue
-                    const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
-                    const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
-                    const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
-                    const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
-                        ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
-                    const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
-                    full.steps.push(stepsLib.make({
+
+                    // One reader for all four capture paths, so a token figure cannot
+                    // come to mean different things on different screens - see stageUsage.
+                    const { tokens, model, modelCalled } = stageUsage(st)
+                    full.steps.push(stepsLib.make(runId, stepsLib.nextOrder(full.steps), {
                         kind: 'doc',
                         content: narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }),
                         format: 'md',
                         source: st.agent_id,
                         model,
                         tokens_used: tokens,
+                        model_called: modelCalled,
                         tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
                         author: resolveAuthor(context),
                         provenance: {
@@ -2013,6 +2040,162 @@ function registerTools (server, context = {}) {
                     }
                     : undefined,
                 note: 'Recorded on the same job, so this brief is one record with a longer history rather than two jobs.'
+            })
+        }
+    )
+
+/**
+ * What a stage spent, as three possible answers rather than two.
+ *
+ *   a number             the stage reported what it cost
+ *   modelCalled false    the harness called no model on this stage, so there is
+ *                        nothing to report and never will be
+ *   both undefined       something ran and nobody said what it cost
+ *
+ * All three used to collapse into "not reported", which drew a deterministic
+ * step as a measurement failure and put a tooltip on screen asking a client for
+ * a number that does not exist. The harness's agents are parsers and MCP tool
+ * calls; the honest figure for them is not zero and not unknown, it is "no
+ * model call", and that is worth saying plainly.
+ *
+ * Read defensively: metadata is inconsistently shaped between stages, and an
+ * absent value is recorded as ABSENT rather than zero. "Not reported" and
+ * "free" are different claims, and quietly turning one into the other is how a
+ * token total stops meaning anything.
+ */
+function stageUsage (st) {
+    const meta = (st && st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
+    const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
+    const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
+    const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
+        ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
+    return {
+        tokens,
+        model: meta.model || meta.model_id || meta.modelId || usage.model || undefined,
+        // Absent on a stage recorded before the harness reported this, and
+        // absent is not false: we do not know, so we do not say.
+        modelCalled: typeof meta.model_called === 'boolean' ? meta.model_called : undefined
+    }
+}
+
+/**
+ * Narrate whatever ran onto the job, deduped on the upstream task-run id.
+ *
+ * Shared by every path that causes an agent to run - the gate decision, an
+ * answer, a continue. Three copies of this loop would drift, and the failure
+ * mode of drift here is a stage that ran and was never written down, which is
+ * precisely the blindness these tools exist to remove.
+ */
+async function captureStages (runId, system, steps) {
+    try {
+        const workfrontInstance = (() => {
+            const servers = mcpServers.list(settings.mcpServers())
+            const wf = servers.find(x => x.practice === 'workfront' && x.instance) || servers.find(x => x.instance)
+            return wf ? wf.instance : null
+        })()
+        const catalog = await agentSystems.discoverAgents(system).catch(() => [])
+        const labelFor = (id) => (catalog.find(a => a.id === id) || {}).label || id
+
+        const full = await store.getResource(runId)
+        if (!full) return
+        full.steps = full.steps || []
+        const already = new Set(
+            full.steps.map(x => x.provenance && x.provenance.upstream_task_run_id).filter(Boolean).map(String)
+        )
+        let added = 0
+        for (const st of steps) {
+            if (st.upstream_task_run_id && already.has(String(st.upstream_task_run_id))) continue
+
+            // One reader for all four capture paths, so a token figure cannot
+            // come to mean different things on different screens - see stageUsage.
+            const { tokens, model, modelCalled } = stageUsage(st)
+            full.steps.push(stepsLib.make(runId, stepsLib.nextOrder(full.steps), {
+                kind: 'doc',
+                content: narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }),
+                format: 'md',
+                source: st.agent_id,
+                model,
+                tokens_used: tokens,
+                model_called: modelCalled,
+                tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
+                author: resolveAuthor(context),
+                provenance: {
+                    upstream_task_run_id: st.upstream_task_run_id,
+                    duration_ms: st.duration_ms,
+                    started_at: st.started_at,
+                    finished_at: st.finished_at,
+                    upstream_payload: {
+                        agent: st.agent_id,
+                        upstream_status: st.upstream_status,
+                        input: st.input,
+                        output: st.output,
+                        metadata: st.metadata
+                    }
+                }
+            }))
+            added++
+        }
+        if (!added) return
+        projectRecipe(full, full.steps, new Date().toISOString())
+        full.content_hash = contentHash(full.content)
+        await store.saveResource(full)
+    } catch (e) {
+        // The work happened and the pipeline moved. Failing to ALSO write it
+        // down must not read as the work having failed.
+    }
+}
+
+    server.tool(
+        'continue_job',
+        'Advance a job by ONE step. The pipeline stops after every completed step and waits - that is ' +
+        'deliberate, the per-agent equivalent of asking before each tool call - so this is what runs the ' +
+        'next agent. Use it when a job is awaiting_approval and get_job shows nothing outstanding for a ' +
+        'human: the approval at 1.5 is recorded with approve_intake, and everything after it moves with ' +
+        'this. It does NOT skip the gate - if the request has not been approved in Workfront it comes ' +
+        'back still waiting, and no agent is called.',
+        {
+            run_id: z.string().min(1).describe('The job id to advance')
+        },
+        async ({ run_id: runId }) => {
+            const resource = await store.getResource(runId)
+            if (!resource) return errorResult(`No job found with id '${runId}'`)
+            const ref = resource.upstream
+            if (!ref || !ref.run_id) return errorResult(`'${runId}' is a captured record, not an agent job, so there is nothing to advance`)
+            const { system, error } = agentSystems.resolve(ref.system_id, undefined, settings.agentSystems())
+            if (error) return errorResult(error)
+
+            let result
+            try {
+                result = await agentSystems.continueRun(system, ref.run_id)
+            } catch (e) {
+                return errorResult(`Could not advance ${runId} on ${system.id}: ${e.message}`)
+            }
+
+            const steps = agentSystems.toSteps(result)
+            const blocked = agentSystems.blockedOn(result)
+            await captureStages(runId, system, steps)
+
+            const status = (result && result.run && result.run.status) || 'unknown'
+            return jsonResult({
+                run_id: runId,
+                upstream_status: status,
+                stages: steps.map(st => ({
+                    agent: st.agent_id,
+                    reported: st.upstream_status,
+                    actual: st.embedded_error ? 'faulted' : st.upstream_status,
+                    failure: st.embedded_error || undefined,
+                    ms: st.duration_ms
+                })),
+                waiting_for: blocked
+                    ? {
+                        explanation: blocked.awaiting,
+                        workfront_url: blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : undefined
+                    }
+                    : undefined,
+                note: status === 'awaiting_approval' && !blocked
+                    ? 'A step finished and the next one is waiting. Nothing is outstanding for a human - call continue_job again to run it.'
+                    : undefined,
+                detail_captured: `Recorded on job ${runId}. Read it with get_job before describing what happened - the stage list here carries statuses and durations only.`
             })
         }
     )
@@ -2191,23 +2374,18 @@ function registerTools (server, context = {}) {
             for (const st of steps) {
                 if (st.upstream_task_run_id && already.has(String(st.upstream_task_run_id))) continue
 
-                // Cost and model where the upstream reports them; ABSENT rather
-                // than zero where it does not - "not reported" and "free" are
-                // different claims.
-                const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
-                const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
-                const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
-                const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
-                    ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
-                const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
+                // One reader for all four capture paths, so a token figure cannot
+                // come to mean different things on different screens - see stageUsage.
+                const { tokens, model, modelCalled } = stageUsage(st)
 
-                full.steps.push(stepsLib.make({
+                full.steps.push(stepsLib.make(id, stepsLib.nextOrder(full.steps), {
                     kind: 'doc',
                     content: narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }),
                     format: 'md',
                     source: st.agent_id,
                     model,
                     tokens_used: tokens,
+                    model_called: modelCalled,
                     tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
                     author: resolveAuthor(context),
                     provenance: {
@@ -2227,7 +2405,7 @@ function registerTools (server, context = {}) {
                 }))
             }
 
-            full.steps.push(stepsLib.make({
+            full.steps.push(stepsLib.make(id, stepsLib.nextOrder(full.steps), {
                 kind: 'steering',
                 signal: decision === 'approved' ? 'affirm' : 'reject',
                 content:
@@ -2295,13 +2473,21 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'approve_intake',
-        'THE PROCESS APPROVAL AT STEP 1.5. Use this when a human says they have approved an intake ' +
-        'request - including when they name a Workfront object id, e.g. "approved 6aac001e...". It opens ' +
-        'the gate so Agent 2 runs (2.1, issue converted to project form) and the campaign proceeds. ' +
+        'RECORDS AN APPROVAL THAT HAS ALREADY HAPPENED IN WORKFRONT. Use it only after a human tells you ' +
+        'they have approved the request - including when they name a Workfront object id, e.g. ' +
+        '"approved 6aac001e...". It opens the gate so Agent 2 runs, converting the request into a project ' +
+        'that carries the brief, and the campaign proceeds. ' +
+        'NEVER OFFER TO APPROVE, and never present approving as a choice the person can ask you to make - ' +
+        'not "shall I approve it", not "approve and continue anyway". The approval is a named person ' +
+        'clicking Approve in Workfront, and there is nothing you can do in its place. When a job is ' +
+        'waiting here, the whole of the correct response is: give the Workfront link, say plainly that it ' +
+        'needs their approval there, and stop. Then wait to be told. ' +
         'It does NOT approve anything inside Workfront: a named person clicks Approve in Workfront\'s own ' +
         'Approvals tab, and this records that they did so the pipeline can move. ' +
         'DO NOT confuse this with certify / bake_job / approve_step - those promote the RECORD of a run ' +
         'into Playbooks for the Oracle to learn from, and none of them makes the pipeline advance. ' +
+        'Do not repeat our step numbers - 1.5, 2.1, 2.7 - to anyone. They are coordinates on an internal ' +
+        'process map and mean nothing to a marketer. Say what is happening instead. ' +
         'If a job is sitting at awaiting_approval, this is the tool that moves it. IT VERIFIES: it reads the record back from Workfront and REFUSES unless Workfront itself reports the approval has cleared. Saying that the user approved it is not enough and never will be - the last time this was taken on trust, a job reported three completed stages while the Workfront request was still Pending Approval.',
         {
             run_id: z.string().optional().describe('The Agent Manager run id from start_intake'),
@@ -2315,7 +2501,8 @@ function registerTools (server, context = {}) {
 
     server.tool(
         'reject_intake',
-        'THE PROCESS REJECTION AT STEP 1.5, i.e. step 1.5a - sent back to the marketer as rework. ' +
+        'RECORDS A REJECTION THAT HAS ALREADY HAPPENED IN WORKFRONT - the request goes back to the ' +
+        'marketer as rework. Same rule as approve_intake: never offer to reject on anyone\'s behalf. ' +
         'Agent 2 reads the reason and translates it into the specific missing field or wrong data source, ' +
         'then proposes a redraft for the marketer to confirm. A reason is REQUIRED: an unexplained ' +
         'rejection sends the marketer back to a form with eleven fields to guess at, which is the ' +
@@ -2903,10 +3090,10 @@ function registerTools (server, context = {}) {
             const nonDiscarded = steps.filter(s => s.status !== 'discarded')
             const approvedExisting = nonDiscarded.filter(s => statusLib.isApproved(s.status))
             if (!approveAll && approvedExisting.length === 0) {
-                return errorResult('Cannot bake: this job has no approved ingredients. Approve at least one ingredient first (or pass approve_all=true to approve them as part of baking).')
+                return errorResult('Cannot submit this job: none of its steps are approved yet. Approve at least one step first, or pass approve_all=true to approve them as part of submitting.')
             }
             if (approveAll && nonDiscarded.length === 0) {
-                return errorResult('Cannot bake: this job has no ingredients to approve.')
+                return errorResult('Cannot submit this job: it has no steps to approve. Nothing has been captured against it yet.')
             }
             let approvedCount = 0
             if (approveAll) {
@@ -3076,7 +3263,7 @@ function registerTools (server, context = {}) {
         async ({ confirm }) => {
             if (!callerHasRole(context, 'admin')) return errorResult('Refused: only an admin may reset the data store.')
             if (confirm !== true) {
-                return errorResult('Refusing to reset: pass confirm=true to delete all jobs, ingredients, projects, and the catalog (config is preserved).')
+                return errorResult('Refusing to reset: pass confirm=true to delete all jobs, steps, projects, and the catalog (config is preserved).')
             }
             const result = await store.resetAll()
             return jsonResult({ reset: true, ...result })
@@ -3342,7 +3529,7 @@ function registerTools (server, context = {}) {
             const steps = stepsLib.ensureSteps(resource)
             const step = steps.find(s => s.id === stepId)
             if (!step) return errorResult(`No ingredient found with id '${stepId}'`)
-            if (step.status === 'discarded') return errorResult('That ingredient was discarded. Assigning it would grant access to something nobody is working on.')
+            if (step.status === 'discarded') return errorResult('That step was discarded. Assigning it would grant access to something nobody is working on.')
 
             const who = await resolveAssignee(assignee)
             if (!who.ok) return errorResult(who.error)

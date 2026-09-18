@@ -61,6 +61,7 @@ const FIELDS = [
     { key: 'run_path', label: 'Read-run path', hint: 'e.g. /api/runs/{run_id}' },
     { key: 'gate_path', label: 'Gate-decision path', hint: 'Where an approval is recorded, e.g. /api/runs/{run_id}/gate. Blank if the harness has no gates.' },
     { key: 'resume_path', label: 'Answer-question path', hint: 'Where an answer to a needs_input question goes, e.g. /api/runs/{run_id}/resume.' },
+    { key: 'continue_path', label: 'Continue path', hint: 'Where a run is advanced one step, e.g. /api/runs/{run_id}/continue.' },
     { key: 'input_key', label: 'Input key', hint: 'The field the brief goes in, e.g. brief' },
     { key: 'input_envelope', label: 'Input envelope', hint: 'Wrapper around the input, e.g. input. Blank for top level.' },
     { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' }
@@ -100,6 +101,7 @@ function list (overrides) {
         run_path: s.run_path || null,
         gate_path: s.gate_path || null,
         resume_path: s.resume_path || null,
+        continue_path: s.continue_path || null,
         input_key: s.input_key || null,
         input_envelope: s.input_envelope || null,
         auth_configured: !!s.auth,
@@ -425,6 +427,24 @@ async function decideGate (system, upstreamRunId, body) {
 }
 
 /**
+ * Advance a run by exactly one step.
+ *
+ * The pipeline deliberately stops after every completed step and waits. This is
+ * the thing that says "yes, run the next one" - and without it a run that had
+ * been approved and had Agent 2 finish simply sat there, because approving
+ * again would have recorded a human decision against a gate nobody was asked
+ * about.
+ *
+ * It does NOT skip the gate: continueRun checks preconditions first and comes
+ * back still waiting if the request has not been approved.
+ */
+async function continueRun (system, upstreamRunId) {
+    const template = system.continue_path || '/api/runs/{run_id}/continue'
+    const url = `${system.base_url}${template.replace('{run_id}', encodeURIComponent(upstreamRunId))}`
+    return request(url, { method: 'POST', headers: { ...headers(system), 'content-type': 'application/json' }, body: '{}' }, 180000)
+}
+
+/**
  * Answer a paused run's question, and let it carry on from the step that paused.
  *
  * The alternative - submitting the brief again - creates a second job for the
@@ -486,6 +506,6 @@ module.exports = {
     merged,
     looksLikeFailure,
     registry, reset, list, get, resolve,
-    discoverAgents, startRun, getRun, waitForRun, decideGate, answerRun,
+    discoverAgents, startRun, getRun, waitForRun, decideGate, answerRun, continueRun,
     toSteps, loopCount, findEmbeddedError, blockedOn, gateDecisions
 }

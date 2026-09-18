@@ -139,7 +139,10 @@ nav button .key { margin-left: auto; font-size: 10px; color: var(--muted); borde
 .sidebar-foot { margin-top: auto; padding: 12px 10px 0; font-size: 11px; color: var(--muted); line-height: 1.7; }
 kbd { font-family: inherit; font-size: 10px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; background: var(--surface); }
 
-main { flex: 1; padding: 24px 32px 72px; min-width: 0; }
+main { flex: 1; padding: 24px 32px 72px; min-width: 0; max-width: 100%; overflow-x: clip; }
+/* Not overflow-x:hidden on body - that would hide a real layout bug
+   everywhere. Clipping the main column keeps the page at window width
+   while any offender still shows up inside its own panel. */
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; row-gap: 10px; }
 header h1 { font-size: 23px; line-height: 1.15; margin: 0; flex: 0 0 auto; }
 .hdr-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
@@ -309,7 +312,16 @@ h3.head { font-size: 15px; margin-bottom: 4px; }
 .card > .rowbtns { margin-top: 12px; }
 
 /* Work Log split */
-.worklog { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+/*
+ * minmax(0, 1fr), not 1fr.
+ *
+ * A `1fr` track still has min-width:auto, so the widest thing inside it sets
+ * the floor: the time ledger's stat row pushed this track past the viewport
+ * and the whole page grew a horizontal scrollbar, with the right-hand column
+ * cut off mid-word. minmax(0, ...) lets the track be narrower than its
+ * content and makes the content fit instead.
+ */
+.worklog { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 900px) { .worklog { grid-template-columns: 1fr; } }
 .job-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 180px); overflow-y: auto; padding-right: 4px; }
 .job-item { text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 11px 12px; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
@@ -347,6 +359,16 @@ h3.head { font-size: 15px; margin-bottom: 4px; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin: 4px 0 14px; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+/* The legend's glyph matches the node's SHAPE, because the graph encodes the
+   stage in the shape as much as the colour: dot, square, triangle, hexagon. */
+.swatch.dot { border-radius: 50%; }
+.swatch.sq { border-radius: 2px; }
+.swatch.tri { border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.swatch.hex { border-radius: 0; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+/* A stage with nothing in it is dimmed, not dropped: the four stages keep a
+   stable order, and "0 with the Oracle" is a fact worth being able to read. */
+.legend span.none { opacity: .45; }
+.legend b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .kv { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; align-items: baseline; }
 .kv .k { color: var(--muted); flex: 0 0 132px; }
@@ -450,10 +472,12 @@ label.flabel { font-size: 12px; font-weight: 600; color: var(--text-2); display:
 .lsw.work{background:var(--house)}
 .lsw.wait{background:var(--exp)}
 .lsw.fault{background:var(--reject)}
-.lstats{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+.lstats{margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));
   gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden}
-.lstat{background:var(--surface);padding:11px 13px}
-.lstat .k{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.lstat{background:var(--surface);padding:11px 13px;min-width:0}
+/* "CLOCK SPENT WAITING" is 19 uppercase characters with letter-spacing. It
+   has to be allowed to wrap, or it sets the track width on its own. */
+.lstat .k{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;overflow-wrap:anywhere}
 .lstat .v{font-size:20px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
 .lstat .v small{font-size:.65em;font-weight:500;color:var(--muted)}
 .lstat.hot .v{color:var(--reject)}
@@ -1341,7 +1365,26 @@ function modelChip (m) { return m ? `<span class="chip"><i data-lucide="cpu"></i
  * which the old version could not: both rendered as no chip at all, so a capture with missing
  * telemetry looked identical to a free one and the totals silently under-counted.
  */
-function tokenChip (t) {
+function tokenChip (t, step) {
+  /*
+   * THREE STATES, NOT TWO.
+   *
+   * Every agent stage read "tokens n/r", with a tooltip asking the client to
+   * pass tokens_used on append_step - advice nobody could act on. The harness's
+   * agents call no model at all: they are deterministic parsers plus MCP tool
+   * calls. No number was being withheld, because there is none.
+   *
+   * The harness now states model_called on each stage, so the true thing can be
+   * shown. It is also the more interesting one: a stage that says "no model
+   * call" is saying the work was code against real tools rather than a model
+   * improvising, which is the claim this whole pipeline is making.
+   *
+   * "not reported" goes back to meaning what it was written for - something
+   * spent tokens and did not say how many.
+   */
+  if (step && step.model_called === false && (t === undefined || t === null || t === '')) {
+    return '<span class="chip" title="This stage called no model. It is deterministic code plus MCP tool calls, so there is no token cost to report - not a missing measurement."><i data-lucide="cpu"></i>no model call</span>'
+  }
   if (t === undefined || t === null || t === '') {
     return '<span class="chip" title="The AI client did not report token usage for this capture, so it is not counted in any total. Ask it to pass tokens_used on append_step."><i data-lucide="help-circle"></i>tokens n/r</span>'
   }
@@ -1350,7 +1393,17 @@ function tokenChip (t) {
   return `<span class="chip" title="${n.toLocaleString()} tokens reported by the capturing client"><i data-lucide="coins"></i>${fmtTokens(n)}</span>`
 }
 /** True when a job/step carries no reported token cost at all. */
-function tokensMissing (x) { return x.tokens_used === undefined || x.tokens_used === null }
+/**
+ * True when a job/step carries no reported token cost AND one was possible.
+ *
+ * A stage that called no model is not a gap in the telemetry, so counting it
+ * under "N not reported" on the bench overstated how much was unknown - most
+ * of that number was stages with nothing to report.
+ */
+function tokensMissing (x) {
+  if (x.model_called === false) return false
+  return x.tokens_used === undefined || x.tokens_used === null
+}
 
 function expiryHtml (iso) {
   if (!iso) return ''
@@ -1651,7 +1704,7 @@ function renderCookOff () {
 
   el.innerHTML = `<div class="cookoff">
     ${cookOffWordmark()}
-    <p class="sub" style="margin:10px 0 2px">Who is feeding the cookbook. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every job a Oracle admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
+    <p class="sub" style="margin:10px 0 2px">Who is feeding the Shared Graph. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every job an Oracle admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
     <p class="help" style="margin-bottom:16px">The crystal colour is <b>purity</b>: the share of what you submitted that a Oracle admitted. Only a spotless record cooks blue. Everybody sees the same board, the same ranks and the same colours.</p>
 
     <ol class="lb">
@@ -1724,7 +1777,7 @@ function renderHome () {
         </div>`).join('')}
     </div>` : ''}
 
-    <div class="section-gap" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="section-gap" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px;">
       <div class="card">
         <h3 class="head"><i data-lucide="timer"></i> Expiring soon</h3>
         <p class="sub">Experimental artifacts auto-expire (retention ${state.settings ? state.settings.retention_days : 30}d). Approve to keep.</p>
@@ -1974,7 +2027,7 @@ function renderStepCard (s) {
     <div class="step-head">
       <span class="step-ord">#${s.order}</span>
       ${kindChip(s.kind)}${s.kind === 'steering' && s.signal ? `<span class="chip"><i data-lucide="compass"></i>${esc(s.signal)}</span>` : ''}
-      ${sourceChip(s.source)}${modelChip(s.model)}${tokenChip(s.tokens_used)}
+      ${sourceChip(s.source)}${modelChip(s.model)}${tokenChip(s.tokens_used, s)}
       <span class="tagrow" style="margin-left:auto">${exp}${stepStatusBadge(s)}</span>
     </div>
     <div class="step-body" data-step-body></div>
@@ -2630,12 +2683,12 @@ ${m.oauth_connected
     </div>
     <div class="card section-gap">
       <h3 class="head"><i data-lucide="tags"></i> Kind labels</h3>
-      <p class="help">Display names for the resource kinds the connector accepts.</p>
+      <p class="help">Display names for the kinds of record Agent Manager accepts.</p>
       ${(s.kinds || []).map(k => `<label class="flabel" for="kind-${esc(k.type)}">${esc(k.type)} <span class="sub">(${esc(k.approval)})</span></label><input class="field" id="kind-${esc(k.type)}" data-kind="${esc(k.type)}" value="${esc(k.label)}" style="max-width:320px">`).join('')}
     </div>
     <div class="card section-gap">
-      <h3 class="head"><i data-lucide="crown"></i> Oracles (CX-graph gatekeepers)</h3>
-      <p class="help">The people who may admit baked jobs into the Company CX Graph. You are a <b>${esc(state.role)}</b>. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
+      <h3 class="head"><i data-lucide="crown"></i> Oracles (who admits work to the Shared Graph)</h3>
+      <p class="help">The people who may admit submitted jobs into the Shared Graph. You are ${esc(roleLabel(state.role))}. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
       <div class="rowbtns">${(s.head_chefs && s.head_chefs.length) ? s.head_chefs.map(h => `<span class="chip"><i data-lucide="crown"></i>${esc(h)}</span>`).join('') : '<span class="sub">No Oracles configured.</span>'}</div>
     </div>
     <div class="card section-gap" id="my-password-card">
@@ -2655,7 +2708,7 @@ ${m.oauth_connected
       <p class="sub" id="mp-msg" style="margin:10px 0 0"></p>
     </div>
     ${state.roles.includes('admin') ? `<div class="card section-gap" id="create-login-card">
-      <h3 class="head"><i data-lucide="user-plus"></i> Create a Cookbook login (admin)</h3>
+      <h3 class="head"><i data-lucide="user-plus"></i> Create a login (admin)</h3>
       <p class="help">One login for the dashboard and for their assistant, so their work carries their name from the first job. The password is stored as a hash and cannot be read back, so the setup file downloads now.</p>
       <div class="fgrid">
         <label class="flabel" for="nu-name">Full name</label>
@@ -3150,19 +3203,19 @@ async function buildGraph () {
 
   const stageCounts = { draft: 0, ready: 0, awaiting: 0, incx: 0 }
   for (const r of rows) stageCounts[jobStage(r)]++
-  sub.innerHTML = `${agentFace('oracle', true, 30)} <b>What the Oracle reads across your work</b> in ${where} ` +
-    `&mdash; every run at every stage, private drafts included, and the artifacts each agent produced drawn as that agent. ` +
-    `${stageCounts.draft} in progress · ${stageCounts.ready} ready to approve · ${stageCounts.awaiting} with the Oracle · ${stageCounts.incx} in the Shared Knowledge Graph. ` +
-    `${capped ? `Showing the ${CAP} most recent of ${total}.` : ''}`
-  // Legend mirrors the four stages exactly, so the colour tells you where the work stands.
-  legend.innerHTML = `<span><span class="swatch" style="background:var(--exp)"></span>in progress (private)</span>` +
-    `<span><span class="swatch" style="background:var(--ready)"></span>ready to approve</span>` +
-    `<span><span class="swatch" style="background:var(--baked)"></span>with the Oracle</span>` +
-    `<span><span class="swatch" style="background:var(--house)"></span>in the Shared Knowledge Graph</span>` +
-    `<span>${agentFace('intake', true, 18)} an agent&rsquo;s artifact</span>` +
-    `<span><span class="swatch" style="background:var(--ingredient)"></span>written by a person</span>` +
-    `<span><span class="swatch ring" style="background:var(--reject)"></span>reported success, failed</span>` +
-    `<span><span class="swatch ring" style="background:var(--correct)"></span>steered</span>`
+  /*
+   * ONE LINE, and the counts live in the legend.
+   *
+   * This was a paragraph: a title, a clause defining a run, a clause explaining
+   * how artifacts are drawn, four counts - three of them zero - and a cap note.
+   * The same four counts then appeared immediately below as four colour
+   * swatches, so one screen stated the same four facts twice in two notations.
+   * The prose also explained the picture, above a canvas still loading it.
+   */
+  sub.innerHTML = `${agentFace('oracle', true, 30)} <span><b>What the Oracle reads</b> ` +
+    `&mdash; your work in ${where}${capped ? `, ${CAP} most recent of ${total}` : ''}</span>`
+  // Drawn once the artifacts are in, so it can describe what is actually there.
+  legend.innerHTML = ''
   container.innerHTML = '<div class="empty" style="padding-top:120px"><i data-lucide="loader"></i><br>Loading artifacts &amp; lineage…</div>'; refreshIcons()
 
   let stepLists, handoffs
@@ -3207,11 +3260,15 @@ async function buildGraph () {
     awaiting: { shape: 'triangle', size: 17, ...pal.stages.awaiting, width: 3 },
     incx: { shape: 'hexagon', size: 20, ...pal.stages.incx, width: 3 }
   }
+  // Counted while the nodes are built, so the legend can describe what is on
+  // screen rather than everything this graph is capable of drawing.
+  let agentArtifacts = 0; let personArtifacts = 0; let faultedCount = 0; let steeredCount = 0
   for (const r of rows) {
     const stage = jobStage(r)
     const vis = STAGE_VIS[stage]
     const artifacts = stepsByJob[r.id]
     const steered = artifacts.some(s => s.kind === 'steering' && s.signal === 'correct')
+    if (steered) steeredCount++
     nodes.push({
       id: r.id, group: 'job', label: r.title.length > 26 ? r.title.slice(0, 24) + '…' : r.title,
       shape: vis.shape, size: vis.size,
@@ -3236,6 +3293,8 @@ async function buildGraph () {
       const who = stepAgent(s)
       const meta = who ? (state.systemAgents || []).find(a => a.id === who) : null
       const faulted = (s.tags || []).includes('silent-failure')
+      if (faulted) faultedCount++
+      if (who) agentArtifacts++; else personArtifacts++
       const rejectHue = themeColor('reject', '#A34E35')
       nodes.push(who
         ? {
@@ -3264,6 +3323,30 @@ async function buildGraph () {
     nodes.push({ id: h.id, group: 'handoff', label: h.title.length > 22 ? h.title.slice(0, 20) + '…' : h.title, shape: 'triangle', size: 12, color: { background: pal.stages.awaiting.bg, border: pal.stages.awaiting.border }, font: { size: 11, color: textColor } })
     for (const dep of deps) edges.push({ from: h.id, to: dep, arrows: 'to', rel: 'lineage', color: { color: pal.stages.incx.border } })
   }
+
+  /*
+   * The legend describes THIS graph.
+   *
+   * Eight entries were drawn unconditionally, six of them for things the graph
+   * did not contain - a legend for somebody else's data, which teaches a reader
+   * to distrust it. Each entry now carries its count and the node shape it
+   * refers to; a marker with nothing behind it is not drawn at all, and a stage
+   * with nothing in it is dimmed so the four stages keep their order.
+   */
+  legend.innerHTML = [
+    ['draft', 'dot', '--exp', 'in progress'],
+    ['ready', 'sq', '--ready', 'ready to approve'],
+    ['awaiting', 'tri', '--baked', 'with the Oracle'],
+    ['incx', 'hex', '--house', 'in the Shared Graph']
+  ].map(([key, shape, token, label]) =>
+    `<span class="${stageCounts[key] ? '' : 'none'}">` +
+    `<span class="swatch ${shape}" style="background:var(${token})"></span><b>${stageCounts[key]}</b> ${label}</span>`
+  ).join('') + [
+    [agentArtifacts, `${agentFace('intake', true, 16)} <b>${agentArtifacts}</b> made by an agent`],
+    [personArtifacts, `<span class="swatch dot" style="background:var(--ingredient)"></span><b>${personArtifacts}</b> written by a person`],
+    [faultedCount, `<span class="swatch ring" style="background:var(--reject)"></span><b>${faultedCount}</b> reported success while failing`],
+    [steeredCount, `<span class="swatch ring" style="background:var(--correct)"></span><b>${steeredCount}</b> steered`]
+  ].filter(([n]) => n).map(([, html]) => `<span>${html}</span>`).join('')
 
   try {
     mountForceGraph(container, nodes, edges, {
@@ -3497,7 +3580,7 @@ document.addEventListener('click', async (e) => {
     else if (t.dataset.submitRun) { openConsent('bake', t.dataset.submitRun) }
     // D86: assignment is the only route by which unfinished work becomes visible to a colleague.
     else if (t.dataset.unassignStep) { await callTool('unassign_step', { step_id: t.dataset.unassignStep, assignee: t.dataset.unassignWho }); toast('Assignment removed'); await refreshCurrent() }
-    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { job_id: t.dataset.cxApprove }); toast('Admitted to the Company CX Graph'); await reloadLight() }
+    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { job_id: t.dataset.cxApprove }); toast('Admitted to the Shared Graph'); await reloadLight() }
     else if (t.dataset.cxReject) { await callTool('headchef_reject', { job_id: t.dataset.cxReject }); toast('Held back from the CX Graph'); await reloadLight() }
   } catch (err) { banner(err.message) }
 })
@@ -3607,8 +3690,22 @@ async function exportReplay (id, format) {
 let consentCtx = null
 function openConsent (mode, id) {
   consentCtx = { mode, id }
+  /*
+   * Say how many artifacts this approves, because it approves them.
+   *
+   * The button was labelled "Approve this run" and then refused, every time,
+   * because the artifacts had not been approved one by one - and no screen on
+   * this path offered a way to do that. The count is read from whatever this
+   * view already knows about the job, so the person is told what they are
+   * signing for rather than being sent to find a flag.
+   */
+  const known = (state.currentJob && state.currentJob.id === id) ? state.currentJob : (state.jobs || []).find(j => j.id === id)
+  const n = known ? ((known.steps || []).length || known.step_count || 0) : 0
+  consentCtx.artifacts = n
   $('#consent-title').textContent = mode === 'bake' ? 'Approve this run' : 'Certify'
-  $('#consent-desc').textContent = mode === 'bake' ? 'Hands the run to the Oracle, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the shared knowledge graph.' : 'Record your consent.'
+  $('#consent-desc').textContent = mode === 'bake'
+    ? `Approves ${n ? `all ${n} artifact(s) on this run` : 'this run\'s artifacts'} and hands it to the Oracle, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the Shared Graph.`
+    : 'Record your consent.'
   $('#consent-confirm').innerHTML = `<i data-lucide="check"></i> ${mode === 'bake' ? 'Approve' : 'Certify'}`
   $('#consent-note').value = ''; $('#consent').classList.add('show'); refreshIcons(); $('#consent-note').focus()
 }
@@ -3618,9 +3715,18 @@ $('#consent-confirm').addEventListener('click', async () => {
   if (!consentCtx) return
   const note = $('#consent-note').value.trim()
   try {
-    // D64: bake uses the artifacts already approved (no approve_all auto-approve). The server
-    // rejects a bake with zero approved artifacts; surface that clearly if it happens.
-    if (consentCtx.mode === 'bake') await callTool('bake_job', note ? { id: consentCtx.id, note } : { id: consentCtx.id })
+    /*
+     * approve_all, because this dialog IS the approval.
+     *
+     * D64's rule - artifacts are not promoted without a human deciding - is
+     * satisfied by a named person confirming here, having been told how many
+     * artifacts it covers. Withholding the flag did not add a review step; it
+     * removed the only one that existed and returned an error naming a
+     * parameter nobody using the dashboard can pass.
+     */
+    if (consentCtx.mode === 'bake') {
+      await callTool('bake_job', { id: consentCtx.id, approve_all: true, ...(note ? { note } : {}) })
+    }
     const id = consentCtx.id; closeConsent(); toast('Run approved and sent to the Oracle'); await reloadLight()
     if (state.currentJob && state.currentJob.id === id) await openWorklog(id)
   } catch (e) { banner(e.message); closeConsent() }
@@ -3700,6 +3806,16 @@ const PANELS_WITHOUT_GLOBAL_PROJECT = new Set(['cx', 'cookoff', 'settings', 'con
  *   cookoff / settings / connections - company-wide or configuration, never owner-scoped.
  */
 function go (panel) {
+  /*
+   * An error belongs to the screen that caused it.
+   *
+   * "Cannot submit this job: none of its steps are approved yet" was raised on
+   * the bench, then followed the viewer to the Oracle Graph and on to Settings,
+   * where it sat above a configuration form it had nothing to do with. A
+   * failure attached to the wrong screen is worse than none: it reads as this
+   * panel being broken, and this panel is fine.
+   */
+  banner('')
   document.querySelectorAll('section.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${panel}`))
   document.querySelectorAll('nav button[data-panel]').forEach(b => b.setAttribute('aria-current', b.dataset.panel === panel ? 'true' : 'false'))
   $('#panel-title').textContent = PANEL_TITLES[panel] || panel
@@ -3759,7 +3875,23 @@ $('#refresh-btn').addEventListener('click', async () => {
 
 /* command palette */
 const paletteActions = () => {
-  const nav = [['home', 'Home / My Work'], ['projects', 'Projects'], ['worklog', 'Work Log'], ['tasks', 'Active Tasks'], ['cookbook', 'Cookbook'], ['graph', 'Knowledge Graph'], ['cx', 'Company CX Graph'], ['settings', 'Settings'], ['connections', 'Connections']]
+  /*
+   * READ FROM THE SIDEBAR, never listed again here.
+   *
+   * This was a second hardcoded copy of the navigation, and it had drifted:
+   * the palette offered "Cookbook", "Knowledge Graph" and "Company CX
+   * Graph" while the sidebar two inches to its left said "Playbooks",
+   * "Oracle Graph" and "Shared Graph". Same panels, different names, one
+   * screen. A rename will always be applied to the thing you can see and
+   * forgotten on the copy you cannot, so there is no copy now - the labels
+   * are taken from the buttons themselves, minus their keyboard hint.
+   */
+  const nav = [...document.querySelectorAll('nav button[data-panel]')].map(b => {
+    const label = [...b.childNodes]
+      .filter(n => n.nodeType === Node.TEXT_NODE)
+      .map(n => n.textContent.trim()).join(' ').trim()
+    return [b.dataset.panel, label || PANEL_TITLES[b.dataset.panel] || b.dataset.panel]
+  }).filter(([, label]) => label)
   const items = nav.map(([p, l]) => ({ label: l, hint: 'panel', run: () => go(p) }))
   // Jumping to a job carries the QUERY with it (D92). Arriving with the list showing everything
   // and the opened job scrolled off-screen loses the context you searched in: the left column

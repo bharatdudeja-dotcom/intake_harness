@@ -304,10 +304,17 @@ describe('MCP Server - Company Connector', () => {
             // only way to send an answer was start_intake, which made a second
             // job for one brief - two identical rows on the bench.
             expect(toolNames).toContain('answer_intake')
+            // The pipeline stops after EVERY completed step and waits, so
+            // something has to say "run the next one". Without this, a job that
+            // had been approved and had Agent 2 finish could not be moved at
+            // all: the only tool left was approve_intake, which would have
+            // recorded a human decision against a gate nobody was asked about.
+            // Agent 3 had therefore never run once.
+            expect(toolNames).toContain('continue_job')
             // The gateway's own tools are DISCOVERED and are not in this count:
             // no server has gateway:true in the seed, so nothing is proxied here.
             expect(toolNames).toContain('list_gateway_tools')
-            expect(toolNames).toHaveLength(73)
+            expect(toolNames).toHaveLength(74)
         })
 
     })

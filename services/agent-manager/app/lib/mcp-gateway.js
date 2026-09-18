@@ -38,6 +38,7 @@
 
 const { z } = require('zod')
 const mcpServers = require('./mcp-servers')
+const { flattenCommentMarkup } = require('./workfront-comment-text.js')
 
 /**
  * JSON Schema -> a Zod raw shape.
@@ -239,7 +240,17 @@ async function callProxied (name, args, overrides) {
     const server = mcpServers.get(parsed.serverId, overrides)
     if (!server) throw new Error(`No MCP server registered with id '${parsed.serverId}'`)
     if (!server.gateway) throw new Error(`${parsed.serverId} is registered but not in the gateway`)
-    return mcpServers.callTool(server, parsed.tool, args || {})
+
+    const { args: safeArgs, flattened } = flattenCommentMarkup(parsed.tool, args || {})
+    const result = await mcpServers.callTool(server, parsed.tool, safeArgs)
+    if (flattened && result && typeof result === 'object') {
+        // Said, not hidden. The comment that landed is not the string that was
+        // sent, and the caller should know before it describes what it posted.
+        result._gateway_note = `The '${flattened}' you sent contained HTML. Workfront's comment stream ` +
+            'renders it literally, so it was converted to plain text before posting. Send plain text ' +
+            '(line breaks are fine, markdown is not) and open with the agent that wrote the content.'
+    }
+    return result
 }
 
 module.exports = { catalog, callProxied, resolveBareName, zodShape, zodForProperty, discover, gatewayServers, proxyName, parseProxyName, reset, TTL_MS }

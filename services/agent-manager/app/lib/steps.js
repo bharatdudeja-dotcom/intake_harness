@@ -75,6 +75,35 @@ function computeExpiry (fromIso) {
 }
 
 /**
+ * One well-formed step, ready to push onto a job.
+ *
+ * The fields that every step must carry - its id, its order, when it was
+ * created and when it expires - are set here rather than at each call site,
+ * because a step missing them is a step the Work Log cannot order, the retention
+ * sweep cannot expire, and the approval flow cannot address.
+ *
+ * `fields` overrides anything above it, so a caller can set its own source,
+ * status or kind. What it cannot do is omit the skeleton.
+ *
+ * @param {string} jobId the job this step belongs to
+ * @param {number} order from nextOrder(job.steps), at the moment of pushing
+ * @param {object} fields kind, content, format, source, model, tokens_used, tags, provenance...
+ */
+function make (jobId, order, fields = {}) {
+    const at = new Date().toISOString()
+    return {
+        id: makeStepId(jobId, order),
+        job_id: jobId,
+        order,
+        source: 'agent-manager',
+        status: statusLib.EXPERIMENTAL,
+        created: at,
+        expires_at: computeExpiry(at),
+        ...fields
+    }
+}
+
+/**
  * Synthesize the single step a pre-Increment-11 flat job implicitly has, from its
  * legacy top-level fields. Source is unknown - the flat model never tracked it.
  * @param {object} resource a full job as read from the store
@@ -247,6 +276,7 @@ function composeReplay (steps, opts = {}) {
 
 module.exports = {
     kindForType,
+    make,
     makeStepId,
     parseStepId,
     computeExpiry,
