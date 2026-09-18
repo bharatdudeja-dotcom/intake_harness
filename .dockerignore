@@ -1,0 +1,20 @@
+# Never send real secrets into the build context/cache, even though the
+# runner stage doesn't copy them into the final image — .env.local carries
+# this repo's actual DATABASE_URL/MCP_ENDPOINT_URL. Runtime config is
+# injected with `docker run -e` / compose, not baked in.
+.env
+.env*
+!.env.local.example
+
+node_modules
+.next
+.git
+local
+
+npm-debug.log*
+.DS_Store
+*.tsbuildinfo
+
+# Not part of this app's own Next.js build — a separate service with its
+# own dependencies (see sidebar.tsx: "never touched, only looked at").
+services/agent-manager
