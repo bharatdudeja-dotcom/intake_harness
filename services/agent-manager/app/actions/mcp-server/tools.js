@@ -1968,6 +1968,7 @@ function registerTools (server, context = {}) {
             // Capture whatever ran because of the answer, onto THIS job. Deduped
             // on the upstream task-run id, so re-running a step appends rather
             // than duplicating, and answering twice cannot double-write.
+            let captureNote = null
             try {
                 const full = await store.getResource(runId)
                 full.steps = full.steps || []
@@ -2017,13 +2018,23 @@ function registerTools (server, context = {}) {
                 // projectJob, not the old name. The recipe->job rename happened; these two
         // calls did not, so every capture through them threw ReferenceError into a
         // catch that said nothing - which is why answering a question and advancing
-        // a run recorded no stages at all, while approving one did.
-        projectJob(full, full.steps, new Date().toISOString())
+                // a run recorded no stages at all, while approving one did.
+                projectJob(full, full.steps, new Date().toISOString())
                 full.content_hash = contentHash(full.content)
                 await store.saveResource(full)
             } catch (e) {
-                // The answer reached the pipeline and it moved; failing to also
-                // write it down here must not read as the answer having failed.
+                /*
+                 * Said, not swallowed.
+                 *
+                 * The Pennsylvania run asked four questions, and the intake
+                 * stage that finally created the Workfront request never
+                 * reached the record - so approve_intake had no reference to
+                 * verify and refused an approval that had really happened. A
+                 * capture that fails in silence is how a gap like that survives
+                 * all the way to a customer demo.
+                 */
+                captureNote = `The stages ran, but were not written down: ${e && e.message ? e.message : e}. ` +
+                    'get_job will not show them.'
             }
 
             return jsonResult({
@@ -2043,7 +2054,9 @@ function registerTools (server, context = {}) {
                         workfront_url: blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : undefined
                     }
                     : undefined,
-                note: 'Recorded on the same job, so this brief is one record with a longer history rather than two jobs.'
+                note: captureNote
+                    ? `${captureNote} The answer DID reach the pipeline and it moved - this is a failure to record, not to act.`
+                    : 'Recorded on the same job, so this brief is one record with a longer history rather than two jobs.'
             })
         }
     )
@@ -2325,21 +2338,61 @@ async function captureStages (runId, system, steps) {
              * a verification step that cannot find the thing to verify is just
              * an outage. The artifacts always carry the reference.
              */
-            const refs = (resource.workfront_refs && resource.workfront_refs.length)
+            let refs = (resource.workfront_refs && resource.workfront_refs.length)
                 ? resource.workfront_refs
                 : (resource.steps || []).flatMap(st => {
                     const payload = st.provenance && st.provenance.upstream_payload
                     return payload ? narrate.findWorkfrontRefs(payload.output) : []
                 })
+
+            /*
+             * THIRD SOURCE: ASK THE PIPELINE WHAT IT CREATED.
+             *
+             * Our record can be incomplete. On the Pennsylvania run intake ran
+             * four times - once per question - and the job holds the first
+             * attempt, which created nothing, and not the last, which created
+             * the request. So both the rollup and the artifact scan came back
+             * empty and the approval was refused for a request that existed and
+             * had been approved.
+             *
+             * The upstream run is the authority on what it created, so it is
+             * asked. A verifier that only works when our own bookkeeping is
+             * complete is a second thing to fail in front of a customer.
+             */
+            /*
+             * resource.upstream, not `ref` - a later `const ref` in this block
+             * shadows the outer one, so naming it here hits the temporal dead
+             * zone and throws "Cannot access 'ref' before initialization".
+             * node --check does not see that; only running it does.
+             */
+            const upstreamRef = resource.upstream
+            if (!refs.length && upstreamRef && upstreamRef.run_id) {
+                try {
+                    const { system } = agentSystems.resolve(upstreamRef.system_id, undefined, settings.agentSystems())
+                    if (system) {
+                        const upstream = await agentSystems.getRun(system, upstreamRef.run_id)
+                        for (const st of agentSystems.toSteps(upstream)) {
+                            for (const r of narrate.findWorkfrontRefs(st.output)) {
+                                if (!refs.some(x => x.objId === r.objId)) refs.push(r)
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Fall through to the error below, which already says what
+                    // could not be found. A failed read here is not a new fact.
+                }
+            }
             // The ISSUE is what carries the approval; a project created later at
             // review time does not. Prefer it explicitly rather than taking
             // whichever reference happens to be first.
             const ref = refs.find(r => r.objCode === 'OPTASK') || refs[0] || null
             if (!ref) {
                 return errorResult(
-                    `Cannot verify an approval for '${id}': this job has no Workfront record recorded against it, ` +
-                    'so there is nothing whose approval state can be read. A job that created no Workfront request ' +
-                    'has nothing to approve.'
+                    `Cannot verify an approval for '${id}': no Workfront record was found against it - not in ` +
+                    'the rollup, not in its artifacts, and not in the pipeline run itself. So there is nothing ' +
+                    'whose approval state can be read. A job that created no Workfront request has nothing to ' +
+                    'approve; if you are looking at a request in Workfront that this job created, pass its id ' +
+                    'directly as workfront_id.'
                 )
             }
 
