@@ -95,7 +95,33 @@ function leafFields(doc: unknown, group: string): SandboxField[] {
  * to fail the whole probe: a partial field list still answers most questions,
  * and saying "I found these 30 of 40" beats saying nothing.
  */
+/*
+ * A SHORT CACHE, because review and Agent 3 ask the same question in one run.
+ *
+ * Both stages read the sandbox's field groups - review to tell Agent 3 what is
+ * available, Agent 3 to decide what to build - and nothing carried the answer
+ * between them, so a run paid for the same twenty-odd calls twice.
+ *
+ * Sixty seconds, in process, deliberately. Long enough to cover one run,
+ * nowhere near long enough to hide a real change to the tenant's schemas -
+ * stale field data would be exactly the kind of thing that sends someone
+ * hunting for an afternoon.
+ */
+const FIELD_CACHE_MS = 60_000;
+let fieldCache: { at: number; read: FieldRead } | null = null;
+
 export async function readSandboxFields(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
+  if (fieldCache && Date.now() - fieldCache.at < FIELD_CACHE_MS && fieldCache.read.read) {
+    return fieldCache.read;
+  }
+  const fresh = await readSandboxFieldsUncached(taskId);
+  // Only a SUCCESSFUL read is cached. Caching a failure would turn one bad
+  // moment into a minute of them.
+  if (fresh.read) fieldCache = { at: Date.now(), read: fresh };
+  return fresh;
+}
+
+async function readSandboxFieldsUncached(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
   let groups: Array<{ title: string; altId: string }> = [];
   try {
     const list = await callMcpTool<{ results?: Array<Record<string, unknown>> }>(
@@ -113,6 +139,14 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
 
   const fields: SandboxField[] = [];
   let tenant: string | null = null;
+
+  /*
+   * EVERY GROUP AT ONCE, not one after another.
+   *
+   * These reads are independent - each is one field group's definition - and
+   * awaiting them in sequence made the stage pay for every round trip. The
+   * tenant is derived from the altIds, which needs no call at all.
+   */
   for (const g of groups) {
     /*
      * This is the TENANT namespace, not the sandbox, and confusing the two cost
@@ -131,12 +165,17 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
      * again by someone reading the type.
      */
     if (!tenant) tenant = g.altId.replace(/^_/, "").split(".")[0] || null;
-    try {
-      const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId });
-      fields.push(...leafFields(doc, g.title));
-    } catch {
-      // One unreadable group must not lose the others.
-    }
+  }
+
+  const docs = await Promise.all(
+    groups.map((g) =>
+      callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId })
+        .then((doc) => ({ g, doc }))
+        .catch(() => null), // one unreadable group must not lose the others
+    ),
+  );
+  for (const hit of docs) {
+    if (hit) fields.push(...leafFields(hit.doc, hit.g.title));
   }
 
   return {
@@ -645,6 +684,20 @@ export type BuildResult = {
  * So it builds once the attributes are CONFIRMED present, and the count goes to
  * the marketer at 3.4 for the approval the map keeps at 3.5.
  */
+/**
+ * A name AEP will accept when it already has the one we asked for.
+ *
+ * Only used after a create is refused. "(new HHmm)" rather than a counter,
+ * because finding the next free number means listing the catalogue - which is
+ * the search a force-new request has just told us to skip.
+ */
+function disambiguate(name: string): string {
+  const now = new Date();
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  return `${name} (new ${hh}${mm})`.slice(0, 100);
+}
+
 export async function createAudience(
   taskId: TaskId,
   /*
@@ -663,24 +716,68 @@ export async function createAudience(
     count: null, countBasis: "not attempted", error: null,
   };
 
-  let segmentId: string | null = null;
-  try {
+  /*
+   * COUNT WHILE THE SEGMENT IS BEING CREATED.
+   *
+   * The count is a query over the DEFINITION - it does not need the segment to
+   * exist, which was the whole reason for going to Query Service instead of the
+   * estimate endpoint. Awaiting it after the create simply added its cost to
+   * the stage.
+   */
+  const countPromise = countAudience(taskId, args.pql);
+
+  const attemptCreate = async (name: string) => {
     const made = await callMcpTool<Record<string, unknown>>(taskId, "adobe_create_segment", {
-      name: args.name,
+      name,
       pql_expression: args.pql,
       description: args.description,
       ...(args.mergePolicyId ? { merge_policy_id: args.mergePolicyId } : {}),
     });
     const text = JSON.stringify(made ?? {});
-    segmentId =
+    const id =
       String((made?.id as string) || (made?.segmentId as string) || "") ||
       text.match(/"id"\s*:\s*"([^"]+)"/)?.[1] ||
       null;
-    if (!segmentId) {
-      return { ...base, error: `the create returned no segment id. Response: ${text.slice(0, 300)}` };
+    return { id, text, name };
+  };
+
+  let segmentId: string | null = null;
+  let createdName = args.name;
+  try {
+    const first = await attemptCreate(args.name);
+    if (!first.id) {
+      await countPromise.catch(() => null);
+      return { ...base, error: `the create returned no segment id. Response: ${first.text.slice(0, 300)}` };
     }
+    segmentId = first.id;
   } catch (err) {
-    return { ...base, error: (err as Error).message };
+    /*
+     * A 400 here is usually a name AEP already has, and it says nothing about
+     * which field it objected to. So the name is not assumed to be the cause -
+     * it is TESTED, by retrying with a different one. If that fails too, the
+     * original error is what gets reported.
+     *
+     * This is what "create a new audience even if a duplicate exists" asks
+     * for: the second identical request failed on the duplicate, which is not
+     * an answer to someone who said they wanted another one.
+     */
+    const raw = (err as Error).message;
+    if (!/400|bad request|already exists|duplicate/i.test(raw)) {
+      await countPromise.catch(() => null);
+      return { ...base, error: raw };
+    }
+    try {
+      const retry = await attemptCreate(disambiguate(args.name));
+      if (!retry.id) {
+        await countPromise.catch(() => null);
+        return { ...base, error: raw };
+      }
+      segmentId = retry.id;
+      createdName = retry.name;
+    } catch {
+      await countPromise.catch(() => null);
+      return { ...base, error: raw };
+    }
   }
 
   // The count. A failure here leaves a REAL segment with no size, which is a
@@ -710,7 +807,7 @@ export async function createAudience(
      * Started, never awaited - query_run takes minutes, and a stage that waits
      * on it turns a twenty-second step into a timeout.
      */
-    const direct = await countAudience(taskId, args.pql);
+    const direct = await countPromise;
     if (direct.profiles != null) {
       count = direct.profiles;
       basis = direct.basis;
@@ -722,6 +819,7 @@ export async function createAudience(
   // A link, not just a GUID. This is the artifact the room wants to open.
   return {
     created: true, segmentId, segmentUrl: segmentUrl(segmentId), countQueryId,
-    name: args.name, pql: args.pql, count, countBasis: basis, error: null,
+    // The name AEP accepted, which is not always the one we asked for.
+    name: createdName, pql: args.pql, count, countBasis: basis, error: null,
   };
 }

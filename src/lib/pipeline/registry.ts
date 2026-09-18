@@ -115,6 +115,24 @@ export const PIPELINE: AgentDefinition[] = [
       // full segmentation-job tools.
       "adobe_create_segment_estimate",
       "adobe_get_segment_estimate",
+      /*
+       * QUERY SERVICE, because the estimate endpoint does not exist.
+       *
+       * adobe_create_segment_estimate posts to
+       * /ups/segment/definitions/{id}/estimate and gets a 404 from nginx, so
+       * the count has to come from somewhere real. Adobe serves query results
+       * over its PSQL interface and hands out the connection parameters
+       * through this tool; the harness already speaks Postgres.
+       *
+       * Without it the count path was refused by our own allow-list -
+       * "Task audience_creation is not allowed to call MCP tool
+       * query_get_connection_parameters" - which is the allow-list doing its
+       * job on a capability I added and forgot to declare.
+       */
+      "query_get_connection_parameters",
+      "query_run",
+      "query_get",
+      "query_get_results",
       "adobe_list_segments",
       "adobe_get_segment",
       "adobe_create_segment",

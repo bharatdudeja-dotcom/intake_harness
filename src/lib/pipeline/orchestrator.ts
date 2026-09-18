@@ -167,7 +167,7 @@ export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> 
     throw new Error(`Run ${runId} is "${run.status}", not "running" — nothing to retry.`);
   }
 
-  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const { priorOutputs, allOutputs, lastCompleted } = await completedTaskRunsFor(runId);
   const currentInput = lastCompleted ? lastCompleted.output : run.input;
 
   return advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
@@ -236,13 +236,19 @@ async function gateBlocking(
   stepIndex: number,
   currentInput: unknown,
   priorOutputs: Partial<Record<AgentName, unknown>>,
+  allOutputs?: Partial<Record<AgentName, unknown[]>>,
 ): Promise<NonNullable<RunRow["blocked_on"]> | null> {
   const agent = PIPELINE[stepIndex];
   if (!agent) return null;
   const gate = gateFor(agent.name);
   if (!gate) return null;
 
-  const verdict = gate.check({ decisions: await listDecisions(runId), input: currentInput, priorOutputs });
+  const verdict = gate.check({
+    decisions: await listDecisions(runId),
+    input: currentInput,
+    priorOutputs,
+    allOutputs,
+  });
   if (verdict.open) return null;
 
   return {
@@ -380,6 +386,32 @@ export async function decideGate(
    * agent and stops again like every other step.
    */
   await query(`UPDATE runs SET blocked_on = NULL WHERE run_id = $1`, [runId]);
+
+  /*
+   * A DECISION TO BUILD A NEW AUDIENCE HAS TO REACH AGENT 3.
+   *
+   * Opening the gate is not enough: Agent 3 searches the catalogue and would
+   * find the same audience again, reuse it, and the marketer who asked for a
+   * separate one would get the same answer with extra steps.
+   *
+   * force_new is set on the run's input so the next step carries it. Read from
+   * the evidence when a caller states it, and from the reason otherwise -
+   * because "build a new one" is how a person says it.
+   */
+  if (gateId === "audience_build_2_7" && input.decision === "approved") {
+    const ev = (input.evidence ?? {}) as Record<string, unknown>;
+    const saidNew =
+      ev.build_new === true ||
+      ev.force_new === true ||
+      /\b(new|fresh|separate|another|do not reuse|don'?t reuse)\b/i.test(String(input.reason ?? ""));
+    if (saidNew) {
+      await query(
+        `UPDATE runs SET input = jsonb_set(coalesce(input, '{}'::jsonb), '{force_new}', 'true'::jsonb) WHERE run_id = $1`,
+        [runId],
+      );
+    }
+  }
+
   const resumed = await continueRun(runId, baseUrl);
   return { run: resumed, decision };
 }
@@ -414,7 +446,7 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
     );
   }
 
-  const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
+  const { priorOutputs, allOutputs, lastCompleted } = await completedTaskRunsFor(runId);
   const currentInput = lastCompleted ? lastCompleted.output : run.input;
 
   /*
@@ -426,7 +458,7 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
    * process gate is shut, the run goes back to awaiting_approval with
    * blocked_on set and no agent is called.
    */
-  const blocked = await gateBlocking(runId, run.current_step, currentInput, priorOutputs);
+  const blocked = await gateBlocking(runId, run.current_step, currentInput, priorOutputs, allOutputs);
   if (blocked) return block(runId, blocked);
 
   const [running] = await query<RunRow>(
@@ -444,7 +476,11 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
 /** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
 async function completedTaskRunsFor(
   runId: string,
-): Promise<{ priorOutputs: Partial<Record<AgentName, unknown>>; lastCompleted: TaskRunRow | undefined }> {
+): Promise<{
+  priorOutputs: Partial<Record<AgentName, unknown>>;
+  allOutputs: Partial<Record<AgentName, unknown[]>>;
+  lastCompleted: TaskRunRow | undefined;
+}> {
   const completedTaskRuns = await query<TaskRunRow>(
     `SELECT * FROM task_runs WHERE run_id = $1 AND status = 'completed' ORDER BY step_index`,
     [runId],
@@ -453,7 +489,35 @@ async function completedTaskRunsFor(
   for (const taskRun of completedTaskRuns) {
     priorOutputs[taskRun.task_id] = taskRun.output;
   }
-  return { priorOutputs, lastCompleted: completedTaskRuns[completedTaskRuns.length - 1] };
+
+  /*
+   * EVERY ATTEMPT, not just the completed ones.
+   *
+   * A stage can run more than once - that is the shape of this pipeline, with
+   * questions and gates between steps - and a later run does not undo what an
+   * earlier one did. On run 9b8e39ee the review that CREATED the project is
+   * marked needs_input, because it also asked the marketer a question, and the
+   * row marked completed is a lighter preflight pass with no conversion in it.
+   *
+   * Reading only completed rows therefore told the 2.7 gate that the request
+   * had never been through review, in front of the project it had just
+   * created, and Agent 3 could never run.
+   *
+   * priorOutputs keeps its old meaning - what an AGENT is handed, which should
+   * be a completed result - and gates get the full history to reason over.
+   */
+  const everyTaskRun = await query<TaskRunRow>(
+    `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index, task_run_id`,
+    [runId],
+  );
+  const allOutputs: Partial<Record<AgentName, unknown[]>> = {};
+  for (const taskRun of everyTaskRun) {
+    const list = allOutputs[taskRun.task_id] || [];
+    list.push(taskRun.output);
+    allOutputs[taskRun.task_id] = list;
+  }
+
+  return { priorOutputs, allOutputs, lastCompleted: completedTaskRuns[completedTaskRuns.length - 1] };
 }
 
 /**
