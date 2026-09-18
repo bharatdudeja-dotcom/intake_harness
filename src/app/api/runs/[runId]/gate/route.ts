@@ -107,7 +107,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ runId: str
     return NextResponse.json({ decision: recorded, run, taskRuns: full?.taskRuns ?? [], gates: full?.gates ?? [] });
   } catch (err) {
     const message = (err as Error).message;
-    const status = /No run |not waiting at a gate/.test(message) ? 409 : 500;
+    /*
+     * A decision that does not apply to this run is a 409, not a 500.
+     *
+     * Rejecting a run still sitting at needs_input threw "nothing there is
+     * gated" and came back as a 500 - so an assistant reported the harness had
+     * failed, twice, for a request that was simply not applicable. A 500 says
+     * "we are broken"; this says "that is not a thing you can do to this run,
+     * and here is why".
+     */
+    const notApplicable = /No run |not waiting at a gate|nothing there is gated|already (approved|rejected)/i.test(message);
+    const status = notApplicable ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

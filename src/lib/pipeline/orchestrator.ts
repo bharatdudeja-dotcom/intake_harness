@@ -25,6 +25,25 @@ import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRo
  * process terminates without an audience, and nothing is captured").
  * "needs_input" does NOT trigger it — that's an expected, resumable pause.
  */
+/**
+ * What this stage spent, and whether anyone would know.
+ *
+ * `usage` is set only by an agent that genuinely called a model. None of the
+ * four do today - they are deterministic parsers plus MCP tool calls - so the
+ * honest value for tokens is null rather than a fabricated 0.
+ *
+ * Null alone is ambiguous downstream, though: a reader cannot tell "no model
+ * was called" from "a model was called and nobody counted". So the metadata
+ * says which. An agent that starts calling a model reports usage, and this
+ * flips to true without anything else changing.
+ */
+function executionMetadata(response: AgentResponse): Record<string, unknown> {
+  return {
+    ...(response.metadata ?? {}),
+    model_called: response.usage ? true : false,
+  };
+}
+
 async function advanceOneStep(
   run: RunRow,
   stepIndex: number,
@@ -77,7 +96,7 @@ async function advanceOneStep(
         JSON.stringify(currentInput),
         JSON.stringify(response.output ?? null),
         response.message ?? null,
-        JSON.stringify(response.metadata ?? {}),
+        JSON.stringify(executionMetadata(response)),
         response.usage?.tokens ?? null,
         response.usage?.model ?? null,
         startedAt.toISOString(),
@@ -468,7 +487,7 @@ async function runEscalation(
       JSON.stringify(failure),
       JSON.stringify(response.output ?? null),
       response.message ?? null,
-      JSON.stringify(response.metadata ?? {}),
+      JSON.stringify(executionMetadata(response)),
       response.usage?.tokens ?? null,
       response.usage?.model ?? null,
       startedAt.toISOString(),
