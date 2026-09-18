@@ -101,6 +101,8 @@ export interface AudienceCreationOutput {
   audience: {
     created: boolean;
     segmentId: string | null;
+    /** Where to open it in AEP. Null when nothing was created. */
+    url: string | null;
     name: string;
     /** The PQL, so a human can check the definition and not just the count. */
     definition: string;
@@ -362,6 +364,9 @@ export async function POST(req: NextRequest) {
       ? {
           created: build.created,
           segmentId: build.segmentId,
+          // A link, so the audience can be opened rather than quoted as a GUID.
+          // Every other stage hands over a URL; this one did not.
+          url: build.segmentUrl,
           name: build.name,
           definition: build.pql,
           reads: expression?.explain ?? [],

@@ -424,9 +424,25 @@ export function buildExpression(check: AttributeCheck, fields: Record<string, st
   return { pql: predicates.join(" and "), explain, ungrounded };
 }
 
+/**
+ * Where a person goes to look at the audience.
+ *
+ * Every other stage hands over a Workfront link; this one handed over a GUID.
+ * The sandbox is part of the path, so a link built without it opens the wrong
+ * tenant's view - which is worse than no link.
+ */
+export function segmentUrl(segmentId: string | null, sandbox?: string | null): string | null {
+  if (!segmentId) return null;
+  const name = (sandbox || process.env.AEP_SANDBOX || "prod").trim();
+  return `https://experience.adobe.com/#/@${(process.env.AEP_IMS_ORG_NAME || "taplondonptrsd").trim()}` +
+    `/sname:${name}/platform/segment/browse/${segmentId}`;
+}
+
 export type BuildResult = {
   created: boolean;
   segmentId: string | null;
+  /** Where to open it. Null when nothing was created. */
+  segmentUrl: string | null;
   name: string;
   pql: string;
   count: number | null;
@@ -458,7 +474,7 @@ export async function createAudience(
   args: { name: string; pql: string; description: string; mergePolicyId?: string | null },
 ): Promise<BuildResult> {
   const base: BuildResult = {
-    created: false, segmentId: null, name: args.name, pql: args.pql,
+    created: false, segmentId: null, segmentUrl: null, name: args.name, pql: args.pql,
     count: null, countBasis: "not attempted", error: null,
   };
 
@@ -505,5 +521,9 @@ export async function createAudience(
     basis = `the segment exists but could not be sized: ${(err as Error).message}`;
   }
 
-  return { created: true, segmentId, name: args.name, pql: args.pql, count, countBasis: basis, error: null };
+  // A link, not just a GUID. This is the artifact the room wants to open.
+  return {
+    created: true, segmentId, segmentUrl: segmentUrl(segmentId),
+    name: args.name, pql: args.pql, count, countBasis: basis, error: null,
+  };
 }

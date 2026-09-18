@@ -141,6 +141,24 @@ export type CreateOutcome =
  *
  * Plain text. A Workfront description is not an HTML field.
  */
+/**
+ * Is this exclusion already covered by the clause we are about to print?
+ *
+ * Compared on the words that carry meaning, so "exclude anyone who already has
+ * Xfinity Internet" is recognised inside "...but no Internet - exclude anyone
+ * who already has Xfinity Internet" without needing the strings to match.
+ */
+function alreadySaid(clause: string | undefined, exclusion: string): boolean {
+  if (!clause) return false;
+  const words = (t: string) =>
+    new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 3));
+  const a = words(clause);
+  const b = [...words(exclusion)];
+  if (!b.length) return false;
+  const shared = b.filter((x) => a.has(x)).length;
+  return shared / b.length >= 0.6;
+}
+
 function describeIntake(
   brief: string,
   values: Record<string, unknown>,
@@ -157,23 +175,15 @@ function describeIntake(
     lines.push("", "What was captured from this brief:", ...reading);
   }
 
-  const onForm = Object.keys(written).length;
-  if (onForm) {
-    lines.push("", `${onForm} of these are also set in the request's own fields.`);
-  }
-  if (dropped.length) {
-    const labels = dropped.map((k) => fieldByKey(k)?.label || k);
-    lines.push(
-      `${labels.length} have no matching field on this form and are recorded above only: ` +
-        `${labels.join(", ")}.`,
-    );
-  }
-  if (!onForm) {
-    lines.push(
-      "None of the request's own fields could be set - the values are above so nothing is lost.",
-    );
-  }
-
+  /*
+   * NO BOOKKEEPING IN A FIELD THE CLIENT READS.
+   *
+   * This printed "2 of these are also set in the request's own fields" and "8
+   * have no matching field on this form and are recorded above only: ...".
+   * Which fields our mapper reached is our problem, not a reviewer's - they
+   * asked for their Workfront process automated, not annotated. Where each
+   * value ended up is in the run record, which is where an engineer looks.
+   */
   return lines.join("\n");
 }
 
@@ -239,7 +249,15 @@ export function toWorkfrontPayload(
       values.line_of_business ? `in ${values.line_of_business}` : null,
       region ? `in ${article}${region}` : null,
       holdings || null,
-      values.exclusion ? `excluding ${values.exclusion}` : null,
+      /*
+       * Do not say it twice. The brief's own clause usually contains the
+       * exclusion already - "who have Xfinity TV but no Internet - exclude
+       * anyone who already has Xfinity Internet" - and appending it again read
+       * as two contradictory rules to anyone skimming the field.
+       */
+      (values.exclusion && !alreadySaid(holdings, String(values.exclusion)))
+        ? `excluding ${values.exclusion}`
+        : null,
     ].filter(Boolean).map(String);
     if (parts.length) values.audience_description = parts.join(", ");
   }

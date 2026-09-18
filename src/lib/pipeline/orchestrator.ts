@@ -396,7 +396,22 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
     throw new Error(`No run found for run_id ${runId}.`);
   }
   if (run.status !== "awaiting_approval") {
-    throw new Error(`Run ${runId} is "${run.status}", not "awaiting_approval" — nothing to approve.`);
+    /*
+     * Say which state it IS in, and do not call this an approval.
+     *
+     * This read "nothing to approve" on a /continue call, which is a message
+     * from a different endpoint: by the time anyone continues a run, the
+     * approval has already happened. A caller was told the opposite of the
+     * truth about the one manual step in this pipeline.
+     *
+     * "completed" in particular is not a problem at all - the run finished, and
+     * the caller wants its outcome rather than another step.
+     */
+    throw new Error(
+      run.status === "completed"
+        ? `Run ${runId} has already finished - every step is done, so there is nothing further to advance. Read the run to see what it produced.`
+        : `Run ${runId} is "${run.status}", so there is no step waiting to be run. Only a run that has finished a step and is waiting can be advanced.`,
+    );
   }
 
   const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
