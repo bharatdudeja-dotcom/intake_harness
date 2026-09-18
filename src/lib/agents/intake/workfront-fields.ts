@@ -272,6 +272,19 @@ export async function resolveFieldMap(
    * A pinned map wins outright. On a stable tenant the parameter names are
    * known, and discovery is then a runtime search that can only fail.
    */
+  /*
+   * A FIELD WE CANNOT PLACE ON THIS OBJECT'S FORM IS NOT A CANDIDATE.
+   *
+   * insights_search_fields answers for the ENTITY, not for the form attached to
+   * the object being written, so it returned 44 parameters and the matcher
+   * confidently picked "DE:Campaign Name" and "DE:Audience" - real fields, on a
+   * different form. Workfront refused them, correctly, and the run reported
+   * "2 field(s) refused" as though something were broken.
+   *
+   * In this tenant the brief's fields live on the PROJECT form. The request
+   * carries the brief in its description until Agent 2 converts it, and then
+   * they land - which is the client's process, not a fault.
+   */
   const pinned = pinnedFieldMap();
   if (pinned) {
     return {

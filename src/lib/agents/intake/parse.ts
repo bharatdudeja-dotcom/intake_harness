@@ -471,11 +471,25 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     );
     if (x) {
       const what = (x[1] || x[2] || x[3] || "").trim().replace(/\s+with us\s*(yet)?$/i, "");
+      /*
+       * "exclude anyone who already has X" is ALREADY an exclusion.
+       *
+       * Every branch was prefixed with "Customers without", so
+       * "exclude anyone who already has Xfinity Internet" came out as
+       * "Customers without anyone who already has Xfinity Internet". Only the
+       * "without X" and "do not have X" branches describe what the customer
+       * lacks; the explicit exclude branch describes who to leave out, in the
+       * marketer's own words, and needs no prefix.
+       */
+      const explicit = Boolean(x[3]);
+      const value = explicit
+        ? what.charAt(0).toUpperCase() + what.slice(1)
+        : `Customers without ${what}`;
       if (what) {
         push({
           key: "exclusion",
           label: "Exclusion",
-          value: `Customers without ${what}`,
+          value,
           from: "derived",
           evidence: x[0].trim(),
         });
