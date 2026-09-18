@@ -224,7 +224,7 @@ const WRITE_TOOLS = new Set([
      * The D79 guard test caught this being absent, which is exactly what it is
      * for - the gate is only as good as its completeness.
      */
-    'approve_intake', 'reject_intake',
+    'approve_intake', 'reject_intake', 'answer_intake',
     // Changes which MCP servers agents can reach, and which upstreams execute them.
     'set_mcp_server', 'set_agent_system'
 ])
@@ -346,6 +346,16 @@ An agent behind a closed gate is not called and writes no stage at all. So a run
 stage is normal and means "waiting", not "broken" and not "lost". get_intake returns a
 waiting_for field saying which decision is outstanding - report that, and do not describe
 the missing stages as having failed or as having been skipped.
+
+ANSWERING A QUESTION IS NOT STARTING A NEW JOB.
+
+When a job comes back needs_input, answer it with answer_intake. Do NOT call
+start_intake again with a completed or corrected brief - that creates a second
+job for the same work, with a second Workfront request behind it, and leaves two
+identical-looking rows on the bench with nobody able to say which is real. It
+also destroys the only number that says whether the agent is doing its job: B1
+measures health by how many rounds a brief takes, and rounds spread across
+separate records cannot be counted.
 
 DO NOT TIDY UP. RETRIES ARE THE DATA.
 
@@ -1886,6 +1896,126 @@ function registerTools (server, context = {}) {
         }
     )
 
+
+    server.tool(
+        'answer_intake',
+        'Answer the question a job asked and let it carry on - use this whenever a job comes back ' +
+        'needs_input. DO NOT call start_intake again to send a corrected or completed brief: that ' +
+        'creates a SECOND job for the same piece of work, which is how one brief ended up as two jobs ' +
+        'on the bench with nobody able to tell which was real. This re-runs the step that paused, with ' +
+        'the answers merged in, and records it on the same job.',
+        {
+            run_id: z.string().min(1).describe('The job id that came back needs_input'),
+            answers: z.record(z.string()).describe('The answers, keyed by the field the question named (e.g. { "request_type": "Audience Build-Only" })')
+        },
+        async ({ run_id: runId, answers }) => {
+            const resource = await store.getResource(runId)
+            if (!resource) return errorResult(`No job found with id '${runId}'`)
+            const ref = resource.upstream
+            if (!ref || !ref.run_id) return errorResult(`'${runId}' is a captured record, not an agent job, so there is no question to answer`)
+            const { system, error } = agentSystems.resolve(ref.system_id, undefined, settings.agentSystems())
+            if (error) return errorResult(error)
+
+            let result
+            try {
+                result = await agentSystems.answerRun(system, ref.run_id, answers || {})
+            } catch (e) {
+                return errorResult(`Could not send the answer to ${system.id}: ${e.message}`)
+            }
+
+            const steps = agentSystems.toSteps(result)
+            const blocked = agentSystems.blockedOn(result)
+
+            const workfrontInstance = (() => {
+                const servers = mcpServers.list(settings.mcpServers())
+                const wf = servers.find(x => x.practice === 'workfront' && x.instance) || servers.find(x => x.instance)
+                return wf ? wf.instance : null
+            })()
+            const agentCatalog = await agentSystems.discoverAgents(system).catch(() => [])
+            const labelFor = (agentId) => {
+                const hit = agentCatalog.find(a => a.id === agentId)
+                return (hit && hit.label) || agentId
+            }
+
+            // Capture whatever ran because of the answer, onto THIS job. Deduped
+            // on the upstream task-run id, so re-running a step appends rather
+            // than duplicating, and answering twice cannot double-write.
+            try {
+                const full = await store.getResource(runId)
+                full.steps = full.steps || []
+                const already = new Set(
+                    full.steps.map(x => x.provenance && x.provenance.upstream_task_run_id).filter(Boolean).map(String)
+                )
+                full.steps.push(stepsLib.make({
+                    kind: 'steering',
+                    signal: 'correct',
+                    content: `**Answered** ${Object.entries(answers || {}).map(([k, v]) => `${k}: ${v}`).join('; ')}`,
+                    format: 'md',
+                    source: 'agent-manager',
+                    tags: ['answer', 'needs-input'],
+                    author: resolveAuthor(context)
+                }))
+                for (const st of steps) {
+                    if (st.upstream_task_run_id && already.has(String(st.upstream_task_run_id))) continue
+                    const meta = (st.metadata && typeof st.metadata === 'object') ? st.metadata : {}
+                    const usage = (meta.usage && typeof meta.usage === 'object') ? meta.usage : meta
+                    const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : undefined
+                    const tokens = num(usage.tokens_used) ?? num(usage.total_tokens) ?? num(usage.totalTokens) ??
+                        ((num(usage.input_tokens) ?? 0) + (num(usage.output_tokens) ?? 0) || undefined)
+                    const model = meta.model || meta.model_id || meta.modelId || usage.model || undefined
+                    full.steps.push(stepsLib.make({
+                        kind: 'doc',
+                        content: narrate.narrateStep(st, labelFor(st.agent_id), { workfrontInstance }),
+                        format: 'md',
+                        source: st.agent_id,
+                        model,
+                        tokens_used: tokens,
+                        tags: ['agent', st.agent_id].concat(st.embedded_error ? ['silent-failure'] : []),
+                        author: resolveAuthor(context),
+                        provenance: {
+                            upstream_task_run_id: st.upstream_task_run_id,
+                            duration_ms: st.duration_ms,
+                            started_at: st.started_at,
+                            finished_at: st.finished_at,
+                            upstream_payload: {
+                                agent: st.agent_id,
+                                upstream_status: st.upstream_status,
+                                input: st.input,
+                                output: st.output,
+                                metadata: st.metadata
+                            }
+                        }
+                    }))
+                }
+                projectRecipe(full, full.steps, new Date().toISOString())
+                full.content_hash = contentHash(full.content)
+                await store.saveResource(full)
+            } catch (e) {
+                // The answer reached the pipeline and it moved; failing to also
+                // write it down here must not read as the answer having failed.
+            }
+
+            return jsonResult({
+                run_id: runId,
+                answered: answers,
+                upstream_status: (result && result.run && result.run.status) || 'unknown',
+                stages: steps.map(st => ({
+                    agent: st.agent_id,
+                    reported: st.upstream_status,
+                    actual: st.embedded_error ? 'faulted' : st.upstream_status,
+                    failure: st.embedded_error || undefined,
+                    ms: st.duration_ms
+                })),
+                waiting_for: blocked
+                    ? {
+                        explanation: blocked.awaiting,
+                        workfront_url: blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : undefined
+                    }
+                    : undefined,
+                note: 'Recorded on the same job, so this brief is one record with a longer history rather than two jobs.'
+            })
+        }
+    )
 
     /* -----------------------------------------------------------------
        The approval at 1.5.

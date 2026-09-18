@@ -60,6 +60,7 @@ const FIELDS = [
     { key: 'start_path', label: 'Start-run path', hint: 'e.g. /api/runs' },
     { key: 'run_path', label: 'Read-run path', hint: 'e.g. /api/runs/{run_id}' },
     { key: 'gate_path', label: 'Gate-decision path', hint: 'Where an approval is recorded, e.g. /api/runs/{run_id}/gate. Blank if the harness has no gates.' },
+    { key: 'resume_path', label: 'Answer-question path', hint: 'Where an answer to a needs_input question goes, e.g. /api/runs/{run_id}/resume.' },
     { key: 'input_key', label: 'Input key', hint: 'The field the brief goes in, e.g. brief' },
     { key: 'input_envelope', label: 'Input envelope', hint: 'Wrapper around the input, e.g. input. Blank for top level.' },
     { key: 'active', label: 'Active', type: 'boolean', hint: 'Off leaves it registered but unused' }
@@ -98,6 +99,7 @@ function list (overrides) {
         start_path: s.start_path || null,
         run_path: s.run_path || null,
         gate_path: s.gate_path || null,
+        resume_path: s.resume_path || null,
         input_key: s.input_key || null,
         input_envelope: s.input_envelope || null,
         auth_configured: !!s.auth,
@@ -423,6 +425,26 @@ async function decideGate (system, upstreamRunId, body) {
 }
 
 /**
+ * Answer a paused run's question, and let it carry on from the step that paused.
+ *
+ * The alternative - submitting the brief again - creates a second job for the
+ * same piece of work, which is what happened before this existed. One job per
+ * brief is not tidiness: B1 measures agent health by how many rounds a brief
+ * takes, and rounds spread across separate records cannot be counted.
+ *
+ * Long timeout for the same reason as the gate: answering re-runs an agent.
+ */
+async function answerRun (system, upstreamRunId, answers) {
+    const template = system.resume_path || '/api/runs/{run_id}/resume'
+    const url = `${system.base_url}${template.replace('{run_id}', encodeURIComponent(upstreamRunId))}`
+    return request(url, {
+        method: 'POST',
+        headers: { ...headers(system), 'content-type': 'application/json' },
+        body: JSON.stringify({ answers })
+    }, 180000)
+}
+
+/**
  * Normalise the upstream's steps into what we log.
  * `task_run_id` is per STEP and belongs on the event; the run's own id is the
  * join key. Both are kept - neither is a foreign key across the boundary.
@@ -464,6 +486,6 @@ module.exports = {
     merged,
     looksLikeFailure,
     registry, reset, list, get, resolve,
-    discoverAgents, startRun, getRun, waitForRun, decideGate,
+    discoverAgents, startRun, getRun, waitForRun, decideGate, answerRun,
     toSteps, loopCount, findEmbeddedError, blockedOn, gateDecisions
 }

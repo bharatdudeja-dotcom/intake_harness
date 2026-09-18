@@ -305,10 +305,24 @@ export async function decideGate(
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) throw new Error(`No run ${runId}`);
 
-  const gateId = input.gateId || run.blocked_on?.gate_id;
+  /*
+   * Which gate is being decided.
+   *
+   * blocked_on is set only when OUR gate check parked the run. But the
+   * per-agent loop also parks a run at awaiting_approval after every completed
+   * step, with blocked_on null - so after intake finishes, the run is waiting
+   * to run Agent 2 and has no blocked_on at all. Reading only blocked_on made
+   * approve_intake answer 409 "not waiting at a gate" for a request that
+   * Workfront had genuinely approved, and the pipeline could never leave
+   * step 1. The gate that matters is the one in front of the step the run is
+   * about to take, whichever mechanism parked it there.
+   */
+  const nextAgent = PIPELINE[run.current_step]?.name;
+  const gateId = input.gateId || run.blocked_on?.gate_id || (nextAgent ? gateFor(nextAgent)?.id : undefined);
   if (!gateId) {
     throw new Error(
-      `Run ${runId} is not waiting at a gate (status "${run.status}"), so there is nothing to decide.`,
+      `Run ${runId} is at step ${run.current_step} (status "${run.status}") and nothing there is gated, ` +
+      "so there is no decision to record. Use /continue to advance it.",
     );
   }
 

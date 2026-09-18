@@ -266,7 +266,7 @@ function narrateBrief (brief, system) {
         '',
         '> ' + String(brief).trim().split('\n').join('\n> '),
         '',
-        `Sent to **${system.label || system.id}** at \`${system.base_url}\`. ` +
+        `Sent to **${system.label || system.id}**. ` +
         'Captured verbatim before any agent touched it, so every later stage can be ' +
         'read against what was actually asked for.'
     ].join('\n')

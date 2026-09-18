@@ -300,10 +300,14 @@ describe('MCP Server - Company Connector', () => {
             // Playbooks while the job sat unmoved at the gate.
             expect(toolNames).toContain('approve_intake')
             expect(toolNames).toContain('reject_intake')
+            // Answering a question continues the SAME job. Without this tool the
+            // only way to send an answer was start_intake, which made a second
+            // job for one brief - two identical rows on the bench.
+            expect(toolNames).toContain('answer_intake')
             // The gateway's own tools are DISCOVERED and are not in this count:
             // no server has gateway:true in the seed, so nothing is proxied here.
             expect(toolNames).toContain('list_gateway_tools')
-            expect(toolNames).toHaveLength(72)
+            expect(toolNames).toHaveLength(73)
         })
 
     })

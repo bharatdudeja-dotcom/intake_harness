@@ -507,7 +507,25 @@ async function listProjects (filter = {}) {
 async function upsertProjectByName ({ name, note, owner }) {
   const files = await getFiles()
   const projects = await readProjects(files)
-  const existing = projects.find(p => p.name === name)
+  /*
+   * Match on the NAME, the ID, or either one's slug.
+   *
+   * start_project("Comcast Xfinity Campaigns") stores that name with the id
+   * `project-comcast-xfinity-campaigns`. A caller then passed the ID to
+   * start_intake, where this function expects a name - so nothing matched and a
+   * SECOND project appeared, called "project-comcast-xfinity-campaigns", with
+   * the real runs split across the two. The dashboard showed one project with
+   * the right title and no runs, and one with an ugly title and all of them.
+   *
+   * The two fields look interchangeable to anyone reading a listing, so they
+   * are now treated as interchangeable here rather than punished with a
+   * duplicate.
+   */
+  const slugify = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)
+  const wanted = slugify(name)
+  const existing = projects.find(p => p.name === name) ||
+    projects.find(p => p.id === name) ||
+    projects.find(p => slugify(p.name) === wanted || p.id === `project-${wanted}`)
   if (existing) {
     // Selecting an existing project; fill in a note if one is newly provided.
     if (note && !existing.note) {
