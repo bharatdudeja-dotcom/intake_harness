@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
+import { countAudience } from "@/lib/agents/audience/count";
 import {
   probeSchemas,
   findExistingSegment,
@@ -266,6 +267,31 @@ export async function POST(req: NextRequest) {
     .map(String);
   const existing = await findExistingSegment(terms);
   let estimate = await estimateCount(existing.id);
+
+  /*
+   * COUNT THE AUDIENCE WE ARE ACTUALLY USING, reused or not.
+   *
+   * The direct count went into the BUILD path only, so a reused audience never
+   * got one - the run said "the estimate failed" and offered no number, for an
+   * audience that was sitting there countable. Reuse is the cheapest good
+   * outcome in the whole map and it was the one outcome with no size attached.
+   *
+   * Counted from the definition this brief needs rather than from the reused
+   * audience's stored rule: they matched when it was reused, and this is the
+   * population the campaign is asking for. If the two ever diverge, the number
+   * describes the request.
+   */
+  if (existing.id && estimate.count == null && check.available) {
+    const wanted = buildExpression(check, targeting);
+    if (wanted && !wanted.ungrounded.length) {
+      const direct = await countAudience("audience_creation", wanted.pql);
+      if (direct.profiles != null) {
+        estimate = { count: direct.profiles, basis: direct.basis, segmentId: existing.id };
+      } else {
+        estimate = { count: null, basis: `${estimate.basis} ${direct.basis}`, segmentId: existing.id };
+      }
+    }
+  }
 
   /*
    * 3.1a - BUILD IT.
