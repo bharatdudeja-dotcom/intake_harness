@@ -98,17 +98,24 @@ export interface WorkfrontToolset {
  * wf_core_project_create and wf_core_issue_create did separately.
  */
 /*
- * WHAT THE TENANT ACTUALLY EXPOSES, read 16 Sep 2026 from taplondonptrsd:
+ * WHAT THE TENANT ACTUALLY EXPOSES - TWO DIFFERENT ANSWERS, DEPENDING ON HOW.
  *
- *   49 of the 94 documented tools. Every WRITE is absent -
- *   workflow_create_any_object, workflow_update_any_object,
- *   comment-stream_create_comment. Present: the whole insights_* family,
- *   comment-stream_query_comments, approvals_* reads, planning_* reads.
+ * Direct (MCP_ENDPOINT_URL, no gateway), read 16 Sep 2026 from taplondonptrsd:
+ * 49 of the 94 documented tools. Every WRITE is absent -
+ * workflow_create_any_object, workflow_update_any_object,
+ * comment-stream_create_comment. Present: the whole insights_* family,
+ * comment-stream_query_comments, approvals_* reads, planning_* reads. That
+ * was the documented default and not a fault: write actions are off until a
+ * Workfront admin turns them on in System Preferences.
  *
- * That is the documented default and not a fault: write actions are off until a
- * Workfront admin turns them on in System Preferences. The names below are
- * still the correct ones to call - they are what appear the moment writes are
- * enabled - so they stay, and the reads point at tools that exist today.
+ * Via MCP_GATEWAY_URL (CX Agent Manager's "Cookbook" endpoint), read 18 Sep
+ * 2026: all 410 tools present, WRITES INCLUDED -
+ * workfront-adobe__workflow_create_any_object/update/delete all showed up in
+ * a live tools/list. This is now the app's default gateway (.env.local.example),
+ * so writes through this file may actually reach Workfront for real instead
+ * of the dry run below - untested end-to-end as of this writing, so the
+ * honest-failure reporting stays regardless of which is true on any given
+ * call. The names below are the correct ones to call either way.
  */
 const ADOBE_OFFICIAL: WorkfrontToolset = {
   flavour: "adobe-official",
