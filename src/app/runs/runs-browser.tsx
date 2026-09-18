@@ -202,7 +202,16 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
           return;
         }
         const data = await res.json();
-        if (!cancelled) setRuns(data.runs ?? []);
+        if (!cancelled) {
+          setRuns(data.runs ?? []);
+          // Nothing to show in the detail panel otherwise - on a page this
+          // wide, an empty "Select a run" message reads as broken rather
+          // than idle. Only when there's no deep-linked run already taking
+          // that slot.
+          if (!initialRunId && data.runs?.length) {
+            loadDetail(data.runs[0].run_id);
+          }
+        }
       })
       .catch((err) => {
         if (!cancelled) setError((err as Error).message);
@@ -213,6 +222,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadDetail is a stable useCallback; initialRunId doesn't change after mount.
   }, []);
 
   // Deep-link support for /runs/[runId]: load that run's detail on mount,
@@ -253,7 +263,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   }
 
   return (
-    <div className="flex max-w-4xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+    <div className="flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Runs</h1>
@@ -271,7 +281,11 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+      {/* A fixed-width run list plus a flexible detail panel, rather than a
+          proportional 1:2 split - on a wide screen a fr-based ratio would
+          stretch the run list (just short ids and badges) far wider than
+          its content needs, at the expense of the detail panel. */}
+      <div className="grid gap-6 sm:grid-cols-[280px_minmax(0,1fr)]">
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-black dark:text-zinc-50">
             {loadingList ? "Loading…" : `${runs.length} run${runs.length === 1 ? "" : "s"}`}

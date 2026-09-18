@@ -155,7 +155,9 @@ export function PipelineChat() {
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex max-h-[32rem] flex-col gap-3 overflow-y-auto p-4">
+      {/* Viewport-relative, not a fixed 32rem - on a tall monitor a fixed
+          cap left most of the screen empty below a small scrolling box. */}
+      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-4">
         {!run && (
           <p className="text-sm text-zinc-400">
             Describe the campaign or audience you need. Each agent runs one at a time — you&apos;ll see what it did
