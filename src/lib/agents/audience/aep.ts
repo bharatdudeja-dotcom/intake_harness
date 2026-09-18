@@ -33,13 +33,45 @@ import type { TaskId } from "@/lib/pipeline/types";
  * false positive here is worse than a false negative: it claims an audience can
  * be built when it cannot.
  */
-const ATTRIBUTE_CUES: Record<string, RegExp> = {
+export const ATTRIBUTE_CUES: Record<string, RegExp> = {
   line_of_business: /(^|[^a-z])(lineofbusiness|line_of_business|lob|businessunit|business_unit)([^a-z]|$)/i,
   customer_type: /(^|[^a-z])(customertype|customer_type|subscriberstatus|subscriber_status|accountstatus|account_status)([^a-z]|$)/i,
   lifecycle_journey: /(^|[^a-z])(lifecycle|lifecyclestage|lifecycle_stage|journeystage|journey_stage)([^a-z]|$)/i,
   channels: /(^|[^a-z])(channel|emailaddress|email_address|phonenumber|phone_number|mobilephone)([^a-z]|$)/i,
   region: /(^|[^a-z])(region|state|market|geo|postalcode|postal_code)([^a-z]|$)/i,
 };
+
+/**
+ * Generic request/audience-request vocabulary, excluded from
+ * criteriaKeywords below so it can't spuriously match an unrelated
+ * segment's name. Deliberately NOT exhaustive - just the words common
+ * enough across audience requests that a false-positive collision with a
+ * real segment name is plausible (a segment literally named "Audience
+ * Composition Test" would otherwise "match" every brief that says
+ * "audience").
+ */
+const REQUEST_STOPWORDS = new Set([
+  "the", "and", "for", "that", "with", "this", "from", "into", "where", "audience", "audiences",
+  "create", "created", "activate", "activated", "activation", "custom", "destination", "campaign",
+  "exist", "exists", "existing", "need", "needs", "want", "wants", "build", "please",
+]);
+
+/**
+ * Meaningful, distinctive words from a brief/audience description - the
+ * vocabulary an existing, already-built segment's own NAME is likely to
+ * share if it really is the same audience. See findExistingSegment's
+ * callers for why this matters: a brief asking for "an audience where ECID
+ * exists" only ever finds a real segment literally named "Has ECID" if
+ * "ecid" is one of the words being searched for.
+ */
+export function criteriaKeywords(text: string): string[] {
+  const words = String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !REQUEST_STOPWORDS.has(w));
+  return [...new Set(words)];
+}
 
 /** Schema titles worth opening: the ones that would carry profile attributes. */
 const PROFILE_SCHEMA_HINT = /profile|individual|customer|account|subscriber|person|demographic/i;
@@ -188,6 +220,15 @@ function sandboxFrom(records: Array<{ id: string }>): string | null {
  * a hardcoded one.
  */
 export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<SchemaProbe> {
+  // Nothing to check means nothing to open a GTO request for - and no
+  // reason to spend a dozen-plus MCP calls opening schemas to confirm that.
+  if (!needed.length) {
+    return {
+      read: true, conclusive: true, error: null, sandbox: null,
+      schemaCount: 0, schemasInspected: 0, fieldGroupsInspected: 0, fieldCount: 0, found: {}, evidence: [],
+    };
+  }
+
   let records: Array<{ title: string; id: string }> = [];
   try {
     const list = await callMcpTool<unknown>(taskId, "adobe_list_schemas", { limit: "50" });

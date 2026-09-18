@@ -8,7 +8,10 @@ import {
   identityGap,
   decideBuildPath,
   nightlyCutoff,
+  ATTRIBUTE_CUES,
+  criteriaKeywords,
 } from "@/lib/agents/audience/aep";
+import { detectActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
 
 /**
  * Agent 3 - Audience Creation.
@@ -32,10 +35,21 @@ import {
  *   B6 (3.3)  the nightly job runs at 21:45 and every cycle after it costs a
  *             full day, so validate and predict BEFORE the cutoff.
  *
- * READ-ONLY, DELIBERATELY. Everything here is an AEP read. It will report that
- * it cannot predict a count rather than create a segment definition to produce
- * one - see lib/agents/audience/aep.ts. A number is the point of B3; a number
- * obtained by silently writing to a client's sandbox is not worth having.
+ * STILL READ-ONLY, DELIBERATELY - even with activation added. Everything
+ * here is an AEP read, including activation: it will report that it cannot
+ * predict a count rather than create a segment definition to produce one
+ * (lib/agents/audience/aep.ts), and it will report whether an audience is
+ * already wired to a named destination rather than write that wiring itself
+ * (lib/agents/audience/activation.ts) - the tools available genuinely have
+ * no safe way to add a segment to an existing destination's dataflow
+ * without risking every other segment already activated there, so this
+ * reports that rather than guessing. A number, or an activation, obtained
+ * by silently writing to a client's sandbox is not worth having.
+ *
+ * ACTIVATION IS OFF BY DEFAULT. Nothing below changes unless the brief
+ * itself explicitly asks to activate the audience somewhere
+ * (activation.ts's detectActivationIntent) - build path, attribute checks,
+ * and count prediction behave exactly as they always have otherwise.
  */
 
 export interface AudienceCreationInput {
@@ -71,15 +85,64 @@ export interface AudienceCreationOutput {
   identityGap: { hasGap: boolean; details: string | null };
   /** Marketer-visible status string - the thing B4 says must never be silence. */
   statusMessage: string;
+  /**
+   * Set ONLY when the brief explicitly asked to activate the audience
+   * somewhere (see activation.ts) - absent otherwise, so a reader can tell
+   * "activation wasn't asked for" from "activation was asked for and this
+   * is what happened" without inspecting a status string.
+   */
+  activation?: ActivationOutcome;
 }
 
-/** The attributes an audience of this shape needs to exist in AEP. */
-function neededAttributes(fields: Record<string, string>): string[] {
-  const needed = new Set<string>(["customer_type", "line_of_business"]);
-  if (fields.lifecycle_journey) needed.add("lifecycle_journey");
-  if (fields.channels) needed.add("channels");
-  if (/northeast|region|state|market/i.test(Object.values(fields).join(" "))) needed.add("region");
+/**
+ * Which AEP profile attributes THIS audience's own criteria actually
+ * reference - never assumed just because an intake field happens to be
+ * populated. Intake requires campaign_name/business_objective/customer_type/
+ * line_of_business/launch_date for every request (Workfront/reporting
+ * needs), not because every audience is built on them - "an audience where
+ * ECID exists" needs none of that, and used to get customer_type and
+ * line_of_business checked anyway because they were hardcoded here as an
+ * always-required baseline.
+ *
+ * THE BUG THIS FIXES: that hardcoded baseline meant EVERY request checked
+ * customer_type/line_of_business whether the ask needed them or not. When
+ * they came back missing (they're intake-form concepts, not necessarily
+ * literal AEP schema field names), a GTO attribute request opened for
+ * fields nothing about the actual ask required - the quarter-long tail
+ * B4 exists to avoid, spent on nothing.
+ *
+ * Reuses aep.ts's ATTRIBUTE_CUES - the same word-anchored cues that decide
+ * whether a SCHEMA has a field now decide whether the BRIEF is actually
+ * asking about one, so this can never recognise an attribute the schema
+ * probe itself would not also recognise.
+ */
+function neededAttributes(fields: Record<string, string>, brief?: string): string[] {
+  const text = [brief, fields.audience_description, fields.exclusion].filter(Boolean).join(" ");
+  const needed = new Set<string>();
+  for (const [key, cue] of Object.entries(ATTRIBUTE_CUES)) {
+    if (cue.test(text)) needed.add(key);
+  }
   return [...needed];
+}
+
+/** The one statusMessage line for whatever activateAudience decided - only ever called when activation was actually requested. */
+function formatActivationMessage(activation: ActivationOutcome): string {
+  switch (activation.status) {
+    case "already_active":
+      return `Already activated to "${activation.destinationName}" - nothing to do.`;
+    case "no_destination_named":
+      return `Activation requested, but no destination was named. ${activation.reason}`;
+    case "destination_not_found":
+      return (
+        `Could not find a destination matching "${activation.requestedName}" ` +
+        `(${activation.considered} dataflow(s) checked)` +
+        (activation.reason ? ` - ${activation.reason}` : ".")
+      );
+    case "needs_manual_wiring":
+      return `Activation needs manual wiring: ${activation.reason}`;
+    case "no_segment_to_activate":
+      return `Cannot activate yet: ${activation.reason}`;
+  }
 }
 
 /**
@@ -141,12 +204,13 @@ export async function POST(req: NextRequest) {
   const body = (await req.json()) as AgentRequest<AudienceCreationInput>;
   const input = body.input || {};
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
+  const brief = typeof input.brief === "string" ? input.brief : undefined;
 
   // Every read below (probeSchemas, findExistingSegment, estimateCount) calls
   // MCP tools - wrapped so every call, request and response, ends up in
   // metadata.toolCalls for the UI.
   const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse<AudienceCreationOutput>> => {
-    const needed = neededAttributes(fields);
+    const needed = neededAttributes(fields, brief);
     const probe = await probeSchemas("audience_creation", needed);
 
     /*
@@ -175,11 +239,34 @@ export async function POST(req: NextRequest) {
 
     // Cheapest good outcome first: an audience that already exists needs no build
     // and is the only way to get a real count without writing anything.
-    const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
+    //
+    // THE BUG THIS FIXES: these terms used to be ONLY intake's own
+    // categorization fields (campaign_name/lifecycle_journey/line_of_business/
+    // customer_type) - never the audience's actual criteria. A brief asking
+    // for "an audience where ECID exists" would never match a real, already-
+    // built segment literally named "Has ECID", because "ecid" was never one
+    // of the words being searched for. Adding keywords from the brief/
+    // audience_description is what makes that match findable.
+    const terms = [
+      fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type,
+      ...criteriaKeywords([brief, fields.audience_description].filter(Boolean).join(" ")),
+    ]
       .filter(Boolean)
       .map(String);
     const existing = await findExistingSegment("audience_creation", terms);
     const estimate = await estimateCount(existing.id);
+
+    // Off by default - see this file's docstring and activation.ts. Only
+    // runs the (read-only) destination check when the brief itself
+    // explicitly asked for activation.
+    const activationIntent = detectActivationIntent(brief);
+    const activation = activationIntent.requested
+      ? await activateAudience("audience_creation", {
+          segmentId: existing.id,
+          segmentName: existing.name,
+          destinationName: activationIntent.destinationName,
+        })
+      : undefined;
 
     // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
     // opening the 2.7a branch because we failed to look is the quarter-long tail
@@ -203,6 +290,7 @@ export async function POST(req: NextRequest) {
           : `Could not list existing audiences: ${existing.error}.`,
       estimate.count != null ? `Predicted ${estimate.count.toLocaleString()} profiles.` : `No count yet - ${estimate.basis}`,
       gap.hasGap ? "Identity gap flagged: see identityGap." : "",
+      activation ? formatActivationMessage(activation) : "",
       attrState.note,
       cutoff.note,
     ]
@@ -220,6 +308,7 @@ export async function POST(req: NextRequest) {
       predictedCount: estimate.count,
       identityGap: gap,
       statusMessage,
+      ...(activation ? { activation } : {}),
     };
 
     /*
@@ -255,6 +344,8 @@ export async function POST(req: NextRequest) {
         existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
         countBasis: estimate.basis,
         nightlyCutoff: cutoff,
+        activationRequested: activationIntent.requested,
+        activationDestination: activationIntent.destinationName,
       },
     };
   });

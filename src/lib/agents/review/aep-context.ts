@@ -1,10 +1,11 @@
 /**
  * What Review can tell Agent 3 - and a human reading the Workfront issue -
  * about AEP before the handoff: which attributes this audience will need
- * and whether they exist, whether an audience like this already exists, and
- * which candidate profile datasets are even profile-enabled.
+ * and whether they exist, whether an audience like this already exists,
+ * which candidate profile datasets are even profile-enabled, and what the
+ * knowledge base actually knows about expressing this in PQL.
  *
- * These are the SAME three read-only questions Agent 3 asks in
+ * The first three are the SAME read-only questions Agent 3 asks in
  * lib/agents/audience/aep.ts, for the same reasons - asked one step
  * earlier, so the brief that reaches Agent 3 already answers them instead
  * of Agent 3 discovering the same facts from scratch. Nothing here writes
@@ -16,22 +17,29 @@ import {
   probeSchemas,
   findExistingSegment,
   profileDatasetSummary,
+  ATTRIBUTE_CUES,
   type SchemaProbe,
   type SegmentMatch,
   type DatasetProbe,
 } from "@/lib/agents/audience/aep";
+import { groundPqlGuidance, formatPqlGuidanceNote, type PqlGuidance } from "./pql-context";
 
 /**
- * The attributes this brief's audience will need in AEP - mirrors
- * audience-creation/route.ts's own `neededAttributes`, asked here first so
- * a "wrong data source" or missing-attribute problem surfaces at review,
- * not two agents later.
+ * Which AEP profile attributes THIS audience's own criteria actually
+ * reference - mirrors audience-creation/route.ts's own `neededAttributes`
+ * (see its docstring for the bug this fixes: customer_type/line_of_business
+ * used to be hardcoded as always-needed, so a brief like "an audience where
+ * ECID exists" got both checked anyway, both came back missing, and Agent 3
+ * opened a GTO attribute request for fields nothing about the ask required).
+ * Asked here first so the same false read surfaces at review, not two
+ * agents later.
  */
-function neededAttributes(fields: Record<string, string>): string[] {
-  const needed = new Set<string>(["customer_type", "line_of_business"]);
-  if (fields.lifecycle_journey) needed.add("lifecycle_journey");
-  if (fields.channels) needed.add("channels");
-  if (/northeast|region|state|market/i.test(Object.values(fields).join(" "))) needed.add("region");
+function neededAttributes(fields: Record<string, string>, brief?: string): string[] {
+  const text = [brief, fields.audience_description, fields.exclusion].filter(Boolean).join(" ");
+  const needed = new Set<string>();
+  for (const [key, cue] of Object.entries(ATTRIBUTE_CUES)) {
+    if (cue.test(text)) needed.add(key);
+  }
   return [...needed];
 }
 
@@ -48,18 +56,24 @@ export type AepContext = {
   segmentTerms: string[];
   segmentMatch: SegmentMatch;
   datasetProbe: DatasetProbe;
+  pqlGuidance: PqlGuidance;
 };
 
-/** Run all three AEP reads for this brief, in parallel - each is independent and none writes anything. */
-export async function gatherAepContext(fields: Record<string, string>): Promise<AepContext> {
-  const neededAttrs = neededAttributes(fields);
+/** Run all four reads for this brief, in parallel - each is independent and none writes anything. */
+export async function gatherAepContext(fields: Record<string, string>, brief?: string): Promise<AepContext> {
+  const neededAttrs = neededAttributes(fields, brief);
   const terms = segmentSearchTerms(fields);
-  const [schemaProbe, segmentMatch, datasetProbe] = await Promise.all([
+  // What the audience is actually FOR, in plain words - the same text
+  // neededAttributes reads, since that's the criteria PQL would need to
+  // express, not the intake-form categorization fields around it.
+  const criteria = [brief, fields.audience_description].filter(Boolean).join(" ") || fields.campaign_name || "";
+  const [schemaProbe, segmentMatch, datasetProbe, pqlGuidance] = await Promise.all([
     probeSchemas("review", neededAttrs),
     findExistingSegment("review", terms),
     profileDatasetSummary("review"),
+    groundPqlGuidance(criteria),
   ]);
-  return { neededAttributes: neededAttrs, schemaProbe, segmentTerms: terms, segmentMatch, datasetProbe };
+  return { neededAttributes: neededAttrs, schemaProbe, segmentTerms: terms, segmentMatch, datasetProbe, pqlGuidance };
 }
 
 /**
@@ -72,7 +86,13 @@ export async function gatherAepContext(fields: Record<string, string>): Promise<
 export function formatAepContextNote(ctx: AepContext): string {
   const lines: string[] = ["Review — AEP context for Agent 3 (Audience Creation):"];
 
-  if (ctx.schemaProbe.conclusive) {
+  if (!ctx.neededAttributes.length) {
+    lines.push(
+      "- This audience's own criteria don't reference any of the attributes we can check " +
+        "(line of business, customer type, lifecycle journey, channels, region) - nothing to verify, " +
+        "nothing to open a GTO request for.",
+    );
+  } else if (ctx.schemaProbe.conclusive) {
     const found = ctx.neededAttributes.filter((k) => ctx.schemaProbe.found[k]);
     const missing = ctx.neededAttributes.filter((k) => !ctx.schemaProbe.found[k]);
     lines.push(
@@ -110,6 +130,8 @@ export function formatAepContextNote(ctx: AepContext): string {
   } else {
     lines.push(`- Could not determine which datasets are profile-enabled: ${ctx.datasetProbe.error}`);
   }
+
+  lines.push(formatPqlGuidanceNote(ctx.pqlGuidance));
 
   return lines.join("\n");
 }
