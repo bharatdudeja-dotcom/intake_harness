@@ -95,7 +95,33 @@ function leafFields(doc: unknown, group: string): SandboxField[] {
  * to fail the whole probe: a partial field list still answers most questions,
  * and saying "I found these 30 of 40" beats saying nothing.
  */
+/*
+ * A SHORT CACHE, because review and Agent 3 ask the same question in one run.
+ *
+ * Both stages read the sandbox's field groups - review to tell Agent 3 what is
+ * available, Agent 3 to decide what to build - and nothing carried the answer
+ * between them, so a run paid for the same twenty-odd calls twice.
+ *
+ * Sixty seconds, in process, deliberately. Long enough to cover one run,
+ * nowhere near long enough to hide a real change to the tenant's schemas -
+ * stale field data would be exactly the kind of thing that sends someone
+ * hunting for an afternoon.
+ */
+const FIELD_CACHE_MS = 60_000;
+let fieldCache: { at: number; read: FieldRead } | null = null;
+
 export async function readSandboxFields(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
+  if (fieldCache && Date.now() - fieldCache.at < FIELD_CACHE_MS && fieldCache.read.read) {
+    return fieldCache.read;
+  }
+  const fresh = await readSandboxFieldsUncached(taskId);
+  // Only a SUCCESSFUL read is cached. Caching a failure would turn one bad
+  // moment into a minute of them.
+  if (fresh.read) fieldCache = { at: Date.now(), read: fresh };
+  return fresh;
+}
+
+async function readSandboxFieldsUncached(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
   let groups: Array<{ title: string; altId: string }> = [];
   try {
     const list = await callMcpTool<{ results?: Array<Record<string, unknown>> }>(
@@ -113,6 +139,14 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
 
   const fields: SandboxField[] = [];
   let tenant: string | null = null;
+
+  /*
+   * EVERY GROUP AT ONCE, not one after another.
+   *
+   * These reads are independent - each is one field group's definition - and
+   * awaiting them in sequence made the stage pay for every round trip. The
+   * tenant is derived from the altIds, which needs no call at all.
+   */
   for (const g of groups) {
     /*
      * This is the TENANT namespace, not the sandbox, and confusing the two cost
@@ -131,12 +165,17 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
      * again by someone reading the type.
      */
     if (!tenant) tenant = g.altId.replace(/^_/, "").split(".")[0] || null;
-    try {
-      const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId });
-      fields.push(...leafFields(doc, g.title));
-    } catch {
-      // One unreadable group must not lose the others.
-    }
+  }
+
+  const docs = await Promise.all(
+    groups.map((g) =>
+      callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId })
+        .then((doc) => ({ g, doc }))
+        .catch(() => null), // one unreadable group must not lose the others
+    ),
+  );
+  for (const hit of docs) {
+    if (hit) fields.push(...leafFields(hit.doc, hit.g.title));
   }
 
   return {
