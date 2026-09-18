@@ -311,10 +311,14 @@ describe('MCP Server - Company Connector', () => {
             // recorded a human decision against a gate nobody was asked about.
             // Agent 3 had therefore never run once.
             expect(toolNames).toContain('continue_job')
+            // Creating the request notifies the queue by email, and a correction
+            // after that is a second version of the truth rather than an edit. So
+            // the marketer sees the payload while it is still free to change.
+            expect(toolNames).toContain('preview_intake')
             // The gateway's own tools are DISCOVERED and are not in this count:
             // no server has gateway:true in the seed, so nothing is proxied here.
             expect(toolNames).toContain('list_gateway_tools')
-            expect(toolNames).toHaveLength(74)
+            expect(toolNames).toHaveLength(75)
         })
 
     })

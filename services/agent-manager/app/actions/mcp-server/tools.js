@@ -224,7 +224,7 @@ const WRITE_TOOLS = new Set([
      * The D79 guard test caught this being absent, which is exactly what it is
      * for - the gate is only as good as its completeness.
      */
-    'approve_intake', 'reject_intake', 'answer_intake', 'continue_job',
+    'approve_intake', 'reject_intake', 'answer_intake', 'continue_job', 'preview_intake',
     // Changes which MCP servers agents can reach, and which upstreams execute them.
     'set_mcp_server', 'set_agent_system'
 ])
@@ -2236,6 +2236,40 @@ async function captureStages (runId, system, steps) {
         return { added: 0, error: `${e && e.message ? e.message : e}${e && e.stack ? ' | ' + String(e.stack).split('\n')[1].trim() : ''}` }
     }
 }
+
+    server.tool(
+        'preview_intake',
+        'SHOW THE MARKETER WHAT WILL BE FILED, BEFORE IT IS FILED. Takes a brief in plain English and ' +
+        'returns exactly what the Workfront request would carry - its title, every field and the values ' +
+        'as Workfront will store them, what this form cannot hold, and what it still needs to ask. ' +
+        'It creates NOTHING: no request, no project, no email. ' +
+        'ALWAYS call this before start_intake, show the result, and ask the marketer to confirm or ' +
+        'correct it. Creating the request notifies the queue by email and a correction afterwards is a ' +
+        'second version of the truth rather than an edit. The moment they say go, call start_intake ' +
+        'once and stop asking - the point of this is to remove waiting, not add a committee.',
+        {
+            brief: z.string().min(1).describe('The marketer\'s brief, in their own words'),
+            known: z.record(z.any()).optional().describe('Anything already settled, e.g. { "campaign_name": "NY Attach Q4" } from an earlier answer'),
+            system_id: z.string().optional().describe('Which agent system. Defaults to the only one configured.')
+        },
+        async ({ brief, known, system_id: systemId }) => {
+            const { system, error } = agentSystems.resolve(systemId, undefined, settings.agentSystems())
+            if (error) return errorResult(error)
+            try {
+                const preview = await agentSystems.previewIntake(system, brief, known)
+                return jsonResult({
+                    ...preview,
+                    next: 'Show this to the marketer. If they confirm, call start_intake with the same brief ' +
+                          '(and any corrections merged in). If they correct something, preview again - it is free.'
+                })
+            } catch (e) {
+                return errorResult(
+                    `Could not preview the brief on ${system.id}: ${e.message}. ` +
+                    'Nothing was created. Do not fall back to start_intake to "see what happens" - that files the request.'
+                )
+            }
+        }
+    )
 
     server.tool(
         'continue_job',
