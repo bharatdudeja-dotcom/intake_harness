@@ -311,7 +311,7 @@ describe('bake rule: >= 1 approved ingredient (D64)', () => {
         await callOk('append_step', { job_id: rec.id, kind: 'decision', content: 'x', source: 'desktop' })
         const res = await callTool('bake_job', { id: rec.id })
         expect(res.result.isError).toBe(true)
-        expect(res.result.content[0].text).toMatch(/no approved ingredients/i)
+        expect(res.result.content[0].text).toMatch(/none of its steps are approved/i)
     })
 
     test('bake succeeds once at least one ingredient is approved', async () => {
