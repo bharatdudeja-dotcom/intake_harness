@@ -155,20 +155,9 @@ export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> 
 
 /** Starts a run and executes only its first agent (Intake). */
 export async function runPipeline(initialInput: unknown, baseUrl: string): Promise<RunRow> {
-  // An optional `programme` name on the submission groups this run under
-  // that Programme, upserted by name (see lib/programmes.ts) so submitting
-  // the same name twice reuses the row rather than duplicating it.
-  const programmeName = (initialInput as { programme?: unknown } | null)?.programme;
-  let programmeId: string | null = null;
-  if (typeof programmeName === "string" && programmeName.trim()) {
-    const { upsertProgrammeByName } = await import("@/lib/programmes");
-    const { programme } = await upsertProgrammeByName({ name: programmeName.trim() });
-    programmeId = programme.programme_id;
-  }
-
   const [run] = await query<RunRow>(
-    `INSERT INTO runs (input, programme_id) VALUES ($1::jsonb, $2) RETURNING *`,
-    [JSON.stringify(initialInput), programmeId],
+    `INSERT INTO runs (input) VALUES ($1::jsonb) RETURNING *`,
+    [JSON.stringify(initialInput)],
   );
 
   return advanceOneStep(run, 0, initialInput, {}, baseUrl);
@@ -430,13 +419,4 @@ export async function getTaskCounts(): Promise<Record<string, TaskCounts>> {
     byTask[row.task_id] = { total: row.total, completed: row.completed, needsInput: row.needs_input, failed: row.failed };
   }
   return byTask;
-}
-
-/** Runs that need a human right now: paused, waiting on approval, or stuck — the Live Queue's "what needs attention." */
-export async function listActiveRuns(limit = 100): Promise<RunRow[]> {
-  return query<RunRow>(
-    `SELECT * FROM runs WHERE status IN ('needs_input', 'awaiting_approval', 'running')
-     ORDER BY updated_at ASC LIMIT $1`,
-    [limit],
-  );
 }

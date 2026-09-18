@@ -34,7 +34,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const [admins, setAdmins] = useState<string[]>([]);
   const [selectedAdmin, setSelectedAdmin] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
   const [curating, setCurating] = useState(false);
 
   useEffect(() => {
@@ -54,7 +53,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     const data = (await res.json()) as RunDetail;
     setDetail(data);
     setAnswers({});
-    setTagsInput(data.run.tags.join(", "));
     setApprovalNote(data.run.approval_note ?? "");
   }, []);
 
@@ -71,29 +69,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setError(data?.error ?? `Failed to approve run (HTTP ${res.status}).`);
-        return;
-      }
-      await loadDetail(selectedRunId);
-      await refresh();
-    } finally {
-      setCurating(false);
-    }
-  }
-
-  async function promoteRun() {
-    if (!selectedRunId || !selectedAdmin) return;
-    setCurating(true);
-    setError(null);
-    try {
-      const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
-      const res = await fetch(`/api/runs/${selectedRunId}/promote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminName: selectedAdmin, tags }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setError(data?.error ?? `Failed to promote run (HTTP ${res.status}).`);
         return;
       }
       await loadDetail(selectedRunId);
@@ -226,7 +201,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
         const data = (await res.json()) as RunDetail;
         if (!cancelled) {
           setDetail(data);
-          setTagsInput(data.run.tags.join(", "));
           setApprovalNote(data.run.approval_note ?? "");
         }
       })
@@ -287,8 +261,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                   <span className="font-mono text-zinc-500">{run.run_id.slice(0, 8)}</span>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={run.status} />
-                    {run.promoted && <span title="Promoted to Shared Graph">🔗</span>}
-                    {run.approved && !run.promoted && <span title="Approved">✓</span>}
+                    {run.approved && <span title="Approved">✓</span>}
                     <span className="text-zinc-400">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
                 </button>
@@ -309,17 +282,12 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     Approved by {detail.run.approved_by}
                   </span>
                 )}
-                {detail.run.promoted && (
-                  <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-950 dark:text-purple-400">
-                    Promoted by {detail.run.promoted_by}
-                  </span>
-                )}
               </div>
 
               {detail.run.status === "completed" && (
                 <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 text-xs dark:border-zinc-800">
                   <p className="font-medium text-zinc-600 dark:text-zinc-400">
-                    Curation — mark this run worth keeping, and optionally share it.
+                    Curation — mark this run worth keeping.
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
@@ -347,24 +315,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       className="rounded-full border border-zinc-300 px-3 py-1 font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                     >
                       {detail.run.approved ? "Approved" : "Approve"}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="text"
-                      className="min-w-40 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                      placeholder="Tags, comma separated (e.g. winback, residential)"
-                      value={tagsInput}
-                      onChange={(e) => setTagsInput(e.target.value)}
-                      disabled={!detail.run.approved}
-                    />
-                    <button
-                      onClick={promoteRun}
-                      disabled={curating || !selectedAdmin || !detail.run.approved || detail.run.promoted}
-                      className="rounded-full bg-purple-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-                      title={!detail.run.approved ? "Approve this run first" : undefined}
-                    >
-                      {detail.run.promoted ? "Promoted to Shared Graph" : "Promote to Shared Graph"}
                     </button>
                   </div>
                 </div>

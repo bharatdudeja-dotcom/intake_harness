@@ -31,10 +31,9 @@ type StepOutput = {
  * src/lib/pipeline/orchestrator.ts's per-step gate (runPipeline only ever
  * runs the next agent; POST .../continue is what approves the next one).
  */
-export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?: string }) {
+export function PipelineChat() {
   const [brief, setBrief] = useState("");
   const [workfrontProjectId, setWorkfrontProjectId] = useState("");
-  const [programme, setProgramme] = useState("");
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -69,7 +68,7 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { brief: text, fields, programme: programme.trim() || undefined } }),
+        body: JSON.stringify({ input: { brief: text, fields } }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -366,26 +365,14 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
                 Send
               </button>
             </div>
-            {/* Stacked on mobile: side by side, each input's placeholder is
-                too long to be legible squeezed into half a phone screen. */}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                type="text"
-                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
-                value={workfrontProjectId}
-                onChange={(e) => setWorkfrontProjectId(e.target.value)}
-                disabled={busy}
-              />
-              <input
-                type="text"
-                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                placeholder={`${programmeLabel} (optional — groups this run for the ${programmeLabel}s page)`}
-                value={programme}
-                onChange={(e) => setProgramme(e.target.value)}
-                disabled={busy}
-              />
-            </div>
+            <input
+              type="text"
+              className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+              placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
+              value={workfrontProjectId}
+              onChange={(e) => setWorkfrontProjectId(e.target.value)}
+              disabled={busy}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-between">

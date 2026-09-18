@@ -15,15 +15,6 @@ const GROUPS: { heading: string; links: { href: string; label: string }[] }[] = 
     links: [
       { href: "/", label: "Home" },
       { href: "/runs", label: "Runs" },
-      { href: "/queue", label: "Live Queue" },
-      { href: "/programmes", label: "Programmes" },
-    ],
-  },
-  {
-    heading: "Knowledge",
-    links: [
-      { href: "/resources", label: "Resources" },
-      { href: "/graph", label: "Shared Graph" },
     ],
   },
   {

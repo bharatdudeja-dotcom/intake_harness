@@ -1,26 +1,12 @@
 import { listAdmins } from "@/lib/admins";
 import { getRunStats } from "@/lib/pipeline/orchestrator";
-import { countPurgeable, getSettings, programmeLabel } from "@/lib/settings";
-import { RetentionSettings } from "./retention-settings";
-import { LabelSettings } from "./label-settings";
-import { PromoteAdminsSettings } from "./promote-admins-settings";
 import { McpServersSettings } from "./mcp-servers-settings";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Settings — ADMIN_NAMES is still read-only (an env var, not a DB-backed
- * setting — nothing here to save). Everything else on this page ported
- * from Agent Manager's settings override (D48) is real: retention/purge,
- * vocabulary labels, and the Hero Agents promote roster.
- */
+/** Settings — ADMIN_NAMES is read-only (an env var, not a DB-backed setting — nothing here to save). */
 export default async function SettingsPage() {
-  const [admins, stats, settings, purgeableCount] = await Promise.all([
-    listAdmins(),
-    getRunStats(),
-    getSettings(),
-    countPurgeable(),
-  ]);
+  const [admins, stats] = await Promise.all([listAdmins(), getRunStats()]);
 
   return (
     <div className="flex max-w-3xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
@@ -33,17 +19,10 @@ export default async function SettingsPage() {
 
       <McpServersSettings />
 
-      <RetentionSettings initialSettings={settings} initialPurgeableCount={purgeableCount} />
-
-      <LabelSettings initialSettings={settings} programmeLabel={programmeLabel(settings)} />
-
-      <PromoteAdminsSettings initialSettings={settings} admins={admins} />
-
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-sm font-semibold text-black dark:text-zinc-50">Admins</h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          From <code className="text-xs">ADMIN_NAMES</code> — the only names that can approve a run or resource, and
-          (unless the Hero Agents roster above narrows it) the only names that can promote one.
+          From <code className="text-xs">ADMIN_NAMES</code> — the only names that can approve a run.
         </p>
         {admins.length === 0 ? (
           <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
