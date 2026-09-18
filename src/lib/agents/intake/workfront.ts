@@ -25,6 +25,7 @@ import { callMcpTool } from "@/lib/mcp-client";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
 import { writeCustomFields } from "@/lib/agents/shared/workfront-write";
+import { fieldByKey } from "@/lib/agents/shared/campaign-brief";
 
 /**
  * What the intake creates in Workfront.
@@ -126,6 +127,56 @@ export type CreateOutcome =
  * Only `name` and `description` are native on an issue; everything from the
  * Campaign Brief is a custom field.
  */
+/**
+ * The brief, and what was understood from it, for the person who approves it.
+ *
+ * A reviewer is approving our READING of the request, not the paragraph - so
+ * the reading has to be in front of them. On this tenant the form has four
+ * fields and we extract up to fourteen, so without this the other ten exist
+ * only inside our own run record, which nobody in Workfront can see.
+ *
+ * It also states which values reached the form and which had no field to go
+ * into. "Recorded here, not on the form" is a fact a reviewer can act on;
+ * silence about it is how a request gets approved on less than it appears.
+ *
+ * Plain text. A Workfront description is not an HTML field.
+ */
+function describeIntake(
+  brief: string,
+  values: Record<string, unknown>,
+  written: Record<string, unknown>,
+  dropped: string[],
+): string {
+  const lines: string[] = [String(brief || "").trim()];
+
+  const reading = Object.entries(values)
+    .filter(([, v]) => v != null && String(v).trim() !== "")
+    .map(([k, v]) => `- ${fieldByKey(k)?.label || k}: ${String(v).trim()}`);
+
+  if (reading.length) {
+    lines.push("", "What was captured from this brief:", ...reading);
+  }
+
+  const onForm = Object.keys(written).length;
+  if (onForm) {
+    lines.push("", `${onForm} of these are also set in the request's own fields.`);
+  }
+  if (dropped.length) {
+    const labels = dropped.map((k) => fieldByKey(k)?.label || k);
+    lines.push(
+      `${labels.length} have no matching field on this form and are recorded above only: ` +
+        `${labels.join(", ")}.`,
+    );
+  }
+  if (!onForm) {
+    lines.push(
+      "None of the request's own fields could be set - the values are above so nothing is lost.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 export function toWorkfrontPayload(
   intake: Record<string, unknown>,
   brief: string,
@@ -166,17 +217,36 @@ export function toWorkfrontPayload(
    * values being dropped for having nowhere to go.
    */
   if (!values.audience_description) {
+    /*
+     * The audience sentence has to contain the AUDIENCE.
+     *
+     * This composed customer type, line of business, region and exclusion, and
+     * produced "Subscriber - Existing Customers in Residential (RES) in the
+     * Pennsylvania" - which reads badly and, worse, says nothing about what
+     * defines the audience. The brief's own clause does: "who have Xfinity TV
+     * but no Internet" is the targeting, and it is what a reviewer needs to see
+     * in the field labelled "Audience to be targeted".
+     *
+     * "in the Northeast" is right and "in the Pennsylvania" is not, so the
+     * article follows the shape of the value rather than being assumed.
+     */
+    const region = values.region ? String(values.region) : null;
+    const article = region && /^(north|south|east|west|mid|national)/i.test(region) ? "the " : "";
+    const holdings = String(brief || "").match(/\bwho\s+(?:have|has|hold|holds)\b[^.;]{0,120}/i)?.[0]?.trim();
+
     const parts = [
       values.customer_type,
       values.line_of_business ? `in ${values.line_of_business}` : null,
-      values.region ? `in the ${values.region}` : null,
-      values.exclusion ? `— ${values.exclusion}` : null,
+      region ? `in ${article}${region}` : null,
+      holdings || null,
+      values.exclusion ? `excluding ${values.exclusion}` : null,
     ].filter(Boolean).map(String);
-    if (parts.length) values.audience_description = parts.join(" ");
+    if (parts.length) values.audience_description = parts.join(", ");
   }
 
   if (fieldMap) {
     const applied = applyFieldMap(values, fieldMap);
+    fields.description = describeIntake(brief, values, applied.customFields, applied.dropped);
     return {
       fields,
       customFields: applied.customFields,

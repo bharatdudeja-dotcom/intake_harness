@@ -69,6 +69,109 @@ function labelFor(key: string): string {
 }
 
 /** Loose comparison: "Business Objective" ~ "business_objective" ~ "businessobjective". */
+/*
+ * Filler words a form designer writes and a field spec does not.
+ * "Name of the Campaign" and "Campaign name" are the same field.
+ */
+const FIELD_FILLER = new Set([
+  "of", "the", "a", "an", "for", "to", "be", "is", "in", "on", "by", "and", "or",
+  "this", "that", "please", "field", "custom", "de",
+]);
+
+/** The words in a field name that carry meaning, normalised. */
+function fieldTokens(s: string): string[] {
+  return String(s || "")
+    .replace(/^DE:/i, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !FIELD_FILLER.has(w));
+}
+
+/**
+ * Match one of our fields to one of the form's, on meaning rather than spelling.
+ *
+ * Tiers, strongest first. Each is a rule a person would apply reading the two
+ * lists side by side:
+ *
+ *   1. the same string, normalised - label, name, key or a declared alias
+ *   2. the same set of meaningful words, in any order, with filler ignored
+ *   3. one set contains the other - "Requested Launch Date" covers "Launch date"
+ *   4. a distinctive word that identifies exactly ONE form field - "objective"
+ *
+ * Tier 4 is where the care is needed, so it requires uniqueness: if the word
+ * appears in two form fields it identifies neither, and no match is made. A
+ * wrong field is worse than an unmapped one - it writes the launch date into
+ * the objective and reports success.
+ *
+ * `taken` stops two of our fields claiming one form field, which would silently
+ * drop whichever lost.
+ */
+function matchFormField(
+  spec: { key: string; label: string; aliases?: readonly string[] },
+  fields: FormField[],
+  taken: Set<string>,
+): FormField | null {
+  const free = fields.filter((f) => !taken.has(f.name));
+  const spellings = [spec.label, spec.key, ...(spec.aliases || [])];
+
+  for (const want of spellings) {
+    const exact = free.find((f) => normalise(f.label) === normalise(want) || normalise(f.name) === normalise(want));
+    if (exact) return exact;
+  }
+
+  const mine = new Set(fieldTokens(spec.label));
+  if (!mine.size) return null;
+
+  const sameSet = free.find((f) => {
+    const theirs = new Set(fieldTokens(f.label || f.name));
+    return theirs.size === mine.size && [...mine].every((t) => theirs.has(t));
+  });
+  if (sameSet) return sameSet;
+
+  const contains = free.find((f) => {
+    const theirs = new Set(fieldTokens(f.label || f.name));
+    if (!theirs.size) return false;
+    const mineInTheirs = [...mine].every((t) => theirs.has(t));
+    const theirsInMine = [...theirs].every((t) => mine.has(t));
+    return mineInTheirs || theirsInMine;
+  });
+  if (contains) return contains;
+
+  // Tier 4: a word that picks out exactly one field, in the WHOLE form rather
+  // than only the free ones - a word shared with an already-claimed field is
+  // not distinctive, it is just late.
+  for (const token of mine) {
+    const everywhere = fields.filter((f) => fieldTokens(f.label || f.name).includes(token));
+    if (everywhere.length === 1 && !taken.has(everywhere[0].name)) return everywhere[0];
+  }
+
+  return null;
+}
+
+/**
+ * A form pinned by configuration, which beats discovering it every run.
+ *
+ * WORKFRONT_FIELD_MAP is JSON: our field key -> the Workfront parameter name,
+ * e.g. {"campaign_name":"DE:Name of the Campaign"}. When the names are known -
+ * and on a stable tenant they are - this removes a runtime search that can
+ * return nothing and take the brief down with it.
+ */
+function pinnedFieldMap(): Record<string, string> | null {
+  const raw = process.env.WORKFRONT_FIELD_MAP;
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    const map: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string" && v.trim()) map[k] = v.trim();
+    }
+    return Object.keys(map).length ? map : null;
+  } catch {
+    // A malformed pin must not take the run down; discovery still runs.
+    return null;
+  }
+}
+
 function normalise(s: string): string {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -137,20 +240,51 @@ export async function resolveFieldMap(
   /** Which agent is reading, for the MCP tool allowlist. */
   taskId: TaskId = "intake",
 ): Promise<FieldMap> {
-  const assumed = (): FieldMap => ({
-    map: Object.fromEntries(CAMPAIGN_BRIEF_FIELDS.map((f) => [f.key, `${DE}${labelFor(f.key)}`])),
-    // No types, because we never read the form. A value is then sent as-is,
-    // which is the honest consequence of not knowing what the field expects.
+  /*
+   * NO MAP AT ALL, rather than a guessed one.
+   *
+   * This used to return `DE:<our own label>` for every field - DE:Campaign
+   * name, DE:Business objective. Those parameters do not exist on the form,
+   * which says "Name of the Campaign" and "Objective of the campaign", so
+   * Workfront dropped every value while the create still succeeded. The run
+   * then reported the brief captured. Seven of eight fields were missing from
+   * the request and the only one that appeared to work was the issue TITLE,
+   * which is the object's own name and not a custom field at all.
+   *
+   * A guessed field name cannot be right by luck and fails without a sound. So
+   * when the form cannot be read, nothing is written and the run says so - the
+   * issue still carries its title and description, and the brief is still in
+   * the record, visible, rather than presumed delivered.
+   */
+  const unresolved = (why: string): FieldMap => ({
+    map: {},
     types: {},
     verified: false,
     source:
-      "Field names are ASSUMED from our own labels, not read from the form. " +
-      "Workfront addresses custom fields as DE:<parameter name>, and if a label " +
-      "differs from the form's wording that value will not be written. Sign in to " +
-      "the Workfront MCP and this becomes a real read.",
+      `No custom fields were written: ${why} ` +
+      "Workfront addresses them as DE:<parameter name>, and a name we have not read is a name " +
+      "Workfront will silently drop - so the values stay in this record instead of being sent " +
+      "under a guess. Fix by signing in to the Workfront MCP, or pin the names with " +
+      "WORKFRONT_FIELD_MAP.",
   });
 
-  if (!categoryID) return assumed();
+  /*
+   * A pinned map wins outright. On a stable tenant the parameter names are
+   * known, and discovery is then a runtime search that can only fail.
+   */
+  const pinned = pinnedFieldMap();
+  if (pinned) {
+    return {
+      map: pinned,
+      types: {},
+      verified: true,
+      source:
+        `Field names pinned by WORKFRONT_FIELD_MAP (${Object.keys(pinned).length} field(s)), ` +
+        "so they are not rediscovered each run.",
+    };
+  }
+
+  if (!categoryID) return unresolved("the request's custom form was not identified.");
 
   try {
     /*
@@ -198,13 +332,7 @@ export async function resolveFieldMap(
     }
     const fields = [...seen.values()];
     if (!fields.length) {
-      const fallback = assumed();
-      return {
-        ...fallback,
-        source:
-          "Read the custom form but found no parameters in the response, so field names " +
-          "are still assumed from our labels. " + fallback.source,
-      };
+      return unresolved("the custom form was read but returned no parameters.");
     }
 
     /*
@@ -222,14 +350,11 @@ export async function resolveFieldMap(
     const map: Record<string, string> = {};
     const types: Record<string, string> = {};
     const unmatched: string[] = [];
+    const taken = new Set<string>();
     for (const f of CAMPAIGN_BRIEF_FIELDS) {
-      const hit =
-        fields.find((c) => normalise(c.label) === normalise(f.label)) ||
-        fields.find((c) => normalise(c.name) === normalise(f.label)) ||
-        fields.find((c) => normalise(c.label) === normalise(f.key) || normalise(c.name) === normalise(f.key)) ||
-        fields.find((c) => (f.aliases || []).some((a) => normalise(c.label) === normalise(a) || normalise(c.name) === normalise(a))) ||
-        fields.find((c) => normalise(c.label).includes(normalise(f.label)) && normalise(f.label).length > 4);
+      const hit = matchFormField(f, fields, taken);
       if (hit) {
+        taken.add(hit.name);
         map[f.key] = hit.name.startsWith(DE) ? hit.name : `${DE}${hit.name}`;
         types[f.key] = hit.dataType;
       } else {
@@ -250,11 +375,7 @@ export async function resolveFieldMap(
       formFields: fields.map((c) => c.name),
     };
   } catch (err) {
-    const fallback = assumed();
-    return {
-      ...fallback,
-      source: `Could not read the custom form (${(err as Error).message}). ` + fallback.source,
-    };
+    return unresolved(`the custom form could not be read (${(err as Error).message}).`);
   }
 }
 
