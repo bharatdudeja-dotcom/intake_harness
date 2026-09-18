@@ -125,10 +125,28 @@ export async function readFormFields(taskId: TaskId, entity: "issue" | "project"
         id?: string; name?: string; label?: string; dataType?: string;
         possibleValues?: { name?: string }[] | null;
       };
-      // `name` is what Workfront is addressed by; `id` is the query path. A
-      // field with neither cannot be written, so it is not a candidate.
-      const name = f.name || null;
-      if (!name || !f.label) continue;
+      /*
+       * `name` is what Workfront is addressed by - but this tenant returns it
+       * as null for most custom fields, giving only a label and an internal
+       * id. Skipping those dropped Audience, Primary Channel, Region and Type:
+       * precisely the fields worth filling.
+       *
+       * A custom field is addressed as `DE:<parameter name>`, and on this
+       * tenant the parameter name is the label. Verified against the live
+       * request: `DE:Audience = existing_customer` writes cleanly.
+       *
+       * Native fields (status, priority) come back with a real name and are
+       * used as given - they are not DE: fields and prefixing one would
+       * invent a field that does not exist.
+       */
+      if (!f.label) continue;
+      const native = f.name && !/^DE:/i.test(f.name) && !/^(issue|project)[._]/i.test(f.name);
+      const name = f.name && /^DE:/i.test(f.name)
+        ? f.name
+        : native
+          ? String(f.name)
+          : `DE:${f.label}`;
+      if (!name) continue;
       if (byName.has(name)) continue;
       byName.set(name, {
         name,

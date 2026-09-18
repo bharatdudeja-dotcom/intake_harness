@@ -101,7 +101,28 @@ export async function writeCustomFields(
          * that was on the form. A confident wrong diagnosis sent us looking at
          * form configuration for a date-parsing bug.
          */
-        return { written: [], rejected: keys.map((f) => ({ field: f, reason: message })) };
+        /*
+         * ONE AT A TIME, rather than losing the lot.
+         *
+         * Workfront refuses a whole update for one bad value, so a single
+         * enumeration sent a sentence took the campaign name, the objective
+         * and the launch date down with it. Writing them individually costs
+         * one call per field, only on the path that already failed, and turns
+         * an all-or-nothing loss into "everything except the one that was
+         * wrong".
+         */
+        const written: string[] = [];
+        const refused: Array<{ field: string; reason: string }> = [];
+        for (const key of keys) {
+          const single = { [key]: remaining[key] };
+          try {
+            await callMcpTool(taskId, set.update, set.customFieldArgs(objCode, objId, single, intent));
+            written.push(key);
+          } catch (individual) {
+            refused.push({ field: key, reason: (individual as Error).message });
+          }
+        }
+        return { written, rejected: [...rejected, ...refused] };
       }
 
       delete remaining[culprit.field];
