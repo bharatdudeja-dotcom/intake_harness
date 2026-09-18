@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
-import { callMcpTool } from "@/lib/mcp-client";
+import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
 import {
@@ -139,19 +139,61 @@ export async function POST(req: NextRequest) {
   const fields = input.intakeFields || input.fields || {};
   const loopCount = Number(input.loopCount) || 0;
 
-  const objId = input.workfront?.created ? String(input.workfront.objId || "") : "";
-  const fetched = await fetchRejection(objId || null);
-  const reason = String(input.rejectionReason || fetched.reason || "").trim();
+  // Everything below calls MCP tools somewhere (fetchRejection,
+  // gatherAepContext's three AEP reads, postReviewComment/
+  // updateReviewNotesField) - wrapped so every call, request and response,
+  // ends up in metadata.toolCalls for the UI.
+  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse> => {
+    const objId = input.workfront?.created ? String(input.workfront.objId || "") : "";
+    const fetched = await fetchRejection(objId || null);
+    const reason = String(input.rejectionReason || fetched.reason || "").trim();
 
-  // --- No rejection to read: act as the pre-flight ---------------------------
-  if (!reason) {
-    const pre = preflight(fields);
-    const clean = pre.findings.length === 0;
+    // --- No rejection to read: act as the pre-flight -----------------------
+    if (!reason) {
+      const pre = preflight(fields);
+      const clean = pre.findings.length === 0;
 
-    if (!clean) {
-      return NextResponse.json<AgentResponse>({
-        status: "needs_input",
-        message: `Before this reaches the review queue: ${pre.findings.map((f) => f.ask).join(" ")}`,
+      if (!clean) {
+        return {
+          status: "needs_input",
+          message: `Before this reaches the review queue: ${pre.findings.map((f) => f.ask).join(" ")}`,
+          output: {
+            ...input,
+            reviewed: true,
+            mode: "preflight",
+            rejection: { present: false, checked: fetched.source, couldNotRead: fetched.error },
+            triage: pre,
+            intakeFields: pre.redraft,
+            loopCount,
+          },
+          metadata: {
+            mode: "preflight",
+            findings: pre.findings.length,
+            rejectionReadable: fetched.error === null,
+            loopCount,
+          },
+        };
+      }
+
+      // Clean: this is the handoff to Agent 3. Ask AEP what it can already
+      // answer about this audience (see the docstring above) and document it -
+      // in the brief Agent 3 gets, and on the Workfront issue for a human.
+      const aepContext = await gatherAepContext(fields);
+      const aepNote = formatAepContextNote(aepContext);
+
+      let workfrontDoc: { comment: CommentOutcome; fieldUpdate: FieldUpdateOutcome } | null = null;
+      if (objId) {
+        const objCode = input.workfront?.objCode || "OPTASK";
+        const [comment, fieldUpdate] = await Promise.all([
+          postReviewComment(objId, objCode, aepNote),
+          updateReviewNotesField(objId, objCode, aepNote),
+        ]);
+        workfrontDoc = { comment, fieldUpdate };
+      }
+
+      return {
+        status: "completed",
+        message: `${pre.summary} ${aepNote}`,
         output: {
           ...input,
           reviewed: true,
@@ -159,88 +201,78 @@ export async function POST(req: NextRequest) {
           rejection: { present: false, checked: fetched.source, couldNotRead: fetched.error },
           triage: pre,
           intakeFields: pre.redraft,
+          aepContext,
+          workfrontDoc,
           loopCount,
         },
         metadata: {
           mode: "preflight",
-          findings: pre.findings.length,
+          findings: 0,
           rejectionReadable: fetched.error === null,
           loopCount,
+          // Same field names Agent 3 reports for the identical read (see
+          // audience-creation/route.ts) - one shared trace component
+          // (tool-call-trace.tsx) renders this block for both agents, and it
+          // is the single most consequential read in this whole pipeline:
+          // if it comes back inconclusive, Agent 3 cannot confirm anything
+          // and defaults to a build path blindly.
+          schemasRead: aepContext.schemaProbe.read,
+          schemaProbeConclusive: aepContext.schemaProbe.conclusive,
+          schemasReadError: aepContext.schemaProbe.error,
+          schemaCount: aepContext.schemaProbe.schemaCount,
+          schemasInspected: aepContext.schemaProbe.schemasInspected,
+          fieldGroupsInspected: aepContext.schemaProbe.fieldGroupsInspected,
+          fieldCount: aepContext.schemaProbe.fieldCount,
+          sandbox: aepContext.schemaProbe.sandbox,
+          attributesNeeded: aepContext.neededAttributes,
+          attributesMissing: aepContext.schemaProbe.conclusive
+            ? aepContext.neededAttributes.filter((k) => !aepContext.schemaProbe.found[k])
+            : [],
+          schemaEvidence: aepContext.schemaProbe.evidence,
+          existingSegment: aepContext.segmentMatch.id
+            ? { id: aepContext.segmentMatch.id, name: aepContext.segmentMatch.name }
+            : null,
+          profileEnabledDatasets: aepContext.datasetProbe.profileEnabled,
+          workfrontCommentPosted: workfrontDoc?.comment.posted ?? null,
+          workfrontFieldUpdated: workfrontDoc?.fieldUpdate.updated ?? null,
         },
-      });
+      };
     }
 
-    // Clean: this is the handoff to Agent 3. Ask AEP what it can already
-    // answer about this audience (see the docstring above) and document it -
-    // in the brief Agent 3 gets, and on the Workfront issue for a human.
-    const aepContext = await gatherAepContext(fields);
-    const aepNote = formatAepContextNote(aepContext);
+    // --- There is a rejection: translate it ---------------------------------
+    const triage = triageRejection(reason, fields);
 
-    let workfrontDoc: { comment: CommentOutcome; fieldUpdate: FieldUpdateOutcome } | null = null;
-    if (objId) {
-      const objCode = input.workfront?.objCode || "OPTASK";
-      const [comment, fieldUpdate] = await Promise.all([
-        postReviewComment(objId, objCode, aepNote),
-        updateReviewNotesField(objId, objCode, aepNote),
-      ]);
-      workfrontDoc = { comment, fieldUpdate };
+    if (triage.needsHuman) {
+      return {
+        status: "needs_input",
+        message: triage.findings[0].ask,
+        output: {
+          ...input,
+          reviewed: true,
+          mode: "triage",
+          rejection: { present: true, reason, checked: fetched.source, couldNotRead: fetched.error },
+          triage,
+          intakeFields: triage.redraft,
+          loopCount: loopCount + 1,
+        },
+        metadata: { mode: "triage", needsHuman: true, loopCount: loopCount + 1 },
+      };
     }
 
-    return NextResponse.json<AgentResponse>({
-      status: "completed",
-      message: `${pre.summary} ${aepNote}`,
-      output: {
-        ...input,
-        reviewed: true,
-        mode: "preflight",
-        rejection: { present: false, checked: fetched.source, couldNotRead: fetched.error },
-        triage: pre,
-        intakeFields: pre.redraft,
-        aepContext,
-        workfrontDoc,
-        loopCount,
-      },
-      metadata: {
-        mode: "preflight",
-        findings: 0,
-        rejectionReadable: fetched.error === null,
-        loopCount,
-        // Same field names Agent 3 reports for the identical read (see
-        // audience-creation/route.ts) - one shared trace component
-        // (tool-call-trace.tsx) renders this block for both agents, and it
-        // is the single most consequential read in this whole pipeline:
-        // if it comes back inconclusive, Agent 3 cannot confirm anything
-        // and defaults to a build path blindly.
-        schemasRead: aepContext.schemaProbe.read,
-        schemaProbeConclusive: aepContext.schemaProbe.conclusive,
-        schemasReadError: aepContext.schemaProbe.error,
-        schemaCount: aepContext.schemaProbe.schemaCount,
-        schemasInspected: aepContext.schemaProbe.schemasInspected,
-        fieldGroupsInspected: aepContext.schemaProbe.fieldGroupsInspected,
-        fieldCount: aepContext.schemaProbe.fieldCount,
-        sandbox: aepContext.schemaProbe.sandbox,
-        attributesNeeded: aepContext.neededAttributes,
-        attributesMissing: aepContext.schemaProbe.conclusive
-          ? aepContext.neededAttributes.filter((k) => !aepContext.schemaProbe.found[k])
-          : [],
-        schemaEvidence: aepContext.schemaProbe.evidence,
-        existingSegment: aepContext.segmentMatch.id
-          ? { id: aepContext.segmentMatch.id, name: aepContext.segmentMatch.name }
-          : null,
-        profileEnabledDatasets: aepContext.datasetProbe.profileEnabled,
-        workfrontCommentPosted: workfrontDoc?.comment.posted ?? null,
-        workfrontFieldUpdated: workfrontDoc?.fieldUpdate.updated ?? null,
-      },
-    });
-  }
-
-  // --- There is a rejection: translate it -----------------------------------
-  const triage = triageRejection(reason, fields);
-
-  if (triage.needsHuman) {
-    return NextResponse.json<AgentResponse>({
+    /*
+     * A redraft goes back for confirmation, never straight through.
+     *
+     * The doc keeps 2.5 as a human step deliberately - "keep the human decision;
+     * remove the surprise". Auto-resubmitting a redraft the marketer never saw
+     * would remove the decision instead of the surprise, and the first time a
+     * proposed value was wrong it would be wrong in Workfront.
+     */
+    return {
       status: "needs_input",
-      message: triage.findings[0].ask,
+      message:
+        `${triage.summary}. ` +
+        triage.findings.map((f) => f.ask).join(" ") +
+        " Confirm and it will be resubmitted.",
       output: {
         ...input,
         reviewed: true,
@@ -250,38 +282,17 @@ export async function POST(req: NextRequest) {
         intakeFields: triage.redraft,
         loopCount: loopCount + 1,
       },
-      metadata: { mode: "triage", needsHuman: true, loopCount: loopCount + 1 },
-    });
-  }
+      metadata: {
+        mode: "triage",
+        corrected: triage.changed,
+        questions: triage.findings.filter((f) => !f.proposed).length,
+        loopCount: loopCount + 1,
+      },
+    };
+  });
 
-  /*
-   * A redraft goes back for confirmation, never straight through.
-   *
-   * The doc keeps 2.5 as a human step deliberately - "keep the human decision;
-   * remove the surprise". Auto-resubmitting a redraft the marketer never saw
-   * would remove the decision instead of the surprise, and the first time a
-   * proposed value was wrong it would be wrong in Workfront.
-   */
   return NextResponse.json<AgentResponse>({
-    status: "needs_input",
-    message:
-      `${triage.summary}. ` +
-      triage.findings.map((f) => f.ask).join(" ") +
-      " Confirm and it will be resubmitted.",
-    output: {
-      ...input,
-      reviewed: true,
-      mode: "triage",
-      rejection: { present: true, reason, checked: fetched.source, couldNotRead: fetched.error },
-      triage,
-      intakeFields: triage.redraft,
-      loopCount: loopCount + 1,
-    },
-    metadata: {
-      mode: "triage",
-      corrected: triage.changed,
-      questions: triage.findings.filter((f) => !f.proposed).length,
-      loopCount: loopCount + 1,
-    },
+    ...result,
+    metadata: { ...result.metadata, toolCalls },
   });
 }

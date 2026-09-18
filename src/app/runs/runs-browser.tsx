@@ -5,6 +5,7 @@ import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { PIPELINE } from "@/lib/pipeline/registry";
 import { StatusBadge } from "../status-badge";
 import { ToolCallTrace, type ToolCallOutput } from "../tool-call-trace";
+import { ToolCallLog, type ToolCallLogEntry } from "../tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 
@@ -485,6 +486,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     <div className="flex flex-col gap-1.5">
                       <ToolCallTrace output={(taskRun.output ?? {}) as ToolCallOutput} metadata={taskRun.metadata} />
                     </div>
+                    <ToolCallLog calls={(taskRun.metadata?.toolCalls as ToolCallLogEntry[] | undefined) ?? []} />
                     <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                       {JSON.stringify(taskRun.output, null, 2)}
                     </pre>

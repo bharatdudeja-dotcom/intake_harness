@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
+import { withToolCallLog } from "@/lib/mcp-client";
 import {
   probeSchemas,
   findExistingSegment,
@@ -141,115 +142,125 @@ export async function POST(req: NextRequest) {
   const input = body.input || {};
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
 
-  const needed = neededAttributes(fields);
-  const probe = await probeSchemas("audience_creation", needed);
+  // Every read below (probeSchemas, findExistingSegment, estimateCount) calls
+  // MCP tools - wrapped so every call, request and response, ends up in
+  // metadata.toolCalls for the UI.
+  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse<AudienceCreationOutput>> => {
+    const needed = neededAttributes(fields);
+    const probe = await probeSchemas("audience_creation", needed);
 
-  /*
-   * AN INCONCLUSIVE PROBE IS NOT A MISSING ATTRIBUTE.
-   *
-   * This distinction is the whole safety property of this agent. If we could
-   * not obtain field-level data we do not know what AEP holds, and claiming the
-   * attributes are absent would open a GTO attribute request - the
-   * quarter-long tail in B4 - on the strength of our own failure to look.
-   *
-   * It has already happened once: the probe matched attribute names against
-   * schema TITLES, which never contain field names, concluded that all three
-   * were missing, and opened a request. Unknown is now reported as unknown, and
-   * only a conclusive probe can open anything.
-   */
-  const missing = probe.conclusive
-    ? Object.entries(probe.found).filter(([, ok]) => !ok).map(([k]) => k)
-    : [];
-  const attributesAvailable: boolean | "undetermined" = probe.conclusive
-    ? missing.length === 0
-    : "undetermined";
+    /*
+     * AN INCONCLUSIVE PROBE IS NOT A MISSING ATTRIBUTE.
+     *
+     * This distinction is the whole safety property of this agent. If we could
+     * not obtain field-level data we do not know what AEP holds, and claiming the
+     * attributes are absent would open a GTO attribute request - the
+     * quarter-long tail in B4 - on the strength of our own failure to look.
+     *
+     * It has already happened once: the probe matched attribute names against
+     * schema TITLES, which never contain field names, concluded that all three
+     * were missing, and opened a request. Unknown is now reported as unknown, and
+     * only a conclusive probe can open anything.
+     */
+    const missing = probe.conclusive
+      ? Object.entries(probe.found).filter(([, ok]) => !ok).map(([k]) => k)
+      : [];
+    const attributesAvailable: boolean | "undetermined" = probe.conclusive
+      ? missing.length === 0
+      : "undetermined";
 
-  const path = decideBuildPath(fields, probe);
-  const gap = identityGap(fields);
-  const cutoff = nightlyCutoff();
+    const path = decideBuildPath(fields, probe);
+    const gap = identityGap(fields);
+    const cutoff = nightlyCutoff();
 
-  // Cheapest good outcome first: an audience that already exists needs no build
-  // and is the only way to get a real count without writing anything.
-  const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
-    .filter(Boolean)
-    .map(String);
-  const existing = await findExistingSegment("audience_creation", terms);
-  const estimate = await estimateCount(existing.id);
+    // Cheapest good outcome first: an audience that already exists needs no build
+    // and is the only way to get a real count without writing anything.
+    const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
+      .filter(Boolean)
+      .map(String);
+    const existing = await findExistingSegment("audience_creation", terms);
+    const estimate = await estimateCount(existing.id);
 
-  // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
-  // opening the 2.7a branch because we failed to look is the quarter-long tail
-  // started by our own blind spot.
-  const attrState = attributeRequestState(body.priorOutputs || {}, attributesAvailable !== false, missing);
+    // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
+    // opening the 2.7a branch because we failed to look is the quarter-long tail
+    // started by our own blind spot.
+    const attrState = attributeRequestState(body.priorOutputs || {}, attributesAvailable !== false, missing);
 
-  const statusMessage = [
-    path.buildPath === "fac"
-      ? "Federated (FAC) path: " + path.reason
-      : "AEP rule builder: " + path.reason,
-    probe.conclusive
-      ? `Checked ${probe.fieldCount} field(s) across ${probe.schemasInspected} profile schema(s)` +
-        (probe.sandbox ? ` in sandbox "${probe.sandbox}"` : "") + "."
-      : `Attribute availability is UNDETERMINED: ${probe.error}` +
-        (probe.sandbox ? ` (sandbox "${probe.sandbox}")` : "") +
-        ". No attribute request has been opened on the strength of that.",
-    existing.id
-      ? `Reusing existing audience "${existing.name}".`
-      : existing.read
-        ? `No existing audience matched (${existing.considered} checked).`
-        : `Could not list existing audiences: ${existing.error}.`,
-    estimate.count != null ? `Predicted ${estimate.count.toLocaleString()} profiles.` : `No count yet - ${estimate.basis}`,
-    gap.hasGap ? "Identity gap flagged: see identityGap." : "",
-    attrState.note,
-    cutoff.note,
-  ]
-    .filter(Boolean)
-    .join(" ");
+    const statusMessage = [
+      path.buildPath === "fac"
+        ? "Federated (FAC) path: " + path.reason
+        : "AEP rule builder: " + path.reason,
+      probe.conclusive
+        ? `Checked ${probe.fieldCount} field(s) across ${probe.schemasInspected} profile schema(s)` +
+          (probe.sandbox ? ` in sandbox "${probe.sandbox}"` : "") + "."
+        : `Attribute availability is UNDETERMINED: ${probe.error}` +
+          (probe.sandbox ? ` (sandbox "${probe.sandbox}")` : "") +
+          ". No attribute request has been opened on the strength of that.",
+      existing.id
+        ? `Reusing existing audience "${existing.name}".`
+        : existing.read
+          ? `No existing audience matched (${existing.considered} checked).`
+          : `Could not list existing audiences: ${existing.error}.`,
+      estimate.count != null ? `Predicted ${estimate.count.toLocaleString()} profiles.` : `No count yet - ${estimate.basis}`,
+      gap.hasGap ? "Identity gap flagged: see identityGap." : "",
+      attrState.note,
+      cutoff.note,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
-  const output: AudienceCreationOutput = {
-    buildPath: path.buildPath,
-    attributesAvailable,
-    openAttributeRequest: {
-      status: attrState.status,
-      requestId: attrState.requestId,
-      ageSeconds: attrState.ageSeconds,
-    },
-    predictedCount: estimate.count,
-    identityGap: gap,
-    statusMessage,
-  };
+    const output: AudienceCreationOutput = {
+      buildPath: path.buildPath,
+      attributesAvailable,
+      openAttributeRequest: {
+        status: attrState.status,
+        requestId: attrState.requestId,
+        ageSeconds: attrState.ageSeconds,
+      },
+      predictedCount: estimate.count,
+      identityGap: gap,
+      statusMessage,
+    };
 
-  /*
-   * An open attribute request is needs_input, not completed.
-   *
-   * 2.7a leaves this process and comes back. Reporting `completed` while an
-   * audience does not exist and cannot yet be built is exactly the
-   * reported-success-while-failing pattern the whole review layer exists to
-   * catch, and it is why escalation has never fired on this pipeline.
-   */
-  const status = attrState.status === "open" ? "needs_input" : "completed";
+    /*
+     * An open attribute request is needs_input, not completed.
+     *
+     * 2.7a leaves this process and comes back. Reporting `completed` while an
+     * audience does not exist and cannot yet be built is exactly the
+     * reported-success-while-failing pattern the whole review layer exists to
+     * catch, and it is why escalation has never fired on this pipeline.
+     */
+    const status = attrState.status === "open" ? "needs_input" : "completed";
+
+    return {
+      status,
+      output,
+      message: status === "needs_input" ? attrState.note : statusMessage,
+      metadata: {
+        buildPathReason: path.reason,
+        schemasRead: probe.read,
+        schemaProbeConclusive: probe.conclusive,
+        schemasReadError: probe.error,
+        schemaCount: probe.schemaCount,
+        schemasInspected: probe.schemasInspected,
+        fieldGroupsInspected: probe.fieldGroupsInspected,
+        fieldCount: probe.fieldCount,
+        // Which AEP sandbox answered. Assessing Comcast's attributes against a
+        // sandbox that is not Comcast's is a meaningless check, and the reader
+        // needs to be able to see that for themselves.
+        sandbox: probe.sandbox,
+        attributesNeeded: needed,
+        attributesMissing: missing,
+        schemaEvidence: probe.evidence,
+        existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
+        countBasis: estimate.basis,
+        nightlyCutoff: cutoff,
+      },
+    };
+  });
 
   return NextResponse.json<AgentResponse<AudienceCreationOutput>>({
-    status,
-    output,
-    message: status === "needs_input" ? attrState.note : statusMessage,
-    metadata: {
-      buildPathReason: path.reason,
-      schemasRead: probe.read,
-      schemaProbeConclusive: probe.conclusive,
-      schemasReadError: probe.error,
-      schemaCount: probe.schemaCount,
-      schemasInspected: probe.schemasInspected,
-      fieldGroupsInspected: probe.fieldGroupsInspected,
-      fieldCount: probe.fieldCount,
-      // Which AEP sandbox answered. Assessing Comcast's attributes against a
-      // sandbox that is not Comcast's is a meaningless check, and the reader
-      // needs to be able to see that for themselves.
-      sandbox: probe.sandbox,
-      attributesNeeded: needed,
-      attributesMissing: missing,
-      schemaEvidence: probe.evidence,
-      existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
-      countBasis: estimate.basis,
-      nightlyCutoff: cutoff,
-    },
+    ...result,
+    metadata: { ...result.metadata, toolCalls },
   });
 }

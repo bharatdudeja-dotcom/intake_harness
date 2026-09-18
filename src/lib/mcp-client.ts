@@ -56,8 +56,61 @@
  * route directly.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ALL_TASKS } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
+
+/**
+ * One MCP call, request and response together — the raw ground truth
+ * behind whatever an agent's `message`/`output` says it concluded.
+ *
+ * Captured transparently: nothing that calls callMcpTool (aep.ts,
+ * workfront.ts, workfront-notes.ts, ...) had to change to produce this — see
+ * withToolCallLog below.
+ */
+export type ToolCallRecord = {
+  name: string;
+  args: Record<string, unknown>;
+  startedAt: string;
+  durationMs: number;
+  /** Present on success. Truncated (see TRUNCATE_AT) so one huge list_schemas can't bloat a task_run row. */
+  result?: unknown;
+  resultTruncated?: boolean;
+  /** Present on failure, instead of `result`. */
+  error?: string;
+};
+
+const TRUNCATE_AT = 20_000;
+
+/** JSON-serialize `value`, truncating the STRING (not the structure) past TRUNCATE_AT chars. */
+function truncatedJson(value: unknown): { json: unknown; truncated: boolean } {
+  let text: string;
+  try {
+    text = JSON.stringify(value);
+  } catch {
+    return { json: String(value), truncated: false };
+  }
+  if (text.length <= TRUNCATE_AT) return { json: value, truncated: false };
+  return { json: `${text.slice(0, TRUNCATE_AT)}… (truncated, ${text.length} chars total)`, truncated: true };
+}
+
+const toolCallLogStorage = new AsyncLocalStorage<ToolCallRecord[]>();
+
+/**
+ * Run `fn`, collecting every callMcpTool call made anywhere inside it —
+ * including calls several functions deep, in a different module entirely —
+ * into the returned `toolCalls` list, in call order.
+ *
+ * An agent route wraps its whole handler body in this and puts the result
+ * in `AgentResponse.metadata.toolCalls`, which the orchestrator already
+ * persists verbatim to task_runs.metadata (see orchestrator.ts) - no schema
+ * change, no per-call-site plumbing.
+ */
+export async function withToolCallLog<T>(fn: () => Promise<T>): Promise<{ result: T; toolCalls: ToolCallRecord[] }> {
+  const log: ToolCallRecord[] = [];
+  const result = await toolCallLogStorage.run(log, fn);
+  return { result, toolCalls: log };
+}
 
 const MCP_SERVER_ROUTES: Array<{ prefix: string; path: string }> = [
   { prefix: "wf_core_", path: "/mcp/workfront/core" },
@@ -285,6 +338,32 @@ export async function callMcpTool<T = unknown>(
 ): Promise<T> {
   assertToolAllowed(taskId, name);
 
+  const startedAt = new Date();
+  const record = (partial: Pick<ToolCallRecord, "result" | "resultTruncated"> | Pick<ToolCallRecord, "error">) => {
+    const log = toolCallLogStorage.getStore();
+    if (!log) return; // no withToolCallLog wrapper active - fine, this call just isn't traced
+    log.push({
+      name,
+      args,
+      startedAt: startedAt.toISOString(),
+      durationMs: Date.now() - startedAt.getTime(),
+      ...partial,
+    });
+  };
+
+  try {
+    const value = await callMcpToolInner<T>(name, args, timeoutMs);
+    const { json, truncated } = truncatedJson(value);
+    record({ result: json, resultTruncated: truncated });
+    return value;
+  } catch (err) {
+    record({ error: (err as Error).message });
+    throw err;
+  }
+}
+
+/** The actual wire call - separated from callMcpTool so the try/record/throw above stays a single, simple wrapper around every return/throw path below. */
+async function callMcpToolInner<T>(name: string, args: Record<string, unknown>, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callMcpTool } from "@/lib/mcp-client";
+import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { parseBrief, nextQuestions, type ParsedIntake } from "@/lib/agents/intake/parse";
 import { createIntakeRequest, toWorkfrontPayload } from "@/lib/agents/intake/workfront";
@@ -111,92 +111,104 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // A rework loop carries the fields already confirmed, so the marketer is
-  // never asked twice for the same thing.
-  const parsed = parseBrief(brief, body.input?.fields || {});
-  const questions = nextQuestions(parsed, 2);
-  const grounding = await groundQuestions(questions.map((q) => q.label));
+  // Everything below calls MCP tools somewhere in its call graph
+  // (groundQuestions, createIntakeRequest -> resolveIntakeQueue/
+  // resolveFieldMap/writeCustomFields) - wrapped so every one of those
+  // calls, request and response, ends up in metadata.toolCalls for the UI,
+  // without any of those functions needing to know they're being watched.
+  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse> => {
+    // A rework loop carries the fields already confirmed, so the marketer is
+    // never asked twice for the same thing.
+    const parsed = parseBrief(brief, body.input?.fields || {});
+    const questions = nextQuestions(parsed, 2);
+    const grounding = await groundQuestions(questions.map((q) => q.label));
 
-  // B1's verdict, owned by the agent instead of looped onto the marketer.
-  if (loopCount >= LOOP_LIMIT && questions.length) {
-    return NextResponse.json<AgentResponse>({
-      status: "failed",
-      message:
-        `Still missing ${questions.map((q) => q.label).join(" and ")} after ${loopCount} rounds. ` +
-        `Past ${LOOP_LIMIT} rounds this is the agent failing to read the brief, not the marketer ` +
-        `failing to write it, so it escalates rather than asking a third time.`,
+    // B1's verdict, owned by the agent instead of looped onto the marketer.
+    if (loopCount >= LOOP_LIMIT && questions.length) {
+      return {
+        status: "failed",
+        message:
+          `Still missing ${questions.map((q) => q.label).join(" and ")} after ${loopCount} rounds. ` +
+          `Past ${LOOP_LIMIT} rounds this is the agent failing to read the brief, not the marketer ` +
+          `failing to write it, so it escalates rather than asking a third time.`,
+        output: {
+          brief,
+          ...summarise(parsed),
+          loopCount,
+          grounding: { grounded: grounding.grounded, reason: grounding.reason },
+        },
+        metadata: { loopCount, loopLimitReached: true },
+      };
+    }
+
+    // Something required is genuinely absent. Ask for it, and only it.
+    if (questions.length) {
+      return {
+        status: "needs_input",
+        message: questions.map((q) => q.ask || `What is the ${q.label.toLowerCase()}?`).join(" "),
+        output: {
+          brief,
+          ...summarise(parsed),
+          // The next round arrives with this incremented and the fields so far,
+          // so the marketer answers two questions instead of the whole form.
+          loopCount: loopCount + 1,
+          questions: questions.map((q) => ({
+            key: q.key,
+            label: q.label,
+            ask: q.ask ?? null,
+            options: q.options ?? null,
+            optionsPartial: q.optionsPartial ?? false,
+          })),
+          grounding,
+        },
+        metadata: { loopCount: loopCount + 1, askedFor: questions.map((q) => q.key) },
+      };
+    }
+
+    /*
+     * Complete enough to build. Create the Workfront request.
+     *
+     * createIntakeRequest reports what it WOULD have created when the call fails,
+     * which is the honest outcome while nobody has signed in to the official MCP:
+     * Workfront writes need OAuth, and 44 of its 94 tools are writes a Workfront
+     * admin must enable per tenant. A visible dry run beats a run that reads as a
+     * success and wrote nothing.
+     */
+    const outcome = await createIntakeRequest({ intake: parsed.fields, brief });
+    const stated = parsed.extracted.filter((f) => f.from === "stated").length;
+    const message =
+      `Extracted ${stated} stated and ${parsed.inferred.length} inferred field(s) from the brief. ` +
+      (outcome.created
+        ? `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
+        : `Dry run — did not create the Workfront request: ${outcome.reason}`);
+
+    return {
+      status: "completed",
+      message,
       output: {
         brief,
         ...summarise(parsed),
         loopCount,
-        grounding: { grounded: grounding.grounded, reason: grounding.reason },
-      },
-      metadata: { loopCount, loopLimitReached: true },
-    });
-  }
-
-  // Something required is genuinely absent. Ask for it, and only it.
-  if (questions.length) {
-    return NextResponse.json<AgentResponse>({
-      status: "needs_input",
-      message: questions.map((q) => q.ask || `What is the ${q.label.toLowerCase()}?`).join(" "),
-      output: {
-        brief,
-        ...summarise(parsed),
-        // The next round arrives with this incremented and the fields so far,
-        // so the marketer answers two questions instead of the whole form.
-        loopCount: loopCount + 1,
-        questions: questions.map((q) => ({
-          key: q.key,
-          label: q.label,
-          ask: q.ask ?? null,
-          options: q.options ?? null,
-          optionsPartial: q.optionsPartial ?? false,
-        })),
+        workfront: outcome,
         grounding,
+        // Named plainly so Agent 2 reads them rather than re-deriving them.
+        intakeFields: parsed.fields,
+        workfrontPayload: toWorkfrontPayload(parsed.fields, brief),
       },
-      metadata: { loopCount: loopCount + 1, askedFor: questions.map((q) => q.key) },
-    });
-  }
-
-  /*
-   * Complete enough to build. Create the Workfront request.
-   *
-   * createIntakeRequest reports what it WOULD have created when the call fails,
-   * which is the honest outcome while nobody has signed in to the official MCP:
-   * Workfront writes need OAuth, and 44 of its 94 tools are writes a Workfront
-   * admin must enable per tenant. A visible dry run beats a run that reads as a
-   * success and wrote nothing.
-   */
-  const outcome = await createIntakeRequest({ intake: parsed.fields, brief });
-  const stated = parsed.extracted.filter((f) => f.from === "stated").length;
-  const message =
-    `Extracted ${stated} stated and ${parsed.inferred.length} inferred field(s) from the brief. ` +
-    (outcome.created
-      ? `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
-      : `Dry run — did not create the Workfront request: ${outcome.reason}`);
+      metadata: {
+        loopCount,
+        inferredCount: parsed.inferred.length,
+        // A run where the agent guessed four fields is not the same as one where
+        // the marketer stated them. The human at 2.5 has to know which they are
+        // looking at, and that is the only reason 2.5 stays a human step.
+        needsConfirmation: parsed.inferred.length > 0,
+        workfrontCreated: outcome.created,
+      },
+    };
+  });
 
   return NextResponse.json<AgentResponse>({
-    status: "completed",
-    message,
-    output: {
-      brief,
-      ...summarise(parsed),
-      loopCount,
-      workfront: outcome,
-      grounding,
-      // Named plainly so Agent 2 reads them rather than re-deriving them.
-      intakeFields: parsed.fields,
-      workfrontPayload: toWorkfrontPayload(parsed.fields, brief),
-    },
-    metadata: {
-      loopCount,
-      inferredCount: parsed.inferred.length,
-      // A run where the agent guessed four fields is not the same as one where
-      // the marketer stated them. The human at 2.5 has to know which they are
-      // looking at, and that is the only reason 2.5 stays a human step.
-      needsConfirmation: parsed.inferred.length > 0,
-      workfrontCreated: outcome.created,
-    },
+    ...result,
+    metadata: { ...result.metadata, toolCalls },
   });
 }

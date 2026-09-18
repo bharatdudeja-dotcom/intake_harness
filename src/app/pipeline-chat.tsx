@@ -6,6 +6,7 @@ import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
 import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "./status-badge";
 import { ToolCallTrace, type ToolCallOutput } from "./tool-call-trace";
+import { ToolCallLog, type ToolCallLogEntry } from "./tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
@@ -216,9 +217,12 @@ export function PipelineChat() {
               </div>
 
               {isOpen && (
-                <pre className="ml-7 overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
-                  {JSON.stringify(tr.output, null, 2)}
-                </pre>
+                <div className="ml-7 flex flex-col gap-2">
+                  <ToolCallLog calls={((tr.metadata?.toolCalls as ToolCallLogEntry[] | undefined) ?? [])} />
+                  <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
+                    {JSON.stringify(tr.output, null, 2)}
+                  </pre>
+                </div>
               )}
 
               {/* The needs_input turn's questions, live, only on the current pending step. */}
