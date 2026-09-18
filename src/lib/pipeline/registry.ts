@@ -79,6 +79,18 @@ export const PIPELINE: AgentDefinition[] = [
       // already exists for this ask, and roughly how big the candidate
       // profile dataset is. All read-only — Review triages and asks; it
       // does not create/update anything in AEP (that's Agent 3's job).
+      //
+      // WHEN THIS IS WIRED UP: whatever calls adobe_get_schema must only
+      // ever treat a field as present when it is literally named in that
+      // response's field list — never inferred from the schema's title, a
+      // field's plausible existence, or the marketer's own wording. Agent
+      // 3's src/lib/agents/audience/aep.ts hit this exact failure mode
+      // (word-boundary matching against real field names, because an
+      // unanchored match on "lob" once matched "glob" inside a URL and
+      // reported line-of-business as available on nothing) — reuse that
+      // discipline here rather than re-learning it. A hallucinated field
+      // answers "wrong data source" wrong, silently, which is worse than
+      // not answering it at all.
       "adobe_list_schemas",
       "adobe_get_schema",
       "adobe_list_segments",

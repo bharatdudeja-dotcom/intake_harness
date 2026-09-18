@@ -32,6 +32,22 @@ import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
  * signed in - and a failure is REPORTED, not swallowed. Reporting it is the
  * whole point: an agent that treats "I could not read the rejection" as "there
  * was no rejection" reproduces the bug it was built to fix.
+ *
+ * RESOLVING "wrong_data_source" WITH AEP (not implemented yet)
+ *
+ * triage.ts can flag a rejection as FAC-vs-profile-store ambiguous, but it is
+ * pure and never checks AEP - so today that finding is always a question back
+ * to the marketer, never an answer. It is scoped (registry.ts) to call
+ * adobe_list_schemas/adobe_get_schema/adobe_list_segments/adobe_get_segment/
+ * adobe_list_datasets for exactly this. Whoever wires that up: a field counts
+ * as "in the profile store" ONLY when it is literally present in
+ * adobe_get_schema's field list for a profile-enabled schema - never inferred
+ * from the schema's title, the field's plausible name, or the marketer's own
+ * wording. Follow src/lib/agents/audience/aep.ts's SchemaProbe pattern
+ * (word-anchored matching against real field names) rather than re-deriving
+ * it; it exists because an unanchored match already produced one false
+ * positive ("lob" inside "glob"). A hallucinated field here answers the most
+ * expensive classification this agent makes wrong, silently.
  */
 
 type ReviewInput = {
