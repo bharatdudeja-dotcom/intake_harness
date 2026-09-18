@@ -101,6 +101,8 @@ export interface AudienceCreationOutput {
   audience: {
     created: boolean;
     segmentId: string | null;
+    /** Where to open it in AEP. Null when nothing was created. */
+    url: string | null;
     name: string;
     /** The PQL, so a human can check the definition and not just the count. */
     definition: string;
