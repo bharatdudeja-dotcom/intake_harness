@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
       // Clean: this is the handoff to Agent 3. Ask AEP what it can already
       // answer about this audience (see the docstring above) and document it -
       // in the brief Agent 3 gets, and on the Workfront issue for a human.
-      const aepContext = await gatherAepContext(fields);
+      const aepContext = await gatherAepContext(fields, input.brief);
       const aepNote = formatAepContextNote(aepContext);
 
       let workfrontDoc: { comment: CommentOutcome; fieldUpdate: FieldUpdateOutcome } | null = null;
@@ -233,6 +233,8 @@ export async function POST(req: NextRequest) {
             ? { id: aepContext.segmentMatch.id, name: aepContext.segmentMatch.name }
             : null,
           profileEnabledDatasets: aepContext.datasetProbe.profileEnabled,
+          pqlGrounded: aepContext.pqlGuidance.grounded,
+          pqlGuidance: aepContext.pqlGuidance.hits,
           workfrontCommentPosted: workfrontDoc?.comment.posted ?? null,
           workfrontFieldUpdated: workfrontDoc?.fieldUpdate.updated ?? null,
         },
