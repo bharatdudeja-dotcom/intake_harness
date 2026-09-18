@@ -22,6 +22,7 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
+import type { TaskId } from "@/lib/pipeline/types";
 
 /**
  * Attributes we can recognise, matched against SCHEMA FIELD NAMES.
@@ -126,11 +127,18 @@ function sandboxFrom(records: Array<{ id: string }>): string | null {
  *
  * When no profile-like schema can be opened the answer is INCONCLUSIVE, not
  * "missing", and the caller must not open an attribute request off it.
+ *
+ * `taskId` is whichever pipeline task is calling this - originally always
+ * "audience_creation", now also "review" (see agents/review/aep-context.ts),
+ * which asks the identical question one step earlier so the brief handed to
+ * Agent 3 already answers it. Passed through verbatim to callMcpTool so the
+ * allowlist check in mcp-client.ts is enforced against the REAL caller, not
+ * a hardcoded one.
  */
-export async function probeSchemas(needed: string[]): Promise<SchemaProbe> {
+export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<SchemaProbe> {
   let records: Array<{ title: string; id: string }> = [];
   try {
-    const list = await callMcpTool<unknown>("audience_creation", "adobe_list_schemas", { limit: "50" });
+    const list = await callMcpTool<unknown>(taskId, "adobe_list_schemas", { limit: "50" });
     records = schemaRecords(list);
   } catch (err) {
     return {
@@ -147,7 +155,7 @@ export async function probeSchemas(needed: string[]): Promise<SchemaProbe> {
   let lastError: string | null = null;
   for (const c of candidates) {
     try {
-      const doc = await callMcpTool<unknown>("audience_creation", "adobe_get_schema", { schema_id: c.id });
+      const doc = await callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id });
       for (const f of fieldNames(doc)) fields.add(f);
       inspected += 1;
     } catch (err) {
@@ -201,10 +209,12 @@ export type SegmentMatch = {
  * Reusing an existing audience skips the build, the nightly job and the whole
  * rework window. It is also the only way to get a real count without writing
  * anything, so it is tried first.
+ *
+ * `taskId`: see probeSchemas above - same reasoning, same requirement.
  */
-export async function findExistingSegment(terms: string[]): Promise<SegmentMatch> {
+export async function findExistingSegment(taskId: TaskId, terms: string[]): Promise<SegmentMatch> {
   try {
-    const result = await callMcpTool<unknown>("audience_creation", "adobe_list_segments", { limit: "50" });
+    const result = await callMcpTool<unknown>(taskId, "adobe_list_segments", { limit: "50" });
     const rows = (Array.isArray(result) ? result : ((result as { segments?: unknown[]; data?: unknown[] })?.segments
       || (result as { data?: unknown[] })?.data || [])) as Array<Record<string, unknown>>;
 
@@ -221,6 +231,65 @@ export async function findExistingSegment(terms: string[]): Promise<SegmentMatch
     return { read: true, error: null, id: best?.id ?? null, name: best?.name ?? null, considered: rows.length };
   } catch (err) {
     return { read: false, error: (err as Error).message, id: null, name: null, considered: 0 };
+  }
+}
+
+/** A dataset's name/id, and whether Catalog metadata marks it profile-enabled. */
+function datasetRecords(result: unknown): Array<{ id: string; name: string; profileEnabled: boolean }> {
+  const out: Array<{ id: string; name: string; profileEnabled: boolean }> = [];
+  const walk = (v: unknown, depth = 0) => {
+    if (depth > 5 || v == null) return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, depth + 1)); return; }
+    if (typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      const name = String(o.name || o.title || "");
+      const id = String(o.$id || o.id || o["meta:altId"] || "");
+      if (name && id) {
+        // Real-Time Customer Profile enablement is a literal tag Catalog
+        // attaches to the dataset - `tags.unifiedProfile` - never guessed
+        // from the dataset's own NAME containing the word "profile". Schema
+        // titles already taught this lesson once (see probeSchemas above);
+        // the same trap exists here.
+        const tagKeys = o.tags && typeof o.tags === "object" ? Object.keys(o.tags as Record<string, unknown>) : [];
+        out.push({ id, name, profileEnabled: tagKeys.some((k) => /unifiedprofile/i.test(k)) });
+        return; // a dataset record is a leaf - don't also walk into its own fields looking for more.
+      }
+      for (const val of Object.values(o)) walk(val, depth + 1);
+    }
+  };
+  walk(result);
+  return out;
+}
+
+export type DatasetProbe = {
+  read: boolean;
+  /** Did we get back anything we could recognise as dataset records at all? */
+  conclusive: boolean;
+  error: string | null;
+  datasetCount: number;
+  profileEnabled: Array<{ id: string; name: string }>;
+};
+
+/**
+ * Which datasets Catalog marks profile-enabled - context for a brief, not a
+ * row count. Catalog metadata (this call) does not carry record counts;
+ * getting one requires Query Service, which review/registry.ts deliberately
+ * does NOT allowlist for this task (a much bigger permission - arbitrary
+ * SQL - than triage needs). This stops at "which datasets", on purpose.
+ */
+export async function profileDatasetSummary(taskId: TaskId): Promise<DatasetProbe> {
+  try {
+    const list = await callMcpTool<unknown>(taskId, "adobe_list_datasets", { limit: "50" });
+    const records = datasetRecords(list);
+    return {
+      read: true,
+      conclusive: records.length > 0,
+      error: records.length ? null : "the dataset list returned nothing recognisable as a dataset",
+      datasetCount: records.length,
+      profileEnabled: records.filter((r) => r.profileEnabled).map((r) => ({ id: r.id, name: r.name })),
+    };
+  } catch (err) {
+    return { read: false, conclusive: false, error: (err as Error).message, datasetCount: 0, profileEnabled: [] };
   }
 }
 

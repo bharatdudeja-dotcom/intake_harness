@@ -464,7 +464,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       </span>
                     </div>
                     {taskRun.message && (
-                      <p className={`text-xs ${taskRun.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                      <p className={`whitespace-pre-wrap text-xs ${taskRun.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
                         {taskRun.message}
                       </p>
                     )}

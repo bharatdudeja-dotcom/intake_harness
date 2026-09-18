@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { callMcpTool } from "@/lib/mcp-client";
 import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
+import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
+import {
+  postReviewComment,
+  updateReviewNotesField,
+  type CommentOutcome,
+  type FieldUpdateOutcome,
+} from "@/lib/agents/review/workfront-notes";
 
 /**
  * Agent 2 - Review / Triage. B2, at step 1.5a.
@@ -33,21 +40,37 @@ import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
  * whole point: an agent that treats "I could not read the rejection" as "there
  * was no rejection" reproduces the bug it was built to fix.
  *
- * RESOLVING "wrong_data_source" WITH AEP (not implemented yet)
+ * DOCUMENTING THE HANDOFF TO AGENT 3 (lib/agents/review/aep-context.ts)
  *
- * triage.ts can flag a rejection as FAC-vs-profile-store ambiguous, but it is
- * pure and never checks AEP - so today that finding is always a question back
- * to the marketer, never an answer. It is scoped (registry.ts) to call
- * adobe_list_schemas/adobe_get_schema/adobe_list_segments/adobe_get_segment/
- * adobe_list_datasets for exactly this. Whoever wires that up: a field counts
- * as "in the profile store" ONLY when it is literally present in
- * adobe_get_schema's field list for a profile-enabled schema - never inferred
- * from the schema's title, the field's plausible name, or the marketer's own
- * wording. Follow src/lib/agents/audience/aep.ts's SchemaProbe pattern
- * (word-anchored matching against real field names) rather than re-deriving
- * it; it exists because an unanchored match already produced one false
- * positive ("lob" inside "glob"). A hallucinated field here answers the most
- * expensive classification this agent makes wrong, silently.
+ * Once a brief is clean enough to move on (the preflight path below, status
+ * "completed"), Review asks AEP the same three questions Agent 3 would ask
+ * next - are the needed attributes present, does an audience like this
+ * already exist, which candidate datasets are profile-enabled - and:
+ *
+ *   1. folds the answer into `output` so the brief Agent 3 receives already
+ *      has it, instead of Agent 3 discovering the same facts from scratch;
+ *   2. posts it as a Workfront comment (lib/agents/review/workfront-notes.ts)
+ *      for a human reading the issue;
+ *   3. best-effort writes it into a custom field on the issue too, so it
+ *      survives on the record itself, not only in a comment thread.
+ *
+ * (2) and (3) are writes, so they follow createIntakeRequest's contract in
+ * intake/workfront.ts exactly: writes are disabled on this tenant today, so
+ * both report what they WOULD have done rather than pretending success -
+ * see `workfrontDoc` on the completed response.
+ *
+ * NOT DONE HERE: triage.ts's "wrong_data_source" (FAC vs. profile store)
+ * classification itself still never consults AEP - it is PURE ON PURPOSE
+ * (see triage.ts) and still always asks the marketer rather than answering
+ * for them. The AEP context above is handed to Agent 3 and to a human
+ * either way; teaching triage.ts to resolve that specific question from it
+ * is a separate, bigger change to triage.ts's classification logic, not
+ * this one. Whoever does that: a field counts as "in the profile store"
+ * ONLY when it is literally present in adobe_get_schema's field list for a
+ * profile-enabled schema - never inferred from the schema's title, the
+ * field's plausible name, or the marketer's own wording (aep.ts's
+ * SchemaProbe already enforces this; reuse it rather than re-deriving it -
+ * an unanchored match once produced a false positive, "lob" inside "glob").
  */
 
 type ReviewInput = {
@@ -125,31 +148,70 @@ export async function POST(req: NextRequest) {
     const pre = preflight(fields);
     const clean = pre.findings.length === 0;
 
+    if (!clean) {
+      return NextResponse.json<AgentResponse>({
+        status: "needs_input",
+        message: `Before this reaches the review queue: ${pre.findings.map((f) => f.ask).join(" ")}`,
+        output: {
+          ...input,
+          reviewed: true,
+          mode: "preflight",
+          rejection: { present: false, checked: fetched.source, couldNotRead: fetched.error },
+          triage: pre,
+          intakeFields: pre.redraft,
+          loopCount,
+        },
+        metadata: {
+          mode: "preflight",
+          findings: pre.findings.length,
+          rejectionReadable: fetched.error === null,
+          loopCount,
+        },
+      });
+    }
+
+    // Clean: this is the handoff to Agent 3. Ask AEP what it can already
+    // answer about this audience (see the docstring above) and document it -
+    // in the brief Agent 3 gets, and on the Workfront issue for a human.
+    const aepContext = await gatherAepContext(fields);
+    const aepNote = formatAepContextNote(aepContext);
+
+    let workfrontDoc: { comment: CommentOutcome; fieldUpdate: FieldUpdateOutcome } | null = null;
+    if (objId) {
+      const objCode = input.workfront?.objCode || "OPTASK";
+      const [comment, fieldUpdate] = await Promise.all([
+        postReviewComment(objId, objCode, aepNote),
+        updateReviewNotesField(objId, objCode, aepNote),
+      ]);
+      workfrontDoc = { comment, fieldUpdate };
+    }
+
     return NextResponse.json<AgentResponse>({
-      status: clean ? "completed" : "needs_input",
-      message: clean
-        ? pre.summary
-        : `Before this reaches the review queue: ${pre.findings.map((f) => f.ask).join(" ")}`,
+      status: "completed",
+      message: `${pre.summary} ${aepNote}`,
       output: {
         ...input,
         reviewed: true,
         mode: "preflight",
-        rejection: {
-          // Said explicitly. "We looked and there was none" and "we could not
-          // look" must never read the same way.
-          present: false,
-          checked: fetched.source,
-          couldNotRead: fetched.error,
-        },
+        rejection: { present: false, checked: fetched.source, couldNotRead: fetched.error },
         triage: pre,
         intakeFields: pre.redraft,
+        aepContext,
+        workfrontDoc,
         loopCount,
       },
       metadata: {
         mode: "preflight",
-        findings: pre.findings.length,
+        findings: 0,
         rejectionReadable: fetched.error === null,
         loopCount,
+        schemaProbeConclusive: aepContext.schemaProbe.conclusive,
+        existingSegment: aepContext.segmentMatch.id
+          ? { id: aepContext.segmentMatch.id, name: aepContext.segmentMatch.name }
+          : null,
+        profileEnabledDatasets: aepContext.datasetProbe.profileEnabled,
+        workfrontCommentPosted: workfrontDoc?.comment.posted ?? null,
+        workfrontFieldUpdated: workfrontDoc?.fieldUpdate.updated ?? null,
       },
     });
   }

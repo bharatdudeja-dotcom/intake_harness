@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
 
   const needed = neededAttributes(fields);
-  const probe = await probeSchemas(needed);
+  const probe = await probeSchemas("audience_creation", needed);
 
   /*
    * AN INCONCLUSIVE PROBE IS NOT A MISSING ATTRIBUTE.
@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
   const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
     .filter(Boolean)
     .map(String);
-  const existing = await findExistingSegment(terms);
+  const existing = await findExistingSegment("audience_creation", terms);
   const estimate = await estimateCount(existing.id);
 
   // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:

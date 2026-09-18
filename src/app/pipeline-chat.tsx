@@ -204,7 +204,7 @@ export function PipelineChat() {
               </div>
 
               {tr.message && (
-                <p className={`pl-7 text-xs ${tr.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                <p className={`whitespace-pre-wrap pl-7 text-xs ${tr.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
                   {tr.message}
                 </p>
               )}
