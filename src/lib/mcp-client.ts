@@ -199,15 +199,18 @@ function getGatewayUrl(): string | null {
  *
  * MCP_GATEWAY_ROUTES maps server id to the tool-name prefixes it serves:
  *
- *   adobe-aec:adobe_,search_;workfront-adobe:workflow_,comment-stream_,approvals_,insights_,planning_
+ *   adobe-aec:adobe_,search_,cja_,dataprep_,destination_,flow_,msb_,query_,reactor_,source_,execute_sql,knowledge_base_health;workfront-adobe:workflow_,comment-stream_,approvals_,insights_,planning_
  *
  * This list is a statement about what THIS APP actually calls, not the
- * gateway's full catalog - it was originally missing `insights_`, so every
- * insights_* call (including resolveIntakeQueue's insights_find_id_by_name)
- * went out unprefixed as a bare name the gateway didn't recognise, and
- * failed with "Tool ... not found" - the same class of silent-prefix bug
- * the paragraph above already describes, just for a prefix nobody had
- * added yet rather than one applied globally and wrong.
+ * gateway's full catalog - it has grown twice already for exactly this
+ * reason. First `insights_` was missing, so every insights_* call
+ * (including resolveIntakeQueue's insights_find_id_by_name) went out
+ * unprefixed and failed with "Tool ... not found". Then `destination_` was
+ * missing the same way when activation.ts started calling
+ * destination_list_dataflows. Same class of silent-prefix bug the paragraph
+ * above already describes, just for a prefix nobody had added yet rather
+ * than one applied globally and wrong - and the fix is the same each time:
+ * add the missing prefix, don't rename the tool.
  *
  * MCP_GATEWAY_PREFIX remains the fallback for anything unmatched. Both unset,
  * names go through untouched - which is right for a gateway that resolves bare

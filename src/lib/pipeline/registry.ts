@@ -136,6 +136,15 @@ export const PIPELINE: AgentDefinition[] = [
       // fieldGroupRefs: a class schema's fields usually live in a
       // referenced field group, not inline on the class schema itself.
       "adobe_get_field_group",
+      // Explicit, on-command activation ONLY (see agents/audience/
+      // activation.ts) - checking whether an audience is already wired to
+      // a named destination's dataflow, never writing one. Read-only, same
+      // as everything else here: no destination_create_dataflow/
+      // destination_update_dataflow, on purpose - see activation.ts's
+      // docstring for exactly why an unsafe write there is worse than
+      // reporting what a human needs to wire up instead.
+      "destination_list_dataflows",
+      "destination_get_dataflow",
     ],
     // Empty today: this stub doesn't read priorOutputs, and Review's output
     // already carries the confirmed intake forward via its `input`. Add
