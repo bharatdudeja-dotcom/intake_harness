@@ -48,7 +48,7 @@ export interface AgentResponse<TOutput = unknown> {
    * Free-form health/observability data, persisted alongside the task run
    * but NOT passed to the next agent. Use this for the metrics the
    * requirements doc calls out explicitly, e.g. { loopCount } for B1,
-   * { predictedCount, identityGap } for B3/B6, { requestAgeSeconds } for B7.
+   * { identityGap } for B3, { requestAgeSeconds } for B7.
    */
   metadata?: Record<string, unknown>;
   /**

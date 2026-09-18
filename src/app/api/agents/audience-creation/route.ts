@@ -4,7 +4,6 @@ import { withToolCallLog } from "@/lib/mcp-client";
 import {
   probeSchemas,
   findExistingSegment,
-  estimateCount,
   identityGap,
   decideBuildPath,
   nightlyCutoff,
@@ -22,10 +21,12 @@ import { detectActivationIntent, activateAudience, type ActivationOutcome } from
  * logic behind it - every field returned a placeholder and statusMessage said
  * so honestly.
  *
- *   B3 (2.5)  predict the count before the marketer sees it, and flag the
- *             account-vs-profile identity gap rather than letting them discover
- *             a number they do not recognise. Keep the human decision; remove
- *             the surprise.
+ *   B3 (2.5)  flag the account-vs-profile identity gap rather than letting the
+ *             marketer discover a number they do not recognise. (Predicting a
+ *             count itself is NOT done here - see aep.ts's docstring: the
+ *             estimate tool is verified broken upstream, and the effort that
+ *             would have gone into working around it instead went into
+ *             checking whether the audience's needed attributes are real.)
  *   B4 (2.7a) when attributes are missing, keep state on the open GTO request,
  *             re-evaluate on completion rather than waiting for someone to
  *             check, and give the marketer a visible status instead of silence.
@@ -79,8 +80,6 @@ export interface AudienceCreationOutput {
     requestId: string | null;
     ageSeconds: number | null;
   };
-  /** B6: predicted membership count before the 9:45pm segmentation cutoff. */
-  predictedCount: number | null;
   /** B3/B8: account-vs-profile identity gap the marketer should see, not discover. */
   identityGap: { hasGap: boolean; details: string | null };
   /** Marketer-visible status string - the thing B4 says must never be silence. */
@@ -206,8 +205,8 @@ export async function POST(req: NextRequest) {
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
   const brief = typeof input.brief === "string" ? input.brief : undefined;
 
-  // Every read below (probeSchemas, findExistingSegment, estimateCount) calls
-  // MCP tools - wrapped so every call, request and response, ends up in
+  // Every read below (probeSchemas, findExistingSegment) calls MCP tools -
+  // wrapped so every call, request and response, ends up in
   // metadata.toolCalls for the UI.
   const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse<AudienceCreationOutput>> => {
     const needed = neededAttributes(fields, brief);
@@ -254,7 +253,6 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .map(String);
     const existing = await findExistingSegment("audience_creation", terms);
-    const estimate = await estimateCount(existing.id);
 
     // Off by default - see this file's docstring and activation.ts. Only
     // runs the (read-only) destination check when the brief itself
@@ -288,7 +286,6 @@ export async function POST(req: NextRequest) {
         : existing.read
           ? `No existing audience matched (${existing.considered} checked).`
           : `Could not list existing audiences: ${existing.error}.`,
-      estimate.count != null ? `Predicted ${estimate.count.toLocaleString()} profiles.` : `No count yet - ${estimate.basis}`,
       gap.hasGap ? "Identity gap flagged: see identityGap." : "",
       activation ? formatActivationMessage(activation) : "",
       attrState.note,
@@ -305,7 +302,6 @@ export async function POST(req: NextRequest) {
         requestId: attrState.requestId,
         ageSeconds: attrState.ageSeconds,
       },
-      predictedCount: estimate.count,
       identityGap: gap,
       statusMessage,
       ...(activation ? { activation } : {}),
@@ -342,7 +338,6 @@ export async function POST(req: NextRequest) {
         attributesMissing: missing,
         schemaEvidence: probe.evidence,
         existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
-        countBasis: estimate.basis,
         nightlyCutoff: cutoff,
         activationRequested: activationIntent.requested,
         activationDestination: activationIntent.destinationName,

@@ -120,11 +120,14 @@ export const PIPELINE: AgentDefinition[] = [
     owner: "Dev 3 (you)",
     allowedTools: [
       "search_adobe_knowledge",
-      // B5 (3.1): decide FAC vs. AEP rule builder, and predict membership
-      // count before the nightly cutoff (B6) — segment estimation, not the
-      // full segmentation-job tools.
-      "adobe_create_segment_estimate",
-      "adobe_get_segment_estimate",
+      // B5 (3.1): decide FAC vs. AEP rule builder.
+      //
+      // adobe_create_segment_estimate/adobe_get_segment_estimate (B6 count
+      // prediction) are deliberately NOT granted here any more — verified
+      // live against 4 real segment IDs that the estimate tool 404s on every
+      // one of them (a gateway-side bug, not fixable from this app — see
+      // lib/agents/audience/aep.ts's docstring). A tool this agent can no
+      // longer usefully call has no reason to stay in its allowlist.
       "adobe_list_segments",
       "adobe_get_segment",
       "adobe_create_segment",

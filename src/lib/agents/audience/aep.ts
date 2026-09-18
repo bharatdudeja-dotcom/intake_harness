@@ -7,14 +7,19 @@
  *
  * Every function here is a READ. Nothing creates a segment.
  *
- * WHY THAT LINE MATTERS: adobe_create_segment_estimate takes a segment_id, so
- * estimating a brand-new audience means creating the segment first. That is a
- * real write, into a client's AEP sandbox, as a side effect of what the
- * marketer experiences as "showing me a number". So this module will report
- * that it cannot predict a count and say exactly what creating one would
- * require, rather than quietly writing a segment definition to produce a
- * figure. A precomputed count is worth a lot (B3); it is not worth silently
- * mutating a production sandbox.
+ * NO COUNT ESTIMATION HERE, ON PURPOSE. This module used to also call
+ * adobe_create_segment_estimate/adobe_get_segment_estimate for B3's "predict
+ * the count before the marketer sees it." Verified live against 4 different
+ * real, valid segment IDs (confirmed valid via adobe_get_segment) - every one
+ * 404s identically, because the estimate tool hits the wrong upstream URL
+ * (.../estimate suffix that the gateway's adobe_get_segment path does not
+ * use). That is a bug in the gateway's tool, not this app, and not something
+ * fixable from here - so rather than keep a call site that always fails (and
+ * a UI line that always reads "No count yet"), it was removed. The effort
+ * that would have gone into working around it instead went into
+ * ATTRIBUTE_CUES/neededAttributes below: predicting a count nobody can trust
+ * is worth less than being right about which fields an audience actually
+ * needs.
  *
  * Tool names and argument shapes below are verified against the live server -
  * 238 tools, tools/list read 16 Sep 2026. Every one of these takes an optional
@@ -32,6 +37,19 @@ import type { TaskId } from "@/lib/pipeline/types";
  * line-of-business as AVAILABLE on the strength of a substring in a URL. A
  * false positive here is worse than a false negative: it claims an audience can
  * be built when it cannot.
+ *
+ * `identity` and `product_ownership` were added after a real run asked for
+ * "an audience where ECID exists" and this agent opened GTO requests for
+ * line_of_business/customer_type instead - fields nothing about that ask
+ * needed, because the only cues that existed were the intake-form baseline
+ * categories, not what the brief actually said. Both are grounded in real
+ * field names seen live this session, not guessed: `xfinityTV`/
+ * `xfinityInternet` appeared as the literal trailing segment of a real
+ * segment's PQL field path (`_taplondonptrsd.xfinityTV`), and `customerEmail`
+ * as a real schema property, in this tenant's own sandbox. Adding a cue for
+ * a concept never verified against a real field name would repeat the exact
+ * mistake this file exists to prevent - a category that matches the brief but
+ * can never be confirmed present.
  */
 export const ATTRIBUTE_CUES: Record<string, RegExp> = {
   line_of_business: /(^|[^a-z])(lineofbusiness|line_of_business|lob|businessunit|business_unit)([^a-z]|$)/i,
@@ -39,6 +57,15 @@ export const ATTRIBUTE_CUES: Record<string, RegExp> = {
   lifecycle_journey: /(^|[^a-z])(lifecycle|lifecyclestage|lifecycle_stage|journeystage|journey_stage)([^a-z]|$)/i,
   channels: /(^|[^a-z])(channel|emailaddress|email_address|phonenumber|phone_number|mobilephone)([^a-z]|$)/i,
   region: /(^|[^a-z])(region|state|market|geo|postalcode|postal_code)([^a-z]|$)/i,
+  // ECID/identity presence - distinct from "channels", which is about WHICH
+  // channel to send on, not whether an identity attribute exists on the
+  // profile to target against.
+  identity: /(^|[^a-z])(ecid|mcid|experience\s?cloud\s?id|identitymap|identity_map)([^a-z]|$)/i,
+  // Product/service ownership - xfinitytv/xfinityinternet/xfinitymobile are
+  // real field names in this tenant (see docstring above); internet/tv/
+  // broadband/television cover briefs that describe the same thing by the
+  // product's common name rather than the schema's field name.
+  product_ownership: /(^|[^a-z])(xfinitytv|xfinityinternet|xfinitymobile|broadband|television|\btv\b|\binternet\b)([^a-z]|$)/i,
 };
 
 /**
@@ -412,62 +439,6 @@ export async function profileDatasetSummary(taskId: TaskId): Promise<DatasetProb
     };
   } catch (err) {
     return { read: false, conclusive: false, error: (err as Error).message, datasetCount: 0, profileEnabled: [] };
-  }
-}
-
-export type CountEstimate = {
-  count: number | null;
-  /** Where the number came from, or why there is not one. */
-  basis: string;
-  segmentId: string | null;
-};
-
-/**
- * B3/B6: the expected count, before the marketer sees it.
- *
- * Only ever estimated for a segment that ALREADY EXISTS. When there is none,
- * this returns null and says what producing one would require. A number is the
- * whole value of B3, and a number produced by writing an unrequested segment
- * definition into a client's sandbox is not worth having.
- */
-export async function estimateCount(segmentId: string | null): Promise<CountEstimate> {
-  if (!segmentId) {
-    return {
-      count: null,
-      basis:
-        "No existing segment matched this request, and estimating a new one requires creating the " +
-        "segment definition first (adobe_create_segment_estimate takes a segment_id). That is a write " +
-        "into the AEP sandbox, so it is not done as a side effect of a prediction - it needs an " +
-        "explicit build step.",
-      segmentId: null,
-    };
-  }
-  try {
-    const started = await callMcpTool<Record<string, unknown>>(
-      "audience_creation",
-      "adobe_create_segment_estimate",
-      { segment_id: segmentId },
-    );
-    const estimateId = String(started?.estimate_id || started?.id || "");
-    const detail = estimateId
-      ? await callMcpTool<Record<string, unknown>>("audience_creation", "adobe_get_segment_estimate", {
-          segment_id: segmentId,
-          estimate_id: estimateId,
-        })
-      : started;
-
-    const n = Number(
-      detail?.totalRows ?? detail?.profileCount ?? detail?.count ?? detail?.estimatedSize ?? NaN,
-    );
-    return Number.isFinite(n)
-      ? { count: n, basis: `estimate on existing segment ${segmentId}`, segmentId }
-      : {
-          count: null,
-          basis: `the estimate for ${segmentId} returned no recognisable count field`,
-          segmentId,
-        };
-  } catch (err) {
-    return { count: null, basis: `estimate failed: ${(err as Error).message}`, segmentId };
   }
 }
 
