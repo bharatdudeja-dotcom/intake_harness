@@ -2081,6 +2081,16 @@ function stageUsage (st) {
 /**
  * Narrate whatever ran onto the job, deduped on the upstream task-run id.
  *
+ * RETURNS WHAT HAPPENED. This used to swallow every error on the reasoning that
+ * the work had happened and the pipeline had moved, so a failure to write it
+ * down must not read as the work having failed. True about the status, wrong
+ * about the silence: the record IS the product, and a capture that fails
+ * without a word looks exactly like a run with nothing to capture. It hid a
+ * live bug twice in one day - the NJ audience existed upstream and never
+ * reached the record, and every screen said only "server error".
+ *
+ * @returns {Promise<{added: number, error: string|null}>}
+ *
  * Shared by every path that causes an agent to run - the gate decision, an
  * answer, a continue. Three copies of this loop would drift, and the failure
  * mode of drift here is a stage that ran and was never written down, which is
@@ -2097,7 +2107,7 @@ async function captureStages (runId, system, steps) {
         const labelFor = (id) => (catalog.find(a => a.id === id) || {}).label || id
 
         const full = await store.getResource(runId)
-        if (!full) return
+        if (!full) return { added: 0, error: `job ${runId} could not be read back` }
         full.steps = full.steps || []
         const already = new Set(
             full.steps.map(x => x.provenance && x.provenance.upstream_task_run_id).filter(Boolean).map(String)
@@ -2135,13 +2145,15 @@ async function captureStages (runId, system, steps) {
             }))
             added++
         }
-        if (!added) return
+        if (!added) return { added: 0, error: null }
         projectRecipe(full, full.steps, new Date().toISOString())
         full.content_hash = contentHash(full.content)
         await store.saveResource(full)
+        return { added, error: null }
     } catch (e) {
-        // The work happened and the pipeline moved. Failing to ALSO write it
-        // down must not read as the work having failed.
+        // Reported, not thrown: the pipeline really did move, so this must not
+        // read as the work having failed. But it must not be silent either.
+        return { added: 0, error: `${e && e.message ? e.message : e}${e && e.stack ? ' | ' + String(e.stack).split('\n')[1].trim() : ''}` }
     }
 }
 
@@ -2203,7 +2215,7 @@ async function captureStages (runId, system, steps) {
 
             const steps = agentSystems.toSteps(result)
             const blocked = agentSystems.blockedOn(result)
-            await captureStages(runId, system, steps)
+            const captured = await captureStages(runId, system, steps)
 
             const status = (result && result.run && result.run.status) || 'unknown'
             return jsonResult({
@@ -2227,7 +2239,9 @@ async function captureStages (runId, system, steps) {
                     : (status === 'awaiting_approval' && !blocked
                         ? 'A step finished and the next one is waiting. Nothing is outstanding for a human - call continue_job again to run it.'
                         : undefined),
-                detail_captured: `Recorded on job ${runId}. Read it with get_job before describing what happened - the stage list here carries statuses and durations only.`
+                detail_captured: captured.error
+                    ? `NOT recorded on job ${runId}: ${captured.error}. The stages above DID run - this is a failure to write them down, and get_job will not show them. Say so rather than describing the stages as captured.`
+                    : `${captured.added} stage(s) recorded on job ${runId}. Read it with get_job before describing what happened - the stage list here carries statuses and durations only.`
             })
         }
     )
