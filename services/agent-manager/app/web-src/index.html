@@ -2321,13 +2321,13 @@ function renderAgents () {
           <b>${esc(sys.label || sys.id)}</b>
           <div class="sub">${esc(sys.practice || 'no domain')} &middot;
             ${sys.active ? `<span class="ok">connected</span>` : `<span class="off">not connected</span>`}
-            ${sys.base_url ? ` &middot; <span class="mono">${esc(sys.base_url)}</span>` : ''}</div>
+            </div>
         </div>
         <span class="sub">${mine.length} agent(s) &middot; ${totalRuns} run(s)</span>
       </div>
 
-      ${server ? `<div class="sub" style="margin:-2px 0 10px">
-        Tools via <b>${esc(server.label)}</b>${server.auth_configured ? '' : ' &middot; no credential set'}</div>` : ''}
+      <div class="sub" style="margin:-2px 0 10px">Tools reach it through the gateway &mdash; see
+        Settings &rsaquo; MCP servers for what is in it.</div>
 
       ${mine.length ? `<div class="agent-grid">${mine.map(a => {
         const runs = runsFor(a.id)
