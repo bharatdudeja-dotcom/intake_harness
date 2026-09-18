@@ -1890,6 +1890,7 @@ function registerTools (server, context = {}) {
                 run_id: runId,
                 upstream: ref,
                 upstream_status: (envelope && envelope.run && envelope.run.status) || 'unknown',
+                ...describeRunState((envelope && envelope.run && envelope.run.status) || 'unknown', blocked),
                 loop_count: agentSystems.loopCount(steps),
                 stages: steps.map(st => ({
                     agent: st.agent_id,
@@ -2041,6 +2042,7 @@ function registerTools (server, context = {}) {
                 run_id: runId,
                 answered: answers,
                 upstream_status: (result && result.run && result.run.status) || 'unknown',
+                ...describeRunState((result && result.run && result.run.status) || 'unknown', blocked),
                 stages: steps.map(st => ({
                     agent: st.agent_id,
                     reported: st.upstream_status,
@@ -2060,6 +2062,63 @@ function registerTools (server, context = {}) {
             })
         }
     )
+
+/**
+ * What a run's state MEANS, and what to do about it.
+ *
+ * The pipeline's own word for "finished a step, waiting to be told to run the
+ * next one" is `awaiting_approval`, which reads as though a human owes it an
+ * approval. One does not: the only approval in this process is the request in
+ * Workfront, at the gate, before Agent 2. After that, a pause is just a pause.
+ *
+ * An assistant reading the raw status told a marketer to go and approve
+ * something after Agent 2 had already run. It was reading exactly what we gave
+ * it, so this gives it something truer.
+ *
+ * `blocked_on` is null when nothing is gated, so the distinction is already in
+ * the data - it just was not being said.
+ */
+function describeRunState (status, blocked) {
+    if (blocked) {
+        const url = blocked.ref ? workfrontLink(blocked.ref.objCode, blocked.ref.objId) : null
+        return {
+            state: 'waiting for a named person to approve the request in Workfront',
+            next_action: url
+                ? `Give this link and stop: ${url}. Once they say they have approved it there, record it with approve_intake. Never offer to approve it yourself.`
+                : 'A named person must approve the request in Workfront. Once they say they have, record it with approve_intake.',
+            waiting_on_a_human: true
+        }
+    }
+    if (status === 'awaiting_approval') {
+        return {
+            state: 'paused between steps - a step finished and the next one has not been started',
+            next_action: 'Call continue_job. NOTHING is outstanding for a human: the approval at the gate has already happened, and the pipeline stops after every step by design. Do not ask anyone to approve anything here.',
+            waiting_on_a_human: false
+        }
+    }
+    if (status === 'needs_input') {
+        return {
+            state: 'waiting for an answer to a question',
+            next_action: 'Read the question, ask the marketer only for that, and send it with answer_intake - not start_intake, which would make a second job.',
+            waiting_on_a_human: true
+        }
+    }
+    if (status === 'completed') {
+        return {
+            state: 'finished - every step has run',
+            next_action: 'Nothing to advance. Read the run with get_job to describe what it produced.',
+            waiting_on_a_human: false
+        }
+    }
+    if (status === 'failed') {
+        return {
+            state: 'failed',
+            next_action: 'Read the run to see which stage failed and why. Do not retry blindly.',
+            waiting_on_a_human: false
+        }
+    }
+    return { state: status, next_action: null, waiting_on_a_human: false }
+}
 
 /**
  * What a stage spent, as three possible answers rather than two.
@@ -2242,6 +2301,7 @@ async function captureStages (runId, system, steps) {
             return jsonResult({
                 run_id: runId,
                 upstream_status: status,
+                ...describeRunState(status, blocked),
                 stages: steps.map(st => ({
                     agent: st.agent_id,
                     reported: st.upstream_status,
