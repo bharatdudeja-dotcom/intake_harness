@@ -1,18 +1,21 @@
 import { query } from "@/lib/db";
-import { ESCALATION, PIPELINE } from "./registry";
+import { PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 
 /**
- * Runs exactly the NEXT agent for a run — never more than one — over real
- * HTTP to that agent's own route (a dev can `curl
- * localhost:3000/api/agents/audience-creation` on its own without spinning
- * up the rest of the pipeline). Every call is recorded as a task_runs row.
+ * Runs exactly the NEXT agent for a run over real HTTP to that agent's own
+ * route (a dev can `curl localhost:3000/api/agents/audience-creation` on
+ * its own without spinning up the rest of the pipeline). Every call is
+ * recorded as a task_runs row.
  *
- * The pipeline stops after every step, not just a failed/paused one: a
- * step that completes with more agents left to run puts the run into
- * "awaiting_approval" rather than calling the next agent automatically —
- * the per-agent equivalent of a tool call waiting for permission before it
- * runs. POST /api/runs/[runId]/continue is what actually advances it.
+ * A step that completes with more agents left to run either stops the run
+ * at "awaiting_approval" (the per-agent equivalent of a tool call waiting
+ * for permission before it runs — POST /api/runs/[runId]/continue is what
+ * advances it) or, when the NEXT agent's registry entry sets
+ * `requiresApproval: false`, chains straight into that agent within this
+ * same call instead. Audience Creation is the one agent that opts out
+ * today — see registry.ts for why — so completing Review now runs
+ * Audience Creation immediately rather than waiting for a click.
  *
  * Each agent only ever receives the slice of `priorOutputs` its registry
  * entry declares via `contextAccess` — filtered from the full accumulated
@@ -20,9 +23,10 @@ import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRo
  * agent's output it isn't scoped to see (paired with the tool allowlist
  * enforced in lib/mcp-client.ts).
  *
- * A "failed" step additionally triggers Agent 4 — Escalation (B9: "the
- * process terminates without an audience, and nothing is captured").
- * "needs_input" does NOT trigger it — that's an expected, resumable pause.
+ * A "failed" step just ends the run there — there is no Agent 4 /
+ * Escalation any more (removed on explicit product direction; see
+ * registry.ts's note where it used to be defined). "needs_input" was
+ * already never a failure — an expected, resumable pause — and remains one.
  */
 async function advanceOneStep(
   run: RunRow,
@@ -86,15 +90,6 @@ async function advanceOneStep(
     );
 
     if (response.status !== "completed") {
-      if (response.status === "failed") {
-        await runEscalation(run.run_id, baseUrl, {
-          failedTask: agent.name,
-          failedStepIndex: stepIndex,
-          message: response.message ?? null,
-          input: currentInput,
-        }, priorOutputs, stepIndex + 1);
-      }
-
       const [updated] = await query<RunRow>(
         `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
          WHERE run_id = $1 RETURNING *`,
@@ -105,6 +100,18 @@ async function advanceOneStep(
 
     const nextStepIndex = stepIndex + 1;
     const isLastStep = nextStepIndex >= PIPELINE.length;
+
+    // No approval gate before the next agent — run it now, within this same
+    // call, instead of stopping at "awaiting_approval". See registry.ts's
+    // requiresApproval and this file's own docstring.
+    if (!isLastStep && PIPELINE[nextStepIndex].requiresApproval === false) {
+      const nextPriorOutputs: Partial<Record<AgentName, unknown>> = {
+        ...priorOutputs,
+        [agent.name]: response.output,
+      };
+      return advanceOneStep(run, nextStepIndex, response.output, nextPriorOutputs, baseUrl);
+    }
+
     const [updated] = await query<RunRow>(
       `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
        WHERE run_id = $1 RETURNING *`,
@@ -112,17 +119,16 @@ async function advanceOneStep(
     );
     return updated;
   } catch (err) {
+    // Recording the step's own result (the try block above) failed — there
+    // is nowhere left in the DB to put why (no Escalation task_run any
+    // more, and `runs` itself carries no message column), so this is the
+    // one place that error is still visible at all.
+    console.error(`orchestrator: failed to record task_run for run ${run.run_id} step ${stepIndex}:`, err);
     const [failed] = await query<RunRow>(
       `UPDATE runs SET status = 'failed', current_step = $2, updated_at = NOW()
        WHERE run_id = $1 RETURNING *`,
       [run.run_id, stepIndex],
     );
-    await runEscalation(run.run_id, baseUrl, {
-      failedTask: agent.name,
-      failedStepIndex: stepIndex,
-      message: `Recording this step's result failed: ${(err as Error).message}`,
-      input: currentInput,
-    }, priorOutputs, stepIndex + 1).catch(() => {});
     return failed;
   }
 }
@@ -231,62 +237,6 @@ async function completedTaskRunsFor(
     priorOutputs[taskRun.task_id] = taskRun.output;
   }
   return { priorOutputs, lastCompleted: completedTaskRuns[completedTaskRuns.length - 1] };
-}
-
-/**
- * Best-effort call to the Escalation agent when a run fails. Never throws:
- * a broken escalation path must not mask the original failure, but it IS
- * still recorded as its own task_run — even escalation failing is
- * something B9 says must be captured, not silently dropped.
- */
-async function runEscalation(
-  runId: string,
-  baseUrl: string,
-  failure: { failedTask: AgentName; failedStepIndex: number; message: string | null; input: unknown },
-  priorOutputs: Partial<Record<AgentName, unknown>>,
-  stepIndex: number,
-): Promise<void> {
-  const scopedPriorOutputs: Partial<Record<AgentName, unknown>> = {};
-  for (const visibleAgent of ESCALATION.contextAccess) {
-    if (visibleAgent in priorOutputs) {
-      scopedPriorOutputs[visibleAgent] = priorOutputs[visibleAgent];
-    }
-  }
-
-  const startedAt = new Date();
-  let response: AgentResponse;
-  try {
-    response = await callAgent(baseUrl, ESCALATION.path, {
-      runId,
-      input: failure,
-      priorOutputs: scopedPriorOutputs,
-    });
-  } catch (err) {
-    response = { status: "failed", message: (err as Error).message };
-  }
-  const finishedAt = new Date();
-
-  await query<TaskRunRow>(
-    `INSERT INTO task_runs
-       (run_id, task_id, step_index, status, input, output, message, metadata,
-        tokens_used, model, started_at, finished_at, duration_ms)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
-    [
-      runId,
-      ESCALATION.name,
-      stepIndex,
-      response.status,
-      JSON.stringify(failure),
-      JSON.stringify(response.output ?? null),
-      response.message ?? null,
-      JSON.stringify(response.metadata ?? {}),
-      response.usage?.tokens ?? null,
-      response.usage?.model ?? null,
-      startedAt.toISOString(),
-      finishedAt.toISOString(),
-      finishedAt.getTime() - startedAt.getTime(),
-    ],
-  );
 }
 
 /**

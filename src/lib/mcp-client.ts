@@ -57,7 +57,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { ALL_TASKS } from "./pipeline/registry";
+import { PIPELINE } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
 
 /**
@@ -313,7 +313,7 @@ async function describeError(res: Response): Promise<string> {
 let requestCounter = 0;
 
 function assertToolAllowed(taskId: TaskId, name: string): void {
-  const agent = ALL_TASKS.find((a) => a.name === taskId);
+  const agent = PIPELINE.find((a) => a.name === taskId);
   if (!agent) {
     throw new McpError(`callMcpTool: unknown taskId "${taskId}" — not in the pipeline registry.`);
   }

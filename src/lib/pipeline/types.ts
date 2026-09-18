@@ -1,13 +1,18 @@
 /**
- * The contract every agent endpoint implements. Each agent — the three in
- * the sequential pipeline (Intake, Review/Triage, Audience Creation) plus
- * Escalation, invoked out-of-band when a run fails (see
- * src/lib/pipeline/orchestrator.ts) — is a standalone Next.js route
+ * The contract every agent endpoint implements. Each agent in the
+ * sequential pipeline (Intake, Review/Triage, Audience Creation — see
+ * src/lib/pipeline/registry.ts's PIPELINE) is a standalone Next.js route
  * handler. This is the ONLY shape the orchestrator, and every other agent,
  * needs to agree on. An agent can be rewritten entirely internally as long
  * as it keeps this request/response shape.
  */
 
+/**
+ * "escalation" is kept here even though Agent 4 — Escalation was removed
+ * (see registry.ts) purely so historical `task_runs`/`tasks` rows with
+ * that task_id still type-check honestly against real DB content — it is
+ * not, and will never again be, an agent this app invokes.
+ */
 export const AGENT_NAMES = ["intake", "review", "audience_creation", "escalation"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 /** A task_id in the `tasks` table is just an AgentName — same vocabulary, DB column name. */
@@ -40,8 +45,8 @@ export interface AgentResponse<TOutput = unknown> {
    * A plain-English explanation of what this step did, for a human reading
    * the run — not just for "failed"/"needs_input" anymore. Every current
    * agent already computes something like this internally (Audience
-   * Creation's statusMessage, Escalation's summary); the fix was surfacing
-   * it here on success too, not adding a new field.
+   * Creation's statusMessage); the fix was surfacing it here on success
+   * too, not adding a new field.
    */
   message?: string;
   /**

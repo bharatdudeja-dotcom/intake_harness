@@ -1,9 +1,9 @@
-import { ALL_TASKS } from "@/lib/pipeline/registry";
+import { PIPELINE } from "@/lib/pipeline/registry";
 import { getTaskCounts } from "@/lib/pipeline/orchestrator";
 
 export const dynamic = "force-dynamic";
 
-/** The Agents page — the registry (PIPELINE + Escalation) plus real execution counts per agent, across every run. */
+/** The Agents page — the registry (PIPELINE) plus real execution counts per agent, across every run. */
 export default async function AgentsPage() {
   const counts = await getTaskCounts();
 
@@ -18,7 +18,7 @@ export default async function AgentsPage() {
       </div>
 
       <ol className="flex flex-col gap-3">
-        {ALL_TASKS.map((agent) => {
+        {PIPELINE.map((agent) => {
           const c = counts[agent.name] ?? { total: 0, completed: 0, needsInput: 0, failed: 0 };
           return (
             <li

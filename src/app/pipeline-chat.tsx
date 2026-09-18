@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
+import { PIPELINE } from "@/lib/pipeline/registry";
 import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "./status-badge";
 import { ToolCallTrace, type ToolCallOutput } from "./tool-call-trace";
@@ -11,8 +11,11 @@ import { ToolCallLog, type ToolCallLogEntry } from "./tool-call-log";
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
 
+// Falls back to the raw task_id for a historical "escalation" row — the
+// registry no longer has an entry for it (Agent 4 was removed), but old
+// task_runs with that task_id still need to render something.
 function agentLabel(taskId: AgentName): string {
-  return PIPELINE.find((a) => a.name === taskId)?.label ?? (taskId === "escalation" ? ESCALATION.label : taskId);
+  return PIPELINE.find((a) => a.name === taskId)?.label ?? taskId;
 }
 
 /** A step's output, loosely — every field here is optional because each agent's shape differs. */
@@ -25,10 +28,13 @@ type StepOutput = ToolCallOutput & {
  * A conversational front end for the whole pipeline, one agent per turn —
  * modeled on how Claude Code itself shows a run: the marketer's request,
  * each agent's tool calls surfaced inline rather than hidden, and an
- * explicit approval prompt before the next agent runs rather than the
- * whole pipeline firing off unattended. Backed entirely by
+ * explicit approval prompt before an agent that still gates runs rather
+ * than the whole pipeline firing off unattended. Backed by
  * src/lib/pipeline/orchestrator.ts's per-step gate (runPipeline only ever
- * runs the next agent; POST .../continue is what approves the next one).
+ * runs the next agent; POST .../continue is what approves the next one) —
+ * except Audience Creation, which registry.ts opts out of the gate for, so
+ * it runs immediately once Review completes rather than waiting for a
+ * click.
  */
 export function PipelineChat() {
   const [brief, setBrief] = useState("");
@@ -285,8 +291,10 @@ export function PipelineChat() {
           </div>
         )}
 
-        {/* The approval gate — the whole point of this view. Nothing after the
-            step above ran without this being clicked. */}
+        {/* The approval gate — only shows up before an agent whose registry
+            entry still requires it (see registry.ts's requiresApproval).
+            Audience Creation opted out, so this never appears between
+            Review finishing and Audience Creation running. */}
         {run?.status === "awaiting_approval" && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
             <p className="text-blue-900 dark:text-blue-300">
@@ -320,7 +328,7 @@ export function PipelineChat() {
         )}
         {run?.status === "failed" && (
           <p className="text-sm text-red-600">
-            This run failed and Escalation was invoked — see the{" "}
+            This run failed — see the{" "}
             <Link href={`/runs/${run.run_id}`} className="underline">
               full trace
             </Link>

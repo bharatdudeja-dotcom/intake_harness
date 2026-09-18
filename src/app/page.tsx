@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
+import { PIPELINE } from "@/lib/pipeline/registry";
 import { getRunStats } from "@/lib/pipeline/orchestrator";
 import { PipelineChat } from "./pipeline-chat";
 
@@ -26,9 +26,10 @@ export default async function Home() {
             Home
           </h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Describe a campaign below. Agent 1 (Intake) runs first, then each
-            later agent waits for your approval before it runs. See every run
-            in the database on the{" "}
+            Describe a campaign below. Agent 1 (Intake) runs first; Agent 2
+            (Review) waits for your approval before it runs, then Agent 3
+            (Audience Creation) runs immediately once Review completes. See
+            every run in the database on the{" "}
             <Link href="/runs" className="underline">Runs</Link> page.
           </p>
         </div>
@@ -65,22 +66,6 @@ export default async function Home() {
                 <code className="text-xs text-zinc-400">{agent.path}</code>
               </li>
             ))}
-            {/* Escalation isn't step 4 of the sequence above — it's called
-                out of band by the orchestrator only when a run fails, so
-                it's rendered separately rather than numbered 4 in the same
-                list. */}
-            <li
-              key={ESCALATION.name}
-              className="flex items-center gap-3 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/30"
-            >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-medium text-white dark:bg-amber-600">
-                !
-              </span>
-              <span className="font-medium text-black dark:text-zinc-50">{ESCALATION.label}</span>
-              <span className="text-xs text-amber-700 dark:text-amber-500">on failure</span>
-              <span className="ml-auto text-xs text-zinc-500">{ESCALATION.owner}</span>
-              <code className="text-xs text-zinc-400">{ESCALATION.path}</code>
-            </li>
           </ol>
         </details>
       </main>

@@ -42,6 +42,16 @@ export interface AgentDefinition {
    * key it isn't scoped to see, not just one it's expected to ignore.
    */
   contextAccess: AgentName[];
+  /**
+   * Does a human have to click "Approve" before THIS agent runs, once the
+   * prior one has completed? Defaults to true (undefined === required) —
+   * the per-agent equivalent of a tool-use permission prompt, so opting
+   * OUT of it is the thing that has to be explicit and visible here, not
+   * the other way round. See orchestrator.ts's advanceOneStep for exactly
+   * how a `false` here chains straight into this agent instead of stopping
+   * the run at "awaiting_approval".
+   */
+  requiresApproval?: boolean;
 }
 
 export const PIPELINE: AgentDefinition[] = [
@@ -118,6 +128,15 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/audience-creation",
     label: "Agent 3 — Audience Creation",
     owner: "Dev 3 (you)",
+    // Runs straight after Review with no approval click in between — on
+    // explicit product direction, to keep the happy path moving rather
+    // than stopping to ask "run Audience Creation?" every single time.
+    // Everything Agent 3 itself does is still a read (see
+    // lib/agents/audience/aep.ts) and it can still pause the RUN on its
+    // own via "needs_input" (an open GTO attribute request) - this only
+    // removes the separate human click that used to sit between it and
+    // Review finishing.
+    requiresApproval: false,
     allowedTools: [
       "search_adobe_knowledge",
       // B5 (3.1): decide FAC vs. AEP rule builder.
@@ -158,36 +177,17 @@ export const PIPELINE: AgentDefinition[] = [
 ];
 
 /**
- * Agent 4 — Escalation. NOT part of PIPELINE: it isn't step 4 of the happy
- * path, it's the handler for when the happy path doesn't happen.
+ * Agent 4 — Escalation was removed on explicit product direction: the
+ * out-of-band handler the orchestrator used to call when a run's status
+ * became "failed" (B9 / step 4.6 in the requirements doc - "log the
+ * failure and classify it"). It never actually fired in practice (see
+ * db/schema.sql's tasks-catalog comment / the historical `escalation` rows
+ * that predate this removal) and product direction was to drop it rather
+ * than keep carrying a handler for a case nothing exercised. A failed run
+ * now just ends at status "failed" - see orchestrator.ts's advanceOneStep,
+ * which no longer calls anything after recording that.
  *
- * From the requirements doc (B9 / step 4.6): "Full escalation. The process
- * terminates without an audience, and nothing is captured... Log the
- * failure and classify it. This is the input to the crawl, walk, run loop
- * in section 10 — without it, the same class of failure recurs
- * indefinitely and the agents never improve."
- *
- * The orchestrator (runPipeline in orchestrator.ts) calls this agent
- * exactly when a run's status becomes "failed" — never on "needs_input",
- * which is an expected, resumable pause (B1's marketer round-trip, B3's
- * validation step), not a terminated-without-an-audience escalation. It
- * needs visibility into every prior agent's output to classify what
- * actually went wrong, which is why contextAccess is broad here — this is
- * the one agent where that's the job, not a scoping gap.
+ * "escalation" stays in AgentName/TaskId (types.ts) purely so historical
+ * task_runs rows with that task_id still type-check honestly - it is not
+ * an agent this app will ever invoke again.
  */
-export const ESCALATION: AgentDefinition = {
-  name: "escalation",
-  path: "/api/agents/escalation",
-  label: "Agent 4 — Escalation",
-  owner: "Unassigned",
-  // NOTE: the knowledge tool is `search_adobe_knowledge`. `search_knowledge_base`
-  // does NOT exist on any server in the estate - it was asked for here and in
-  // all three agents above, every call failed, the failure was written into the
-  // payload rather than raised, and the run still reported `completed`. That is
-  // why escalation has never fired. Verified against the live endpoint, 238 tools.
-  allowedTools: ["search_adobe_knowledge"], // TODO: look up prior similar failures once a real classification store exists
-  contextAccess: ["intake", "review", "audience_creation"],
-};
-
-/** Every task, sequential pipeline + escalation — used to seed db/schema.sql's `tasks` catalog and for tool-allowlist lookups in lib/mcp-client.ts. */
-export const ALL_TASKS: AgentDefinition[] = [...PIPELINE, ESCALATION];

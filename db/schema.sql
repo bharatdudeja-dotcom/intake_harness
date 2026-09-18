@@ -8,10 +8,11 @@
 -- Three levels, matching how the pipeline actually runs:
 --   runs       — one row per pipeline invocation (a marketer's request).
 --   tasks      — a catalog of the task/agent *types* that can run (intake,
---                review, audience_creation, and escalation — the last one
---                invoked only when a run fails, not part of the sequential
---                pipeline). Static reference data, seeded below from the
---                pipeline registry.
+--                review, audience_creation). Static reference data, seeded
+--                below from the pipeline registry. Also still carries an
+--                'escalation' row for historical task_runs predating Agent
+--                4 — Escalation's removal; nothing seeds new rows with it.
+--                See src/lib/pipeline/registry.ts.
 --   task_runs  — one row per actual execution of a task within a run: which
 --                task, in which run, at which step, with what status, and
 --                exactly when it started/finished. This is the traceability
@@ -226,12 +227,19 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_transactions (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
--- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
--- it's the one place both agree on task_id.
+-- Seed/refresh the task catalog from src/lib/pipeline/registry.ts's
+-- PIPELINE. Keep this block in sync with that file — it's the one place
+-- both agree on task_id.
+--
+-- The 'escalation' row stays, relabeled rather than removed — it is NOT
+-- re-derived from the registry any more (Agent 4 was deleted, see
+-- registry.ts), but task_runs.task_id has a FK against tasks(task_id) and
+-- historical task_runs rows still reference 'escalation', so deleting it
+-- would fail that constraint anyway. This row simply stops being touched
+-- going forward.
 INSERT INTO tasks (task_id, label, owner) VALUES
     ('intake',            'Agent 1 — Intake',              'Dev 1'),
     ('review',            'Agent 2 — Review / Triage',     'Dev 2'),
     ('audience_creation', 'Agent 3 — Audience Creation',   'Dev 3 (you)'),
-    ('escalation',        'Agent 4 — Escalation',          'Unassigned')
+    ('escalation',        'Agent 4 — Escalation (removed)', 'Unassigned')
 ON CONFLICT (task_id) DO UPDATE SET label = EXCLUDED.label, owner = EXCLUDED.owner;

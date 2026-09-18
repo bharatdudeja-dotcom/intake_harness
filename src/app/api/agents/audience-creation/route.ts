@@ -313,7 +313,7 @@ export async function POST(req: NextRequest) {
      * 2.7a leaves this process and comes back. Reporting `completed` while an
      * audience does not exist and cannot yet be built is exactly the
      * reported-success-while-failing pattern the whole review layer exists to
-     * catch, and it is why escalation has never fired on this pipeline.
+     * catch.
      */
     const status = attrState.status === "open" ? "needs_input" : "completed";
 
