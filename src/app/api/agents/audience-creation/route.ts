@@ -173,6 +173,30 @@ export async function POST(req: NextRequest) {
   const fields = ((input.intakeFields || input.fields || {}) as Record<string, string>) || {};
 
   /*
+   * THE BRIEF TRAVELS WITH THE FIELDS, and it has to.
+   *
+   * What this agent has to decide - which products, which place, which
+   * reachability - is stated in the marketer's own sentence. The structured
+   * fields are what INTAKE managed to lift out of it, and when intake lifts
+   * nothing, the targeting is invisible here.
+   *
+   * That is not hypothetical. For "existing residential subscribers in
+   * Pennsylvania who have Xfinity TV but no Internet", intake captured neither
+   * a region nor a product holding, so this agent saw neither, built "no
+   * Internet and has an email address", and reported it complete. Every
+   * customer with no Internet and an email, in any state, TV or not.
+   *
+   * The fields are still preferred - they are the reviewed, structured version.
+   * The brief is added so nothing STATED can be silently absent.
+   */
+  const briefText = String(
+    (input.brief as string) ||
+      ((body.priorOutputs?.intake as Record<string, unknown> | undefined)?.brief as string) ||
+      "",
+  ).trim();
+  const targeting: Record<string, string> = briefText ? { ...fields, brief_text: briefText } : fields;
+
+  /*
    * 2.6 and 2.7, answered from the sandbox's real fields.
    *
    * probeSchemas is kept for its schema-level read but it can never answer 2.7
@@ -187,7 +211,7 @@ export async function POST(req: NextRequest) {
    * business", so 2.7 could never say yes and every run was headed for 2.7a.
    * audienceRequirements asks instead what the DEFINITION has to test.
    */
-  const requirements = audienceRequirements(fields);
+  const requirements = audienceRequirements(targeting);
   const fieldRead = await readSandboxFields("audience_creation");
   const check = checkAttributes(requirements, fieldRead);
 
@@ -258,8 +282,18 @@ export async function POST(req: NextRequest) {
   let build: BuildResult | null = null;
   let expression: Expression | null = null;
   if (check.available && !existing.id) {
-    expression = buildExpression(check, fields);
-    if (expression) {
+    expression = buildExpression(check, targeting);
+    /*
+     * NOTHING IS BUILT IF ANYTHING STATED WAS DROPPED.
+     *
+     * `ungrounded` means the brief asked for a filter that cannot be expressed
+     * against a real field. Building the rest produces an audience BROADER than
+     * the request - and then sizes it, and sends that number on for approval as
+     * though it described the requested population. With a launch date and a
+     * budget behind it, a plausible number for the wrong people is the most
+     * expensive thing this pipeline could produce.
+     */
+    if (expression && !expression.ungrounded.length) {
       build = await createAudience("audience_creation", {
         name: String(fields.campaign_name || "Audience").slice(0, 80),
         pql: expression.pql,
@@ -372,7 +406,23 @@ export async function POST(req: NextRequest) {
   let status: "completed" | "needs_input" | "failed";
   let blockedReason: string | null = null;
 
-  if (build && !build.created) {
+  if (expression && expression.ungrounded.length) {
+    /*
+     * A pause, not a failure: nothing is broken, the request is simply not yet
+     * expressible as an audience, and only a person can resolve the difference.
+     */
+    status = "needs_input";
+    blockedReason =
+      "This audience has not been created. " +
+      `The request asks for ${expression.ungrounded.length === 1 ? "something" : `${expression.ungrounded.length} things`} ` +
+      "the definition cannot express yet, and leaving " +
+      (expression.ungrounded.length === 1 ? "it" : "them") +
+      " out would build an audience BROADER than what was asked for - so nothing was built. " +
+      `Missing: ${expression.ungrounded.join(" Also: ")}` +
+      (expression.explain.length
+        ? ` What can be expressed today: ${expression.explain.join("; ")}.`
+        : "");
+  } else if (build && !build.created) {
     /*
      * 2.7 said yes, the expression was grounded, and the WRITE failed.
      *

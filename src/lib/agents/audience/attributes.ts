@@ -38,6 +38,7 @@
 
 import { callMcpTool } from "@/lib/mcp-client";
 import type { TaskId } from "@/lib/pipeline/types";
+import { findState, namesAPlace, statePredicate } from "@/lib/agents/shared/us-states";
 
 export type SandboxField = {
   /** The full XDM path, which is what a PQL expression addresses. */
@@ -173,6 +174,9 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
  */
 export function audienceRequirements(fields: Record<string, string>): Requirement[] {
   const all = Object.values(fields).join(" ").toLowerCase();
+  // Place detection reads capitalisation - "around the Detroit metro area" is a
+  // place because Detroit is a proper noun - so it gets the text as written.
+  const asWritten = Object.values(fields).join(" ");
   const reqs: Requirement[] = [];
 
   if (/internet|tv|mobile|video|broadband|voice|bundle|upsell|cross-?sell|upgrade|only\b/.test(all)) {
@@ -184,7 +188,14 @@ export function audienceRequirements(fields: Record<string, string>): Requiremen
     });
   }
 
-  if (/\b(state|region|market|county|city|zip|postal|radius|northeast|southeast|midwest|west|detroit|michigan)\b/.test(all)) {
+  /*
+   * Any named place, not a list of the places we happened to develop against.
+   *
+   * This read "...|radius|northeast|southeast|midwest|west|detroit|michigan",
+   * so "in Pennsylvania" raised no geography requirement, the audience was
+   * built with no geographic filter, and nothing was flagged as dropped.
+   */
+  if (namesAPlace(asWritten)) {
     reqs.push({
       key: "geography",
       label: "Geography",
@@ -324,14 +335,6 @@ export type Expression = {
   ungrounded: string[];
 };
 
-/** US states the brief might name, and the two-letter code AEP data usually holds. */
-const STATES: Record<string, string> = {
-  michigan: "MI", pennsylvania: "PA", illinois: "IL", georgia: "GA", florida: "FL",
-  california: "CA", texas: "TX", colorado: "CO", washington: "WA", oregon: "OR",
-  massachusetts: "MA", newjersey: "NJ", newyork: "NY", maryland: "MD", virginia: "VA",
-  ohio: "OH", indiana: "IN", tennessee: "TN", minnesota: "MN", wisconsin: "WI",
-};
-
 /**
  * Turn the brief into a PQL expression over fields that actually exist.
  *
@@ -387,15 +390,21 @@ export function buildExpression(check: AttributeCheck, fields: Record<string, st
   // --- Geography. Only when the brief names a place we can map to a value. --
   const geo = byKey("geography");
   if (geo) {
-    const named = Object.keys(STATES).find((s) => all.replace(/[^a-z]/g, "").includes(s));
+    const named = findState(all);
     if (named) {
-      predicates.push(`${geo.field} = "${STATES[named]}"`);
-      explain.push(`is in ${named.replace(/^(\w)/, (c) => c.toUpperCase())} (${geo.field} = "${STATES[named]}")`);
+      /*
+       * Either spelling. This sandbox holds full names ("New York"); the old
+       * map emitted two-letter codes, so a working geography path would have
+       * written `state = "PA"` and matched nobody - an empty audience reported
+       * as an audience.
+       */
+      predicates.push(statePredicate(geo.field, named));
+      explain.push(`is in ${named.name} (${geo.field} is "${named.name}" or "${named.code}")`);
     } else {
       ungrounded.push(
-        `a geography was asked for but the brief names no state this can map to a value in ${geo.field}. ` +
-        "A radius around a city cannot be expressed against a state field, so no geographic filter was applied - " +
-        "the count below is therefore NOT limited to that area.",
+        "the location to target. The request asks for a place, but does not name a state that can be " +
+        "matched against customer records - a radius around a city cannot be expressed against a " +
+        "state-level field. Name the state, or confirm the audience should not be limited by location.",
       );
     }
   }

@@ -20,6 +20,7 @@
  * Pure functions. No I/O, no framework — testable on its own.
  */
 
+import { findState } from "@/lib/agents/shared/us-states";
 import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
 
 export type Provenance = "stated" | "derived" | "inferred";
@@ -303,6 +304,28 @@ function findCampaignName(brief: string): ExtractedField | null {
  * @param brief the marketer's own words
  * @param known anything already structured (a rework loop carries this)
  */
+/*
+ * Channel names that are also ordinary English words.
+ *
+ * "Push" is a noun ("the Q4 push"), a verb ("push the launch"), and a channel.
+ * On a plain word boundary, a brief reading "PA Internet Attach Q4 push ...
+ * Email only" produced channels "Email, Push" - a notification nobody asked
+ * for, in a plan the marketer had explicitly limited to email.
+ *
+ * So an ambiguous name has to read like a channel: named as the medium, or
+ * listed alongside other channels. An unambiguous one ("SMS", "Direct Mail")
+ * needs no such test - nobody writes those by accident.
+ */
+const AMBIGUOUS_CHANNELS: Record<string, RegExp> = {
+  Push: /\bpush\s+(notification|message|alert|channel)s?\b|\b(via|through|on|by)\s+push\b|\bpush\s*[,/&]|[,/&]\s*push\b|\band\s+push\b|\bpush\s+and\b/i,
+};
+
+/** Does this channel word actually refer to the channel here? */
+function channelSense(brief: string, option: string): boolean {
+  const test = AMBIGUOUS_CHANNELS[option];
+  return test ? test.test(brief) : true;
+}
+
 export function parseBrief(brief: string, known: Record<string, unknown> = {}): ParsedIntake {
   const extracted: ExtractedField[] = [];
   const seen = new Set<string>();
@@ -331,11 +354,30 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
      * brief said two and the structured output said one.
      */
     if (spec.key === "channels") {
+      /*
+       * "EMAIL ONLY" MEANS EMAIL ALONE.
+       *
+       * The marketer is ruling the others out, and that is a stronger
+       * statement than any channel word appearing elsewhere in the brief.
+       */
+      const only = spec.options.find((opt) =>
+        new RegExp(`\\b${opt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[- ]only\\b`, "i").test(brief) ||
+        new RegExp(`\\bonly\\b[^.]{0,12}\\b${opt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(brief),
+      );
+      if (only) {
+        push({
+          key: spec.key, label: spec.label, value: only, from: "stated",
+          evidence: `${only} only`,
+        });
+        continue;
+      }
+
       const all = spec.options.filter(
         (opt) =>
           new RegExp(`\\b${opt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(brief) &&
           // "explicitly no direct mail" must not add Direct Mail.
-          !isNegated(brief, opt),
+          !isNegated(brief, opt) &&
+          channelSense(brief, opt),
       );
       if (all.length) {
         push({
@@ -351,6 +393,31 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
       push({
         key: spec.key, label: spec.label, value: hit, from: "stated",
         evidence: brief.match(new RegExp(`[^.]*${hit.split(" ")[0]}[^.]*`, "i"))?.[0]?.trim(),
+      });
+    }
+  }
+
+  /*
+   * A NAMED STATE IS A REGION.
+   *
+   * The region options are the six macro-regions, so "in Pennsylvania" matched
+   * nothing and the state was captured nowhere - it stayed as prose in the
+   * brief, and the audience the pipeline built was therefore national. The
+   * state list is shared with the audience agent, so the two cannot disagree
+   * about what counts as a place.
+   *
+   * Stated, not inferred: the marketer wrote the state's name.
+   */
+  if (!seen.has("region")) {
+    const state = findState(brief);
+    if (state) {
+      const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === "region");
+      push({
+        key: "region",
+        label: spec?.label ?? "Region / market",
+        value: state.name,
+        from: "stated",
+        evidence: state.name,
       });
     }
   }
