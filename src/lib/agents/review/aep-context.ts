@@ -78,14 +78,18 @@ export function formatAepContextNote(ctx: AepContext): string {
     lines.push(
       `- Attributes needed: ${ctx.neededAttributes.join(", ")}. Checked ${ctx.schemaProbe.fieldCount} field(s) ` +
         `across ${ctx.schemaProbe.schemasInspected} profile schema(s)` +
+        (ctx.schemaProbe.fieldGroupsInspected
+          ? ` and ${ctx.schemaProbe.fieldGroupsInspected} referenced field group(s)`
+          : "") +
         (ctx.schemaProbe.sandbox ? ` in sandbox "${ctx.schemaProbe.sandbox}"` : "") +
         `. Present: ${found.join(", ") || "none"}.` +
         (missing.length ? ` Missing: ${missing.join(", ")}.` : ""),
     );
   } else {
     lines.push(
-      `- Attribute availability could not be determined: ${ctx.schemaProbe.error} ` +
-        "Not reporting anything as missing on the strength of that.",
+      `- BLOCKER — attribute availability could not be determined: ${ctx.schemaProbe.error} ` +
+        "Not reporting anything as missing on the strength of that. Agent 3 cannot confirm a build " +
+        "path from this and will default to one blindly - this is the read to fix, not a footnote.",
     );
   }
 

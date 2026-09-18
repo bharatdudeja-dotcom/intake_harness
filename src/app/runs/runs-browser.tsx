@@ -469,7 +469,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       </p>
                     )}
                     <div className="flex flex-col gap-1.5">
-                      <ToolCallTrace output={(taskRun.output ?? {}) as ToolCallOutput} />
+                      <ToolCallTrace output={(taskRun.output ?? {}) as ToolCallOutput} metadata={taskRun.metadata} />
                     </div>
                     <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                       {JSON.stringify(taskRun.output, null, 2)}

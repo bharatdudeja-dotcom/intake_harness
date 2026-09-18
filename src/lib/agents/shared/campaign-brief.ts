@@ -125,10 +125,14 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "campaign_duration",
     label: "Campaign duration",
-    options: ["Evergreen (ongoing)", "Fixed window"],
+    // "Evergreen (ongoing)" is the exact string the LCE form's own "Is this
+    // a one-time or evergreen campaign?" question uses too - strong evidence
+    // this is the same field under two forms, so "One-time" was added here
+    // rather than opening a second, near-duplicate field for it.
+    options: ["Evergreen (ongoing)", "Fixed window", "One-time"],
     optionsPartial: true,
-    aliases: ["duration", "how long"],
-    ask: "Is this a fixed window or evergreen?",
+    aliases: ["duration", "how long", "one-time or evergreen"],
+    ask: "Is this a one-time campaign, a fixed window, or evergreen?",
   },
   {
     key: "cadence",
@@ -141,10 +145,15 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "activation_pattern",
     label: "Activation pattern",
-    options: ["Batch", "Near-real time trigger"],
+    // "Triggered" is the LCE form's own "Deployment Type" wording for the
+    // same concept as "Near-real time trigger" - added as its own accepted
+    // value (not force-mapped onto our wording) so it still matches if a
+    // real form's field literally uses that word, same reasoning as
+    // campaign_duration above.
+    options: ["Batch", "Near-real time trigger", "Triggered"],
     optionsPartial: true,
-    aliases: ["activation", "trigger"],
-    ask: "Batch send, or a near-real-time trigger?",
+    aliases: ["activation", "trigger", "deployment type"],
+    ask: "Batch send, or a near-real-time/triggered send?",
   },
   {
     key: "channels",
@@ -181,6 +190,183 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     label: "Exclusion",
     aliases: ["exclude", "without", "who do not have", "not already"],
     ask: "Who should be excluded - for example, customers who already have the product?",
+  },
+  /*
+   * FROM "LCE | Campaign Deployment Request" - a real, live Workfront form
+   * (ticket ACQ_WFP_PriceUpdate_092126, read 18 Sep 2026) that is far richer
+   * than the CSC-form model above: ~35 fields across request overview,
+   * audience specification, channel, and email-specific sections. None of
+   * the fields below are `required` - B1's fix is asking FEWER things, not
+   * more, and these enrich the brief when present rather than opening new
+   * required-field round trips. A field with no match on whatever form is
+   * actually live gets DROPPED at write time (workfront-fields.ts), same as
+   * every field above - adding these here is safe even before anyone
+   * confirms LCE is the real target form/queue for Agent 1's create.
+   *
+   * A few of these deliberately have NO `options`: parse.ts's matchOption
+   * has no word-boundary check, just `hay.includes(needle)`, so a short,
+   * common option string ("Yes", "No", "Internal") would match as a
+   * substring of unrelated text ("Notes", "known", "international") - the
+   * exact class of bug this file's other comments warn about repeatedly
+   * ("lob" inside "glob", "mar" inside "in market"). Those fields are left
+   * for the marketer to answer explicitly, or for a rejection to name via
+   * resolveFieldRef, never opportunistically guessed from prose.
+   */
+  {
+    key: "data_availability",
+    label: "Targeting data available today",
+    aliases: ["targeting data available", "is the data available"],
+    ask: "Is all the targeting data this audience needs already available today, or does something still need to be built?",
+  },
+  {
+    // The single highest-stakes field in this whole block: this is the
+    // FAC-vs-profile-store question aep.ts's identityGap/decideBuildPath and
+    // triage.ts's SOURCE_CUES already spend real effort trying to infer from
+    // free text. An authoritative answer here is worth far more than a
+    // guessed one - see lib/agents/audience/aep.ts.
+    key: "data_location",
+    label: "Where the targeting data lives",
+    aliases: ["where does this data live", "data source", "fac or profile"],
+    ask: "Where does this targeting data live today - the AEP profile store, or an external/federated (FAC) source? They resolve to different identities and different build paths.",
+  },
+  {
+    key: "audience_build_method",
+    label: "Audience build method",
+    options: ["Simple Workflow Audience"],
+    optionsPartial: true,
+    aliases: ["how should the audience be built", "build method"],
+    ask: "How should this audience be built - a simple workflow audience, or something more complex?",
+  },
+  {
+    // The gap this closes: "no refresh cadence, so the build gets treated
+    // as a one-time snapshot and goes stale by send day."
+    key: "audience_refresh_cadence",
+    label: "Audience refresh cadence",
+    options: ["Static Campaign Audience"],
+    optionsPartial: true,
+    aliases: ["refresh cadence", "how often should this audience refresh"],
+    ask: "Should this audience refresh on a schedule, or is it a static, one-time snapshot?",
+  },
+  {
+    // The gap this closes: "'~40K?' is the requester asking the technical
+    // team to do feasibility work that then becomes the committed number."
+    // Capturing the marketer's OWN expectation, separate from Agent 3's
+    // predicted count, makes a mismatch visible instead of silent.
+    //
+    // Only "Medium (50K-250K)" is confirmed from a real ticket - the other
+    // bucket boundaries are a reasonable guess at the same scheme, NOT
+    // verified against the live form. Treat as a starting point.
+    key: "expected_audience_size",
+    label: "Expected audience size",
+    options: ["Small (<50K)", "Medium (50K–250K)", "Large (250K–1M)", "Very Large (1M+)"],
+    optionsPartial: true,
+    aliases: ["expected audience size", "audience size", "how big"],
+    ask: "Roughly what audience size do you expect? A ballpark bucket is fine - Agent 3 predicts the real count separately, and a mismatch between the two is worth surfacing rather than silently picking one.",
+  },
+  {
+    key: "requires_predictive_model",
+    label: "Requires a predictive model",
+    aliases: ["predictive model", "model not yet live"],
+    ask: "Does this audience need a predictive model that isn't live yet, or can it be built from data that already exists?",
+  },
+  {
+    // The gap this closes: "no holdout, so the campaign can't be measured
+    // and the +3.5pp claim in the next QBR is unfalsifiable."
+    key: "requires_test_holdout",
+    label: "Test / holdout required",
+    aliases: ["a/b test", "holdout", "control group", "implementing any tests"],
+    ask: "Is a holdout or control group needed to measure this campaign, or is it going out unmeasured?",
+  },
+  {
+    key: "request_category",
+    label: "Request category",
+    options: ["Promotional (Marketing)"],
+    optionsPartial: true,
+    aliases: ["what type of request is this", "request type category"],
+    ask: "What type of request is this - promotional/marketing, or something else?",
+  },
+  {
+    key: "promo_channel_type",
+    label: "Single- or multi-channel",
+    options: ["Single-Channel", "Multi-Channel"],
+    optionsPartial: true,
+    aliases: ["single-channel", "multi-channel", "coordinated communication"],
+    ask: "Is this a single-channel send, or a coordinated multi-channel communication?",
+  },
+  {
+    key: "email_delivery_type",
+    label: "Email delivery type",
+    options: ["Email Series / Journey"],
+    optionsPartial: true,
+    aliases: ["how is this email being delivered"],
+    ask: "Is this a single email, or a series/journey of emails?",
+  },
+  {
+    // The gap this closes: "no personalization fields, which means the
+    // export schema gets designed twice."
+    key: "personalization_level",
+    label: "Email personalization level",
+    options: ["No Personalization"],
+    optionsPartial: true,
+    aliases: ["personalization", "how personalized"],
+    ask: "How personalized does this email need to be - none, basic merge fields, or full 1:1 personalization?",
+  },
+  {
+    key: "email_count",
+    label: "Number of emails",
+    aliases: ["how many emails", "email count"],
+    ask: "How many emails are in this campaign/journey?",
+  },
+  {
+    key: "spanish_version",
+    label: "Spanish version",
+    aliases: ["spanish version", "en espanol"],
+    ask: "Is a Spanish version of this needed?",
+  },
+  {
+    key: "trigger_already_active",
+    label: "Trigger already active",
+    aliases: ["is this trigger already active", "already live in the platform"],
+    ask: "Is this trigger already active in the platform, or does it need to be newly activated?",
+  },
+  {
+    key: "expected_business_impact",
+    label: "Expected business impact",
+    options: ["Medium Impact ($50K–$250K)"],
+    optionsPartial: true,
+    aliases: ["expected revenue", "business impact"],
+    ask: "What's the expected revenue or business impact of this campaign?",
+  },
+  {
+    key: "campaign_series",
+    label: "Part of a larger initiative",
+    options: ["Campaign Series Part"],
+    optionsPartial: true,
+    aliases: ["larger marketing initiative", "campaign series"],
+    ask: "Is this campaign part of a larger series or initiative?",
+  },
+  {
+    key: "creative_status",
+    label: "Creative status",
+    options: ["Creative is already in production/approved"],
+    optionsPartial: true,
+    aliases: ["creative needs", "creative status"],
+    ask: "What's the state of the creative - already approved, in progress, or not started?",
+  },
+  {
+    key: "priority",
+    label: "Request priority",
+    options: ["Standard Priority"],
+    optionsPartial: true,
+    aliases: ["priority of this request"],
+    ask: "What priority is this request - standard, or expedited?",
+  },
+  {
+    // Routing metadata, like workfront_project_id below - never asked for,
+    // only carried through when the intake form itself supplies it.
+    key: "linked_creative_project",
+    label: "Linked creative project",
+    aliases: ["creative project", "linked creative project"],
   },
   {
     /*

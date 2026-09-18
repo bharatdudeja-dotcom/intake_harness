@@ -238,6 +238,7 @@ export async function POST(req: NextRequest) {
       schemasReadError: probe.error,
       schemaCount: probe.schemaCount,
       schemasInspected: probe.schemasInspected,
+      fieldGroupsInspected: probe.fieldGroupsInspected,
       fieldCount: probe.fieldCount,
       // Which AEP sandbox answered. Assessing Comcast's attributes against a
       // sandbox that is not Comcast's is a meaningless check, and the reader

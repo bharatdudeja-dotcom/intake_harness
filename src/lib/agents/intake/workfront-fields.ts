@@ -131,7 +131,17 @@ export async function resolveFieldMap(categoryID: string, entity = "issue"): Pro
      * DE:Audience_to_be_Targeted and DE:Requested_Launch_Date are all project
      * fields. Asking only about issues found none of them.
      */
-    const queries = ["campaign", "objective", "audience", "launch", "product", "name"];
+    /*
+     * Widened for the LCE-form fields added to campaign-brief.ts: without a
+     * query term that actually hits them, they would ALWAYS fall into the
+     * "unmatched, dropped" bucket below even on a live form that has them -
+     * not because the form lacks the field, but because we never asked
+     * about it.
+     */
+    const queries = [
+      "campaign", "objective", "audience", "launch", "product", "name",
+      "email", "test", "priority", "creative", "data", "channel", "size", "deployment",
+    ];
     const seen = new Set<string>();
     for (const query of queries) {
       try {

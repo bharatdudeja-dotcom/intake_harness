@@ -210,7 +210,7 @@ export function PipelineChat() {
               )}
 
               <div className="ml-7 flex flex-col gap-1.5">
-                <ToolCallTrace output={output} />
+                <ToolCallTrace output={output} metadata={tr.metadata} />
               </div>
 
               {isOpen && (

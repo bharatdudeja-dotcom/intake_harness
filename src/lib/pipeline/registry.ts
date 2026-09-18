@@ -93,6 +93,13 @@ export const PIPELINE: AgentDefinition[] = [
       // not answering it at all.
       "adobe_list_schemas",
       "adobe_get_schema",
+      // A class-based schema (Profile, ExperienceEvent) rarely carries its
+      // fields inline - it composes them from field groups via allOf/$ref,
+      // so reading the class schema alone and finding nothing is "asked the
+      // wrong document," not "no fields exist." See aep.ts's
+      // fieldGroupRefs/FIELD_GROUP_SAMPLE for exactly how this is used and
+      // why it's bounded.
+      "adobe_get_field_group",
       "adobe_list_segments",
       "adobe_get_segment",
       // Catalog metadata is how you tell a profile-enabled dataset from any
@@ -125,6 +132,10 @@ export const PIPELINE: AgentDefinition[] = [
       // in AEP before opening a GTO/attribute request.
       "adobe_list_schemas",
       "adobe_get_schema",
+      // See registry.ts's note on review's identical grant, and aep.ts's
+      // fieldGroupRefs: a class schema's fields usually live in a
+      // referenced field group, not inline on the class schema itself.
+      "adobe_get_field_group",
     ],
     // Empty today: this stub doesn't read priorOutputs, and Review's output
     // already carries the confirmed intake forward via its `input`. Add

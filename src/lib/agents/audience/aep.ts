@@ -44,8 +44,28 @@ const ATTRIBUTE_CUES: Record<string, RegExp> = {
 /** Schema titles worth opening: the ones that would carry profile attributes. */
 const PROFILE_SCHEMA_HINT = /profile|individual|customer|account|subscriber|person|demographic/i;
 
-/** How many schemas to open. Each is a network call; three is enough to tell. */
-const SCHEMA_SAMPLE = 3;
+/**
+ * How many schemas to open. Each is a network call, and this is THE tool
+ * call this whole probe lives or dies on - miss every field on a small
+ * sample and the result is "inconclusive", which Agent 3 then has no choice
+ * but to build around blindly (see decideBuildPath's default-to-rule-builder
+ * branch). Raised from 3 to 6 after exactly that happened on a real run: the
+ * 3 sampled schemas were real XDM class schemas that compose their fields
+ * via `allOf`/`$ref` field groups rather than inline `properties` (see
+ * fieldGroupRefs/fieldNames below), so a bigger sample alone would not have
+ * saved that run - field-group resolution is the actual fix, this is the
+ * cheap second line of defense.
+ */
+const SCHEMA_SAMPLE = 6;
+
+/**
+ * How many referenced field groups to open per schema. XDM class schemas
+ * (Profile, ExperienceEvent) rarely carry attributes inline - they compose
+ * them from field groups via `allOf: [{ $ref: "..." }, ...]`, and a class
+ * schema's OWN document has no `properties` at all for those. Capped so one
+ * schema with many field groups cannot turn this into an unbounded fan-out.
+ */
+const FIELD_GROUP_SAMPLE = 6;
 
 export type SchemaProbe = {
   /** Did the schema LIST read succeed? */
@@ -67,6 +87,8 @@ export type SchemaProbe = {
   schemaCount: number;
   /** How many schemas we opened and walked. */
   schemasInspected: number;
+  /** How many referenced field groups we additionally opened - see fieldGroupRefs. */
+  fieldGroupsInspected: number;
   /** How many distinct field names we saw. */
   fieldCount: number;
   found: Record<string, boolean>;
@@ -91,7 +113,7 @@ function schemaRecords(result: unknown): Array<{ title: string; id: string }> {
   return out;
 }
 
-/** Every property name in a schema document, however deeply nested. */
+/** Every property name in a schema (or field group) document, however deeply nested. */
 function fieldNames(schema: unknown): string[] {
   const out = new Set<string>();
   const walk = (v: unknown, depth = 0) => {
@@ -107,6 +129,36 @@ function fieldNames(schema: unknown): string[] {
   };
   walk(schema);
   return [...out];
+}
+
+/**
+ * The field-group `$ref`s a CLASS-based schema composes via `allOf`.
+ *
+ * A real XDM Profile/ExperienceEvent schema's own document usually has no
+ * inline `properties` at all - it lists `allOf: [{ $ref: ".../xdm/context/
+ * profile" }, { $ref: ".../mixins/profile/loyalty" }, ...]` and the actual
+ * attributes live in each referenced field group's OWN document. Reading
+ * only the class schema and finding zero properties is not "this tenant has
+ * no fields" - it's "we asked the wrong document." Excludes Adobe's own
+ * base class refs (ns.adobe.com/xdm/context/...), which are never a
+ * tenant's custom attributes and are not fetchable the same way a
+ * tenant-registered field group is.
+ */
+function fieldGroupRefs(schema: unknown): string[] {
+  const refs = new Set<string>();
+  const walk = (v: unknown, depth = 0) => {
+    if (depth > 12 || v == null) return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, depth + 1)); return; }
+    if (typeof v !== "object") return;
+    const o = v as Record<string, unknown>;
+    const ref = o.$ref;
+    if (typeof ref === "string" && ref && !/ns\.adobe\.com\/xdm\/(context|data)\//.test(ref)) {
+      refs.add(ref);
+    }
+    for (const val of Object.values(o)) walk(val, depth + 1);
+  };
+  walk(schema);
+  return [...refs];
 }
 
 /** "https://ns.adobe.com/taplondonptrsd/schemas/..." -> "taplondonptrsd" */
@@ -143,7 +195,7 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
   } catch (err) {
     return {
       read: false, conclusive: false, error: (err as Error).message, sandbox: null,
-      schemaCount: 0, schemasInspected: 0, fieldCount: 0, found: {}, evidence: [],
+      schemaCount: 0, schemasInspected: 0, fieldGroupsInspected: 0, fieldCount: 0, found: {}, evidence: [],
     };
   }
 
@@ -151,15 +203,40 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
   const candidates = records.filter((r) => PROFILE_SCHEMA_HINT.test(r.title)).slice(0, SCHEMA_SAMPLE);
 
   const fields = new Set<string>();
+  const pendingRefs = new Set<string>();
   let inspected = 0;
   let lastError: string | null = null;
   for (const c of candidates) {
     try {
       const doc = await callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id });
       for (const f of fieldNames(doc)) fields.add(f);
+      // A class-based schema's own document rarely has inline properties -
+      // it composes field groups via allOf/$ref (see fieldGroupRefs). Queue
+      // those regardless of whether this schema's own walk found anything,
+      // since a schema can mix a few inline fields with several field-group
+      // refs.
+      for (const ref of fieldGroupRefs(doc)) pendingRefs.add(ref);
       inspected += 1;
     } catch (err) {
       lastError = (err as Error).message;
+    }
+  }
+
+  // Resolve field groups only if the class schemas alone were inconclusive -
+  // fields.size === 0 after inspecting at least one schema is exactly the
+  // "properties live in a $ref, not inline" case this exists for. Bounded to
+  // FIELD_GROUP_SAMPLE total, not per schema, so several profile-hinted
+  // schemas each listing a handful of refs cannot fan out unboundedly.
+  let fieldGroupsInspected = 0;
+  if (inspected > 0 && fields.size === 0 && pendingRefs.size > 0) {
+    for (const ref of [...pendingRefs].slice(0, FIELD_GROUP_SAMPLE)) {
+      try {
+        const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: ref });
+        for (const f of fieldNames(doc)) fields.add(f);
+        fieldGroupsInspected += 1;
+      } catch (err) {
+        lastError = (err as Error).message;
+      }
     }
   }
 
@@ -184,10 +261,14 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
       ? null
       : candidates.length === 0
         ? `none of the ${records.length} schemas in this sandbox look like profile schemas, so attribute availability could not be determined`
-        : lastError || "opened the candidate schemas but found no field definitions in them",
+        : pendingRefs.size > 0 && fieldGroupsInspected === 0
+          ? `${candidates.length} class schema(s) composed their fields via ${pendingRefs.size} field-group ` +
+            `reference(s) none of which could be opened (${lastError})`
+          : lastError || "opened the candidate schemas and their field groups but found no field definitions in them",
     sandbox,
     schemaCount: records.length,
     schemasInspected: inspected,
+    fieldGroupsInspected,
     fieldCount: fields.size,
     found,
     evidence: evidence.slice(0, 8),

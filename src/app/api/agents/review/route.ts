@@ -205,7 +205,25 @@ export async function POST(req: NextRequest) {
         findings: 0,
         rejectionReadable: fetched.error === null,
         loopCount,
+        // Same field names Agent 3 reports for the identical read (see
+        // audience-creation/route.ts) - one shared trace component
+        // (tool-call-trace.tsx) renders this block for both agents, and it
+        // is the single most consequential read in this whole pipeline:
+        // if it comes back inconclusive, Agent 3 cannot confirm anything
+        // and defaults to a build path blindly.
+        schemasRead: aepContext.schemaProbe.read,
         schemaProbeConclusive: aepContext.schemaProbe.conclusive,
+        schemasReadError: aepContext.schemaProbe.error,
+        schemaCount: aepContext.schemaProbe.schemaCount,
+        schemasInspected: aepContext.schemaProbe.schemasInspected,
+        fieldGroupsInspected: aepContext.schemaProbe.fieldGroupsInspected,
+        fieldCount: aepContext.schemaProbe.fieldCount,
+        sandbox: aepContext.schemaProbe.sandbox,
+        attributesNeeded: aepContext.neededAttributes,
+        attributesMissing: aepContext.schemaProbe.conclusive
+          ? aepContext.neededAttributes.filter((k) => !aepContext.schemaProbe.found[k])
+          : [],
+        schemaEvidence: aepContext.schemaProbe.evidence,
         existingSegment: aepContext.segmentMatch.id
           ? { id: aepContext.segmentMatch.id, name: aepContext.segmentMatch.name }
           : null,

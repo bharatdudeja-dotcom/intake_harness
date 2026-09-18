@@ -370,6 +370,17 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     }
   }
 
+  // 8. How many emails, when stated as a count next to the word "email(s)".
+  // Safe as a plain digit-plus-word match - unlike the Yes/No-style LCE
+  // fields in campaign-brief.ts, a number immediately followed by "email(s)"
+  // is not a phrase that shows up by coincidence.
+  if (!seen.has("email_count")) {
+    const e = brief.match(/\b(\d{1,3})\s*emails?\b/i);
+    if (e) {
+      push({ key: "email_count", label: "Number of emails", value: e[1], from: "stated", evidence: e[0] });
+    }
+  }
+
   const fields: Record<string, string> = {};
   for (const f of extracted) fields[f.key] = f.value;
 
