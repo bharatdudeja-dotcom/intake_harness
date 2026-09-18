@@ -256,7 +256,60 @@ function assertToolAllowed(taskId: TaskId, name: string): void {
  * Throws McpError on a scoping violation, transport failure, JSON-RPC
  * error, or a tool-level error (isError: true in the MCP content envelope).
  */
+/**
+ * The same arguments, with numbers as strings.
+ *
+ * Several tools on both connectors declare numeric arguments as strings -
+ * `limit`, `max_rows`, `sample_records` - and refuse a number outright:
+ *
+ *     "code": "invalid_type", "expected": "string", "received": "number"
+ *
+ * That is not a fault we can fix upstream, and it has cost us a comment-stream
+ * read inside a stage that then reported success. Retrying with strings is
+ * cheap and only happens on the calls that need it.
+ */
+function stringifyNumbers(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    out[k] = typeof v === "number" ? String(v) : v;
+  }
+  return out;
+}
+
+/** Was this refused for sending a number where a string was declared? */
+function wantsStringArgs(message: string): boolean {
+  return /invalid_type/i.test(message) &&
+    /expected"?\s*:?\s*"?string/i.test(message) &&
+    /received"?\s*:?\s*"?number/i.test(message);
+}
+
+/**
+ * Call a tool, and retry once with string arguments if that is what it wanted.
+ *
+ * Several tools on both connectors declare numeric arguments as strings and
+ * refuse a number outright. A stage that hits one reports "a tooling error"
+ * that nobody can act on - it cost us the comment-stream read on the NY run,
+ * inside a stage that then reported success.
+ */
 export async function callMcpTool<T = unknown>(
+  taskId: TaskId,
+  name: string,
+  args: Record<string, unknown> = {},
+  opts: { timeoutMs?: number } = {},
+): Promise<T> {
+  try {
+    return await callMcpToolOnce<T>(taskId, name, args, opts);
+  } catch (err) {
+    const message = (err as Error).message || "";
+    const hasNumbers = Object.values(args).some((v) => typeof v === "number");
+    if (!hasNumbers || !wantsStringArgs(message)) throw err;
+    // The contract is ambiguous, not broken. One retry, and if it fails again
+    // the original error stands.
+    return await callMcpToolOnce<T>(taskId, name, stringifyNumbers(args), opts);
+  }
+}
+
+async function callMcpToolOnce<T = unknown>(
   taskId: TaskId,
   name: string,
   args: Record<string, unknown> = {},

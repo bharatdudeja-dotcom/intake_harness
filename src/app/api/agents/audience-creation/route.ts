@@ -265,7 +265,30 @@ export async function POST(req: NextRequest) {
   const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
     .filter(Boolean)
     .map(String);
-  const existing = await findExistingSegment(terms);
+  /*
+   * REUSE IS THE DEFAULT, NOT A RULE.
+   *
+   * A marketer asked for "everything new, even if duplicate" and got the
+   * existing audience reused - correct by design, wrong for the request. Reuse
+   * is the cheapest good outcome in the map and stays the default; it is not
+   * something to impose on someone who has said otherwise.
+   *
+   * Two ways to say so: the words in the brief, or force_new on the input for a
+   * caller that already knows. The words matter because that is where a
+   * marketer puts it.
+   */
+  const askedForNew =
+    input.force_new === true ||
+    input.forceNew === true ||
+    /\b(create|build|make)\s+(a\s+)?(brand[- ]?new|new|fresh)\b[^.]{0,40}\b(audience|segment)\b/i.test(briefText) ||
+    /\b(do not|don'?t|never)\s+reuse\b/i.test(briefText) ||
+    /\beven if (it is |it's )?(a )?duplicate\b/i.test(briefText) ||
+    /\bcreate everything new\b/i.test(briefText);
+
+  const existing = askedForNew
+    ? { id: null as string | null, name: null as string | null, read: true, considered: 0, error: null as string | null,
+        skipped: "The request asked for a new audience, so the catalogue was not searched for one to reuse." }
+    : await findExistingSegment(terms);
   let estimate = await estimateCount(existing.id);
 
   /*
