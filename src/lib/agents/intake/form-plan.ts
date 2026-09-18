@@ -52,7 +52,16 @@ const CONCEPTS: { labels: string[]; from: string[]; ask: boolean }[] = [
   { labels: ["Region"], from: ["region"], ask: true },
   { labels: ["Requested Launch Date", "Launch Date"], from: ["launch_date"], ask: true },
   { labels: ["Product Name"], from: ["product", "line_of_business"], ask: false },
-  { labels: ["Type"], from: ["request_type"], ask: false },
+  /*
+   * Type is New | Revision / Edit to existing - whether this request is new
+   * work or a change to existing work. It was being fed request_type
+   * ("Audience + Campaign Execution"), which answers a different question
+   * entirely: what the campaign needs done.
+   *
+   * A fresh intake is New. A brief that came back through triage as rework
+   * says so, and `revision_of` is where that lands.
+   */
+  { labels: ["Type"], from: ["revision_of"], ask: false },
 ];
 
 /**
@@ -76,7 +85,14 @@ export async function planFormWrites(
     const field = fieldByLabel(form, ...concept.labels);
     if (!field || claimed.has(field.name)) continue;
 
-    const source = concept.from.map((k) => fields[k]).find((v) => v != null && String(v).trim() !== "");
+    let source = concept.from.map((k) => fields[k]).find((v) => v != null && String(v).trim() !== "");
+
+    // A request that is not a revision of anything is new work, and the form
+    // has a value for exactly that. Left blank it tells a reviewer nothing.
+    if (source == null && concept.labels[0] === "Type" && field.allowed.some((a) => /^new$/i.test(a))) {
+      source = field.allowed.find((a) => /^new$/i.test(a)) as string;
+    }
+
     if (source == null) {
       /*
        * The form asks and the brief is silent. For an enumeration that is a

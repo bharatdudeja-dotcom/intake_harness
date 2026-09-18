@@ -1,5 +1,6 @@
 import { callMcpTool } from "@/lib/mcp-client";
 import type { TaskId } from "@/lib/pipeline/types";
+import { findState } from "@/lib/agents/shared/us-states";
 
 /**
  * The tenant's own vocabulary, and how a marketer's words map onto it.
@@ -181,6 +182,39 @@ export function mapValue(field: FormField, given: unknown): MappedValue {
 
   const exact = field.allowed.find((a) => a === raw);
   if (exact) return { ok: true, field, value: exact, note: null };
+
+  /*
+   * A COUNTRY LIST ASKED A PLACE QUESTION.
+   *
+   * This field offers uk, de and us, and the brief says New York. Refusing left
+   * a filter a reviewer would use empty, and New York being in the US is a
+   * fact rather than a judgement about the client's data model.
+   *
+   * So the country is written - and the caller still gets the note saying the
+   * form cannot express the state, because the thing that would actually be
+   * wrong is letting "New York" quietly become "us" with nobody told.
+   */
+  const looksLikeCountryList = field.allowed.every((a) => /^[a-z]{2}$/i.test(a));
+  if (looksLikeCountryList) {
+    const state = findState(raw);
+    if (state && field.allowed.some((a) => norm(a) === "us")) {
+      const us = field.allowed.find((a) => norm(a) === "us") as string;
+      return {
+        ok: true,
+        field,
+        value: us,
+        note: `${state.name} is in the US, so this is filed under "${us}" - this form has no state-level field, so the state itself travels in the brief`,
+      };
+    }
+    const UK = /\b(uk|united kingdom|great britain|england|scotland|wales|london|manchester|birmingham)\b/i;
+    const DE = /\b(de|germany|deutschland|berlin|munich|m[uü]nchen|hamburg)\b/i;
+    if (UK.test(raw) && field.allowed.some((a) => norm(a) === "uk")) {
+      return { ok: true, field, value: field.allowed.find((a) => norm(a) === "uk") as string, note: `read "${raw}" as the UK` };
+    }
+    if (DE.test(raw) && field.allowed.some((a) => norm(a) === "de")) {
+      return { ok: true, field, value: field.allowed.find((a) => norm(a) === "de") as string, note: `read "${raw}" as Germany` };
+    }
+  }
 
   const loose = field.allowed.find((a) => norm(a) === norm(raw));
   if (loose) {
