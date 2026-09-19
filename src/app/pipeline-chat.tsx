@@ -98,7 +98,19 @@ export function PipelineChat() {
         body: JSON.stringify({ answers }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        // See runs-browser.tsx's submitAnswers for the full reasoning - a
+        // VALIDATION_ERROR here means the run moved on since this page
+        // loaded (another tab, another person, or an earlier answer), so
+        // refetch and show the real current question instead of leaving
+        // the form stuck on one that no longer applies.
+        const staleRun = data?.code === "VALIDATION_ERROR";
+        if (staleRun) await loadDetail(runDetail.run.run_id);
+        throw new Error(
+          (data?.error ?? `HTTP ${res.status}`) +
+            (staleRun ? " This run has moved on since you loaded it - refreshed to show the current step below." : ""),
+        );
+      }
       await loadDetail(runDetail.run.run_id);
     } catch (err) {
       setError((err as Error).message);

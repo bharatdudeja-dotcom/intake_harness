@@ -179,7 +179,29 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error ?? `Failed to resume run (HTTP ${res.status}).`);
+        /*
+         * A VALIDATION_ERROR here ("Still blank: ..." or "has no paused
+         * step to answer") means the run moved on since THIS page loaded -
+         * another tab, another person, or an earlier answer already
+         * advanced it past whatever question is on screen, so the server
+         * validated the submitted answers against a DIFFERENT, later
+         * question than the one this form is showing. `readyToSubmitAnswers`
+         * already keeps the button disabled until every question CURRENTLY
+         * ON SCREEN is filled, so a VALIDATION_ERROR reaching here is
+         * overwhelmingly this staleness case, not a genuinely-blank field.
+         * Refetching shows what's actually current instead of leaving the
+         * form stuck on a question that no longer applies - the exact bug
+         * a real run hit (task_run 195's form, task_run 196 already the
+         * real pending step).
+         */
+        const staleRun = data?.code === "VALIDATION_ERROR";
+        if (staleRun) await loadDetail(selectedRunId);
+        setError(
+          (data?.error ?? `Failed to resume run (HTTP ${res.status}).`) +
+            (staleRun
+              ? " This run has moved on since you loaded it - refreshed to show the current step below."
+              : ""),
+        );
         return;
       }
       await loadDetail(selectedRunId);
