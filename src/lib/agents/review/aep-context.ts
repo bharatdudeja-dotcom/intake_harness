@@ -52,7 +52,7 @@ export async function gatherAepContext(fields: Record<string, string>, brief?: s
     probeSchemas("review", neededAttrs),
     findExistingSegment("review", terms),
     profileDatasetSummary("review"),
-    groundPqlGuidance(criteria),
+    groundPqlGuidance("review", criteria),
   ]);
   return { neededAttributes: neededAttrs, schemaProbe, segmentTerms: terms, segmentMatch, datasetProbe, pqlGuidance };
 }

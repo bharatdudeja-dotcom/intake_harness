@@ -11,6 +11,7 @@ import {
   criteriaKeywords,
 } from "@/lib/agents/audience/aep";
 import { detectActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
+import { groundPqlGuidance, type PqlGuidance } from "@/lib/agents/review/pql-context";
 
 /**
  * Agent 3 - Audience Creation.
@@ -205,6 +206,17 @@ export async function POST(req: NextRequest) {
     const gap = identityGap(fields);
     const cutoff = nightlyCutoff();
 
+    // PQL is the rule builder's language - FAC doesn't use it, so there's
+    // nothing to ground when this request took the federated path. See
+    // pql-context.ts's docstring for why the local reference (docs/
+    // pql-reference.md), not the knowledge base, is the trustworthy source
+    // here - re-grounded independently from Review's own pass at this
+    // (audience_creation gets no priorOutputs from review today - see this
+    // file's docstring - so it can't just trust review's answer secondhand).
+    const criteria = [brief, fields.audience_description].filter(Boolean).join(" ") || fields.campaign_name || "";
+    const pqlGuidance: PqlGuidance | null =
+      path.buildPath === "aep_rule_builder" ? await groundPqlGuidance("audience_creation", criteria) : null;
+
     // Cheapest good outcome first: an audience that already exists needs no build
     // and is the only way to get a real count without writing anything.
     //
@@ -256,6 +268,11 @@ export async function POST(req: NextRequest) {
           ? `No existing audience matched (${existing.considered} checked).`
           : `Could not list existing audiences: ${existing.error}.`,
       gap.hasGap ? "Identity gap flagged: see identityGap." : "",
+      pqlGuidance
+        ? pqlGuidance.localReference.available
+          ? `PQL reference: ${pqlGuidance.localReference.path} (${pqlGuidance.localReference.categoryCount} categories) - build the segment expression against this, not the knowledge base.`
+          : `PQL reference unavailable: ${pqlGuidance.localReference.error}.`
+        : "",
       activation ? formatActivationMessage(activation) : "",
       attrState.note,
       cutoff.note,
@@ -307,6 +324,11 @@ export async function POST(req: NextRequest) {
         attributesMissing: missing,
         schemaEvidence: probe.evidence,
         existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
+        // Full PQL guidance (including the local reference's content - see
+        // pql-context.ts) travels with the run, not just a pointer to a
+        // file someone has to go find separately. Null when the FAC path
+        // was taken - PQL doesn't apply there.
+        pqlGuidance,
         nightlyCutoff: cutoff,
         activationRequested: activationIntent.requested,
         activationDestination: activationIntent.destinationName,

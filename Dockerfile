@@ -27,6 +27,18 @@ RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# docs/ is read from disk at runtime (src/lib/agents/review/pql-context.ts -
+# the local PQL reference both Agent 2 and Agent 3 ground against). Next's
+# own file-tracer happens to pick this up into .next/standalone/docs/
+# automatically today (confirmed by inspecting a real build), because the
+# path is a static string literal it can resolve - but that's the tracer's
+# static analysis working out in this one case, not a guarantee for every
+# future change to how that path gets built. Copied explicitly here too so
+# this doesn't silently start failing closed in a deployed container the
+# day that path stops being literal (e.g. built from an env var) - belt and
+# suspenders, and the second COPY of an already-present directory is a
+# no-op either way.
+COPY --from=builder --chown=nextjs:nodejs /app/docs ./docs
 
 USER nextjs
 
