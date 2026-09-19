@@ -208,3 +208,14 @@ export function workfrontToolNames(set: WorkfrontToolset): string[] {
 export function allWorkfrontToolNames(): string[] {
   return [...new Set([...workfrontToolNames(ADOBE_OFFICIAL), ...workfrontToolNames(INHOUSE)])];
 }
+
+/**
+ * Just the "create a comment" tool, for BOTH flavours — the minimal grant an
+ * agent needs to post an update comment back onto its issue and nothing more.
+ * Both names are returned so the allowlist stays correct whichever
+ * WORKFRONT_MCP_FLAVOUR is configured, without granting the create/update/read
+ * tools a read-only agent has no business calling (allWorkfrontToolNames would).
+ */
+export function commentToolNames(): string[] {
+  return [...new Set([ADOBE_OFFICIAL.createComment, INHOUSE.createComment])];
+}

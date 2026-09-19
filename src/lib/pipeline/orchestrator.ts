@@ -2,6 +2,7 @@ import { query } from "@/lib/db";
 import { PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, AgentStatus, RunRow, TaskRow, TaskRunRow } from "./types";
 import * as liveProgress from "@/lib/live-progress";
+import { postAgentUpdate } from "./workfront-updates";
 
 /**
  * Runs exactly the NEXT agent for a run over real HTTP to that agent's own
@@ -75,6 +76,19 @@ async function advanceOneStep(
   // accepts neither resumeRun nor continueRun, so a run stuck there has no
   // way back in short of someone hand-editing the database (see the outer
   // catch below).
+  // Post "what this agent did" back onto the Workfront issue as a comment,
+  // centrally for EVERY agent (see workfront-updates.ts). Best-effort and
+  // never throws: the outcome is folded into the step's metadata so it is
+  // visible in observability, and a disabled write tool / missing issue can
+  // never fail the run being recorded here.
+  const workfrontUpdate = await postAgentUpdate(
+    agent.name,
+    response.status,
+    response.message,
+    response.output,
+    priorOutputs,
+  );
+
   try {
     await query<TaskRunRow>(
       `INSERT INTO task_runs
@@ -89,7 +103,7 @@ async function advanceOneStep(
         JSON.stringify(currentInput),
         JSON.stringify(response.output ?? null),
         response.message ?? null,
-        JSON.stringify(response.metadata ?? {}),
+        JSON.stringify({ ...(response.metadata ?? {}), workfrontUpdate }),
         response.usage?.tokens ?? null,
         response.usage?.model ?? null,
         startedAt.toISOString(),
@@ -311,6 +325,20 @@ export async function completeInProgressStep(
   const startedAt = new Date(step.started_at);
   const durationMs = finishedAt.getTime() - startedAt.getTime();
 
+  // Same centralized "what this agent did" comment as advanceOneStep, for the
+  // out-of-band completion path. priorOutputs comes from the already-completed
+  // steps (Intake/Review carry the Workfront identity); the finishing step's
+  // own output is checked first. Best-effort — folded into this step's
+  // metadata, never fatal.
+  const { priorOutputs: priorForComment } = await completedTaskRunsFor(runId);
+  const workfrontUpdate = await postAgentUpdate(
+    step.task_id,
+    outcome.status,
+    outcome.message,
+    outcome.output,
+    priorForComment,
+  );
+
   await query(
     `UPDATE task_runs
        SET status = $2, output = $3::jsonb, message = $4, metadata = $5::jsonb,
@@ -321,7 +349,7 @@ export async function completeInProgressStep(
       outcome.status,
       JSON.stringify(outcome.output ?? null),
       outcome.message ?? null,
-      JSON.stringify(outcome.metadata ?? {}),
+      JSON.stringify({ ...(outcome.metadata ?? {}), workfrontUpdate }),
       finishedAt.toISOString(),
       durationMs,
     ],

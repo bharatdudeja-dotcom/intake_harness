@@ -6,9 +6,7 @@ import { detectRejection, type CommentLike } from "@/lib/agents/review/rejection
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
 import { requiredFields } from "@/lib/agents/shared/campaign-brief";
 import {
-  postReviewComment,
   updateReviewNotesField,
-  type CommentOutcome,
   type FieldUpdateOutcome,
 } from "@/lib/agents/review/workfront-notes";
 
@@ -58,15 +56,19 @@ import {
  *
  *   1. folds the answer into `output` so the brief Agent 3 receives already
  *      has it, instead of Agent 3 discovering the same facts from scratch;
- *   2. posts it as a Workfront comment (lib/agents/review/workfront-notes.ts)
- *      for a human reading the issue;
- *   3. best-effort writes it into a custom field on the issue too, so it
- *      survives on the record itself, not only in a comment thread.
+ *   2. best-effort writes it into a custom field on the issue (a human
+ *      reading the record sees it there), so it survives on the record
+ *      itself, not only in a comment thread.
  *
- * (2) and (3) are writes, so they follow createIntakeRequest's contract in
- * intake/workfront.ts exactly: writes are disabled on this tenant today, so
- * both report what they WOULD have done rather than pretending success -
- * see `workfrontDoc` on the completed response.
+ * The COMMENT that used to be posted here is now posted CENTRALLY by the
+ * orchestrator for every agent after each step (lib/pipeline/
+ * workfront-updates.ts), from this step's `message` - which already appends
+ * the same AEP note - so this route no longer posts its own to avoid a
+ * duplicate. Both the central comment and the custom-field write follow
+ * createIntakeRequest's contract in intake/workfront.ts exactly: writes are
+ * disabled on this tenant today, so both report what they WOULD have done
+ * rather than pretending success - see `workfrontDoc` (field write) on the
+ * completed response and `metadata.workfrontUpdate` (comment) on the task_run.
  *
  * NOT DONE HERE: triage.ts's "wrong_data_source" (FAC vs. profile store)
  * classification itself still never consults AEP - it is PURE ON PURPOSE
@@ -156,9 +158,10 @@ export async function POST(req: NextRequest) {
   const loopCount = Number(input.loopCount) || 0;
 
   // Everything below calls MCP tools somewhere (fetchRejection,
-  // gatherAepContext's three AEP reads, postReviewComment/
-  // updateReviewNotesField) - wrapped so every call, request and response,
-  // ends up in metadata.toolCalls for the UI.
+  // gatherAepContext's three AEP reads, updateReviewNotesField) - wrapped so
+  // every call, request and response, ends up in metadata.toolCalls for the
+  // UI. (The update comment is posted by the orchestrator after this returns,
+  // so it is traced separately under metadata.workfrontUpdate.)
   const { result, toolCalls } = await withToolCallLog(body.runId, "review", async (): Promise<AgentResponse> => {
     const objId = input.workfront?.created ? String(input.workfront.objId || "") : "";
     const fetched = await fetchRejection(objId || null);
@@ -197,14 +200,18 @@ export async function POST(req: NextRequest) {
       const aepContext = await gatherAepContext(fields, input.brief);
       const aepNote = formatAepContextNote(aepContext);
 
-      let workfrontDoc: { comment: CommentOutcome; fieldUpdate: FieldUpdateOutcome } | null = null;
+      // The AEP context is documented on the issue two ways. The COMMENT is
+      // now posted centrally by the orchestrator for every agent (see
+      // lib/pipeline/workfront-updates.ts), using this step's `message` -
+      // which already carries the same AEP note appended below - so posting a
+      // second comment here would only duplicate it. The custom-FIELD write
+      // stays: it survives on the record itself, not in a comment thread that
+      // scrolls away, and the central comment hook does not touch fields.
+      let workfrontDoc: { fieldUpdate: FieldUpdateOutcome } | null = null;
       if (objId) {
         const objCode = input.workfront?.objCode || "OPTASK";
-        const [comment, fieldUpdate] = await Promise.all([
-          postReviewComment(objId, objCode, aepNote),
-          updateReviewNotesField(objId, objCode, aepNote),
-        ]);
-        workfrontDoc = { comment, fieldUpdate };
+        const fieldUpdate = await updateReviewNotesField(objId, objCode, aepNote);
+        workfrontDoc = { fieldUpdate };
       }
 
       return {
@@ -251,7 +258,9 @@ export async function POST(req: NextRequest) {
           profileEnabledDatasets: aepContext.datasetProbe.profileEnabled,
           pqlGrounded: aepContext.pqlGuidance.grounded,
           pqlGuidance: aepContext.pqlGuidance.hits,
-          workfrontCommentPosted: workfrontDoc?.comment.posted ?? null,
+          // The update comment is posted centrally now (recorded under
+          // metadata.workfrontUpdate by the orchestrator); this agent still
+          // owns the custom-field write, so only that outcome is reported here.
           workfrontFieldUpdated: workfrontDoc?.fieldUpdate.updated ?? null,
         },
       };

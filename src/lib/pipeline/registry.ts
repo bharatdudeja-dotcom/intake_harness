@@ -1,5 +1,5 @@
 import type { AgentName } from "./types";
-import { allWorkfrontToolNames } from "@/lib/workfront-tools";
+import { allWorkfrontToolNames, commentToolNames } from "@/lib/workfront-tools";
 
 /**
  * The pipeline order AND the least-privilege boundary for every agent.
@@ -174,6 +174,14 @@ export const PIPELINE: AgentDefinition[] = [
       // reporting what a human needs to wire up instead.
       "destination_list_dataflows",
       "destination_get_dataflow",
+      // The orchestrator posts a "what this agent did" comment back onto the
+      // Workfront issue after EVERY step completes (see
+      // lib/pipeline/workfront-updates.ts), and it posts AS the completing
+      // agent — so this otherwise read-only agent needs the comment-create
+      // tool, and ONLY that write. Intake and Review already have it via
+      // allWorkfrontToolNames above; this is the minimal grant that lets
+      // Agent 3's updates reach the issue without handing it create/update.
+      ...commentToolNames(),
     ],
     // Review already runs the SAME read-only AEP context probe one step
     // earlier (agents/review/aep-context.ts) - schema availability, existing
