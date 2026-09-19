@@ -24,6 +24,16 @@
  * Tool names and argument shapes below are verified against the live server -
  * 238 tools, tools/list read 16 Sep 2026. Every one of these takes an optional
  * `sandbox`, and none of them have required arguments.
+ *
+ * PROBING PREFERS THE UNION VIEW. probeSchemas now asks
+ * adobe_get_union_schema for the profile class's merged field set FIRST -
+ * one call that returns every profile field the sandbox actually holds,
+ * flattened - and only falls back to listing and sampling individual
+ * schemas when that view is empty or unavailable. That replaces "sample 6
+ * schemas and hope the field is in one of them" with "ask for the whole
+ * union once", which is both cheaper and structurally unable to miss a
+ * field by sampling wrong (the failure mode SCHEMA_SAMPLE was bumped 3->6
+ * to mitigate). See PROFILE_UNION_CLASS.
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
@@ -135,6 +145,21 @@ export function criteriaKeywords(text: string): string[] {
 
 /** Schema titles worth opening: the ones that would carry profile attributes. */
 const PROFILE_SCHEMA_HINT = /profile|individual|customer|account|subscriber|person|demographic/i;
+
+/**
+ * The XDM Profile class every profile-enabled schema in a sandbox extends.
+ *
+ * adobe_get_union_schema resolves the MERGED view of every schema composed
+ * on this class - i.e. every profile field the whole sandbox actually holds,
+ * already flattened, field groups and all. That is a far more complete and
+ * far cheaper answer to "does attribute X exist" than sampling a handful of
+ * individual schemas and hoping the field lives in one of them: it is ONE
+ * call that cannot miss a field by sampling the wrong schema. The per-schema
+ * walk below stays as a fallback for the case where the union view is empty
+ * or the tool is unavailable, so this only ever makes the probe MORE
+ * conclusive, never less.
+ */
+const PROFILE_UNION_CLASS = "https://ns.adobe.com/xdm/context/profile";
 
 /**
  * How many schemas to open. Each is a network call, and this is THE tool
@@ -289,56 +314,95 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
     };
   }
 
-  let records: Array<{ title: string; id: string }> = [];
-  try {
-    const list = await callMcpTool<unknown>(taskId, "adobe_list_schemas", { limit: "50" });
-    records = schemaRecords(list);
-  } catch (err) {
-    return {
-      read: false, conclusive: false, error: (err as Error).message, sandbox: null,
-      schemaCount: 0, schemasInspected: 0, fieldGroupsInspected: 0, fieldCount: 0, found: {}, evidence: [],
-    };
-  }
-
-  const sandbox = sandboxFrom(records);
-  const candidates = records.filter((r) => PROFILE_SCHEMA_HINT.test(r.title)).slice(0, SCHEMA_SAMPLE);
-
   const fields = new Set<string>();
-  const pendingRefs = new Set<string>();
   let inspected = 0;
+  let fieldGroupsInspected = 0;
+  let unionResolved = false;
   let lastError: string | null = null;
-  for (const c of candidates) {
-    try {
-      const doc = await callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id });
-      for (const f of fieldNames(doc)) fields.add(f);
-      // A class-based schema's own document rarely has inline properties -
-      // it composes field groups via allOf/$ref (see fieldGroupRefs). Queue
-      // those regardless of whether this schema's own walk found anything,
-      // since a schema can mix a few inline fields with several field-group
-      // refs.
-      for (const ref of fieldGroupRefs(doc)) pendingRefs.add(ref);
-      inspected += 1;
-    } catch (err) {
-      lastError = (err as Error).message;
+  let sandbox: string | null = null;
+
+  /*
+   * FIRST, ASK THE UNION. adobe_get_union_schema returns the whole sandbox's
+   * merged profile view - every field of every profile-enabled schema, field
+   * groups already flattened in. One call, and it structurally cannot miss a
+   * field by sampling the wrong schema (the exact failure mode SCHEMA_SAMPLE
+   * was raised 3->6 to paper over). When it answers with fields, the probe is
+   * conclusive and the per-schema sampling below is skipped entirely.
+   *
+   * It is tried inside its own try/catch and treated as strictly additive: if
+   * the tool is unavailable, errors, or comes back empty, we fall through to
+   * the list-and-sample path exactly as before. So this can only make the
+   * probe more conclusive, never break a tenant where the union view isn't
+   * reachable.
+   */
+  try {
+    const union = await callMcpTool<unknown>(taskId, "adobe_get_union_schema", { class_id: PROFILE_UNION_CLASS });
+    for (const f of fieldNames(union)) fields.add(f);
+    if (fields.size > 0) {
+      unionResolved = true;
+      inspected = 1;
+      const unionRecords = schemaRecords(union);
+      sandbox = sandboxFrom(unionRecords);
     }
+  } catch (err) {
+    lastError = (err as Error).message;
   }
 
-  // Resolve field groups only if the class schemas alone were inconclusive -
-  // fields.size === 0 after inspecting at least one schema is exactly the
-  // "properties live in a $ref, not inline" case this exists for. Bounded to
-  // FIELD_GROUP_SAMPLE total, not per schema, so several profile-hinted
-  // schemas each listing a handful of refs cannot fan out unboundedly.
-  let fieldGroupsInspected = 0;
-  if (inspected > 0 && fields.size === 0 && pendingRefs.size > 0) {
-    for (const ref of [...pendingRefs].slice(0, FIELD_GROUP_SAMPLE)) {
+  let records: Array<{ title: string; id: string }> = [];
+  // Hoisted out of the sampling block so the final error message below can
+  // still describe the sampling path (how many schemas looked like profile
+  // schemas, how many field-group refs went unopened) when that path ran.
+  let candidateCount = 0;
+  let pendingRefCount = 0;
+  if (!unionResolved) {
+    try {
+      const list = await callMcpTool<unknown>(taskId, "adobe_list_schemas", { limit: "50" });
+      records = schemaRecords(list);
+    } catch (err) {
+      return {
+        read: false, conclusive: false, error: (err as Error).message, sandbox: null,
+        schemaCount: 0, schemasInspected: 0, fieldGroupsInspected: 0, fieldCount: 0, found: {}, evidence: [],
+      };
+    }
+
+    sandbox = sandboxFrom(records);
+    const candidates = records.filter((r) => PROFILE_SCHEMA_HINT.test(r.title)).slice(0, SCHEMA_SAMPLE);
+    candidateCount = candidates.length;
+
+    const pendingRefs = new Set<string>();
+    for (const c of candidates) {
       try {
-        const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: ref });
+        const doc = await callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id });
         for (const f of fieldNames(doc)) fields.add(f);
-        fieldGroupsInspected += 1;
+        // A class-based schema's own document rarely has inline properties -
+        // it composes field groups via allOf/$ref (see fieldGroupRefs). Queue
+        // those regardless of whether this schema's own walk found anything,
+        // since a schema can mix a few inline fields with several field-group
+        // refs.
+        for (const ref of fieldGroupRefs(doc)) pendingRefs.add(ref);
+        inspected += 1;
       } catch (err) {
         lastError = (err as Error).message;
       }
     }
+
+    // Resolve field groups only if the class schemas alone were inconclusive -
+    // fields.size === 0 after inspecting at least one schema is exactly the
+    // "properties live in a $ref, not inline" case this exists for. Bounded to
+    // FIELD_GROUP_SAMPLE total, not per schema, so several profile-hinted
+    // schemas each listing a handful of refs cannot fan out unboundedly.
+    if (inspected > 0 && fields.size === 0 && pendingRefs.size > 0) {
+      for (const ref of [...pendingRefs].slice(0, FIELD_GROUP_SAMPLE)) {
+        try {
+          const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: ref });
+          for (const f of fieldNames(doc)) fields.add(f);
+          fieldGroupsInspected += 1;
+        } catch (err) {
+          lastError = (err as Error).message;
+        }
+      }
+    }
+    pendingRefCount = pendingRefs.size;
   }
 
   const conclusive = inspected > 0 && fields.size > 0;
@@ -360,10 +424,15 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
     conclusive,
     error: conclusive
       ? null
-      : candidates.length === 0
-        ? `none of the ${records.length} schemas in this sandbox look like profile schemas, so attribute availability could not be determined`
-        : pendingRefs.size > 0 && fieldGroupsInspected === 0
-          ? `${candidates.length} class schema(s) composed their fields via ${pendingRefs.size} field-group ` +
+      : candidateCount === 0
+        ? // The union view returned nothing AND either the schema list was empty
+          // or none of its schemas looked like profile schemas. Distinguish the
+          // union having been tried at all so the message points at the right
+          // thing to fix.
+          `${records.length === 0 ? "the profile union view returned no fields and no schemas could be listed" : `none of the ${records.length} schemas in this sandbox look like profile schemas`}, so attribute availability could not be determined` +
+          (lastError ? ` (${lastError})` : "")
+        : pendingRefCount > 0 && fieldGroupsInspected === 0
+          ? `${candidateCount} class schema(s) composed their fields via ${pendingRefCount} field-group ` +
             `reference(s) none of which could be opened (${lastError})`
           : lastError || "opened the candidate schemas and their field groups but found no field definitions in them",
     sandbox,

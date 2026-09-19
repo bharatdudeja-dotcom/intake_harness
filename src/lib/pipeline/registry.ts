@@ -103,6 +103,10 @@ export const PIPELINE: AgentDefinition[] = [
       // not answering it at all.
       "adobe_list_schemas",
       "adobe_get_schema",
+      // The merged profile view for the whole sandbox - the FIRST thing
+      // aep.ts's probeSchemas asks, because it answers "does field X exist"
+      // in one call that can't miss by sampling the wrong schema. Read-only.
+      "adobe_get_union_schema",
       // A class-based schema (Profile, ExperienceEvent) rarely carries its
       // fields inline - it composes them from field groups via allOf/$ref,
       // so reading the class schema alone and finding nothing is "asked the
@@ -154,6 +158,9 @@ export const PIPELINE: AgentDefinition[] = [
       // in AEP before opening a GTO/attribute request.
       "adobe_list_schemas",
       "adobe_get_schema",
+      // The merged profile view - probeSchemas' first, cheapest probe. See
+      // review's identical grant above.
+      "adobe_get_union_schema",
       // See registry.ts's note on review's identical grant, and aep.ts's
       // fieldGroupRefs: a class schema's fields usually live in a
       // referenced field group, not inline on the class schema itself.
@@ -168,11 +175,15 @@ export const PIPELINE: AgentDefinition[] = [
       "destination_list_dataflows",
       "destination_get_dataflow",
     ],
-    // Empty today: this stub doesn't read priorOutputs, and Review's output
-    // already carries the confirmed intake forward via its `input`. Add
-    // "intake" here specifically if the real implementation needs the
-    // ORIGINAL brief/grounding, separate from whatever Review transformed.
-    contextAccess: [],
+    // Review already runs the SAME read-only AEP context probe one step
+    // earlier (agents/review/aep-context.ts) - schema availability, existing
+    // segment, profile-enabled datasets, PQL grounding. Granting Agent 3
+    // sight of review's output lets it REUSE a conclusive probe instead of
+    // repeating every one of those MCP reads from scratch (see
+    // audience-creation/route.ts, which falls back to its own probe only
+    // when review's is absent or inconclusive). This is the scoped-context
+    // mechanism finally being used, not ceremony.
+    contextAccess: ["review"],
   },
 ];
 

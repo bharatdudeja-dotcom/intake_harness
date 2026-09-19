@@ -13,6 +13,9 @@ export default async function Home() {
   const tiles: { label: string; value: number }[] = [
     { label: "total runs", value: stats.total },
     { label: "needs input", value: stats.needsInput },
+    // Fire-and-poll: runs where an agent accepted long-running work and is
+    // finishing it out-of-band (see orchestrator.ts's in_progress handling).
+    { label: "in progress", value: stats.inProgress },
     { label: "failed", value: stats.failed },
     { label: "approved", value: stats.approved },
     { label: "promoted", value: stats.promoted },
@@ -34,7 +37,7 @@ export default async function Home() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {tiles.map((tile) => (
             <div
               key={tile.label}

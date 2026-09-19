@@ -12,6 +12,14 @@ import {
 } from "@/lib/agents/audience/aep";
 import { detectActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
 import { groundPqlGuidance, type PqlGuidance } from "@/lib/agents/review/pql-context";
+import type { AepContext } from "@/lib/agents/review/aep-context";
+import type { SchemaProbe, SegmentMatch } from "@/lib/agents/audience/aep";
+import {
+  findOpenRequest,
+  openOrGetRequest,
+  resolveOpenRequest,
+  ageSecondsOf,
+} from "@/lib/agents/audience/attribute-requests";
 
 /**
  * Agent 3 - Audience Creation.
@@ -115,57 +123,58 @@ function formatActivationMessage(activation: ActivationOutcome): string {
 }
 
 /**
- * B4's state, carried on the run.
+ * B4's state, now DURABLE and WALL-CLOCK.
  *
- * "Keep state on the open request, re-evaluate 2.7 automatically on completion
- * rather than waiting for someone to check." The run carries the request
- * forward, so each pass re-reads the schemas and can close it out itself. A
- * durable store would outlive the run and is the right next step; carrying it
- * here is what makes the re-evaluation automatic today rather than a person
- * remembering to look.
+ * "Keep state on the open request, re-evaluate 2.7 automatically on
+ * completion rather than waiting for someone to check." This used to carry
+ * the request on the run's own output with an `ageSeconds` counter bumped by
+ * 1 each pass - which measured passes, not time, and evaporated when the run
+ * ended. It now lives in Postgres (lib/agents/audience/attribute-requests.ts,
+ * db/schema.sql's attribute_requests), keyed by (run_id, missing-attribute
+ * signature), with age computed as NOW() - opened_at. So a request that sits
+ * open for a quarter reads as a quarter old - B7's whole point - and the
+ * record outlives the run.
+ *
+ * - attributes present + a prior open request  -> resolve it (automatic 2.7).
+ * - attributes present + nothing open          -> not_opened.
+ * - attributes missing                         -> open-or-reuse; reusing
+ *   preserves opened_at so the clock keeps running.
  */
-function attributeRequestState(
-  priorOutputs: Partial<Record<string, unknown>>,
+async function attributeRequestState(
+  runId: string,
   attributesAvailable: boolean,
   missing: string[],
-): AudienceCreationOutput["openAttributeRequest"] & { note: string } {
-  const prior = (priorOutputs?.audience_creation as AudienceCreationOutput | undefined)?.openAttributeRequest;
-
+): Promise<AudienceCreationOutput["openAttributeRequest"] & { note: string }> {
   if (attributesAvailable) {
-    if (prior && prior.status === "open") {
+    const resolved = await resolveOpenRequest(runId);
+    if (resolved) {
       return {
         status: "resolved",
-        requestId: prior.requestId,
-        ageSeconds: prior.ageSeconds,
+        requestId: resolved.request_id,
+        ageSeconds: ageSecondsOf(resolved),
         note:
-          `Attribute request ${prior.requestId} is now satisfied - the attributes are present in AEP, ` +
-          "so 2.7 was re-evaluated automatically rather than waiting for someone to check.",
+          `Attribute request ${resolved.request_id} is now satisfied after ${ageSecondsOf(resolved)}s - the ` +
+          "attributes are present in AEP, so 2.7 was re-evaluated automatically rather than waiting for " +
+          "someone to check.",
       };
     }
     return { status: "not_opened", requestId: null, ageSeconds: null, note: "No attribute request needed." };
   }
 
-  if (prior && prior.status === "open" && prior.requestId) {
-    const age = Number(prior.ageSeconds || 0) + 1;
-    return {
-      status: "open",
-      requestId: prior.requestId,
-      ageSeconds: age,
-      // B7's lesson applied here: an open request with no visible age is how a
-      // quarter-long tail hides.
-      note: `Attribute request ${prior.requestId} is still open, waiting on ${missing.join(", ")}.`,
-    };
-  }
-
-  const requestId = `ATTR-${Date.now().toString(36).toUpperCase()}`;
+  const existing = await findOpenRequest(runId);
+  const request = existing ?? (await openOrGetRequest(runId, missing));
+  const age = ageSecondsOf(request);
   return {
     status: "open",
-    requestId,
-    ageSeconds: 0,
-    note:
-      `Opened attribute request ${requestId} for ${missing.join(", ")}. This is the 2.7a branch: it ` +
-      "leaves this process into the GTO workflow and returns here on completion, and its age is " +
-      "tracked so it cannot sit unanswered with nobody owning it.",
+    requestId: request.request_id,
+    ageSeconds: age,
+    // B7's lesson applied here with a real clock: an open request whose age
+    // is visible cannot sit unowned as a hidden quarter-long tail.
+    note: existing
+      ? `Attribute request ${request.request_id} is still open after ${age}s, waiting on ${missing.join(", ")}.`
+      : `Opened attribute request ${request.request_id} for ${missing.join(", ")}. This is the 2.7a branch: it ` +
+        "leaves this process into the GTO workflow and returns here on completion, and its age is tracked " +
+        "in wall-clock time so it cannot sit unanswered with nobody owning it.",
   };
 }
 
@@ -178,9 +187,29 @@ export async function POST(req: NextRequest) {
   // Every read below (probeSchemas, findExistingSegment) calls MCP tools -
   // wrapped so every call, request and response, ends up in
   // metadata.toolCalls for the UI.
+  // Review (Agent 2) runs the identical read-only AEP context probe one step
+  // earlier and, as of registry.ts granting audience_creation
+  // contextAccess: ["review"], hands it forward here. Reuse a CONCLUSIVE
+  // prior probe rather than repeating every schema/segment/PQL MCP read -
+  // the single biggest source of duplicated work in this pipeline. An
+  // inconclusive or absent prior probe is not trusted: we re-probe from
+  // scratch below, so this can only save calls, never skip a real check.
+  const priorReview = (body.priorOutputs?.review as { aepContext?: AepContext } | undefined)?.aepContext;
+
   const { result, toolCalls } = await withToolCallLog(body.runId, "audience_creation", async (): Promise<AgentResponse<AudienceCreationOutput>> => {
     const needed = neededAttributes(fields, brief);
-    const probe = await probeSchemas("audience_creation", needed);
+
+    // Reuse Review's probe only when it is conclusive AND covers exactly the
+    // attributes this audience needs (Review derives `needed` from the same
+    // neededAttributes(), so the sets normally match - but if they diverge,
+    // re-probe rather than answer from a probe that checked different fields).
+    const priorProbe = priorReview?.schemaProbe;
+    const priorCoversNeeded =
+      !!priorProbe &&
+      priorProbe.conclusive &&
+      needed.every((k) => k in (priorProbe.found ?? {}));
+    const reusedProbe = priorCoversNeeded;
+    const probe: SchemaProbe = priorCoversNeeded ? priorProbe! : await probeSchemas("audience_creation", needed);
 
     /*
      * AN INCONCLUSIVE PROBE IS NOT A MISSING ATTRIBUTE.
@@ -214,8 +243,16 @@ export async function POST(req: NextRequest) {
     // (audience_creation gets no priorOutputs from review today - see this
     // file's docstring - so it can't just trust review's answer secondhand).
     const criteria = [brief, fields.audience_description].filter(Boolean).join(" ") || fields.campaign_name || "";
+    // Reuse Review's PQL grounding when it actually grounded something -
+    // same criteria, same local reference. Re-ground only on the rule-builder
+    // path (FAC doesn't use PQL) and only when Review didn't already do it.
+    const reusedPql = !!priorReview?.pqlGuidance?.grounded;
     const pqlGuidance: PqlGuidance | null =
-      path.buildPath === "aep_rule_builder" ? await groundPqlGuidance("audience_creation", criteria) : null;
+      path.buildPath === "aep_rule_builder"
+        ? reusedPql
+          ? priorReview!.pqlGuidance
+          : await groundPqlGuidance("audience_creation", criteria)
+        : null;
 
     // Cheapest good outcome first: an audience that already exists needs no build
     // and is the only way to get a real count without writing anything.
@@ -233,7 +270,15 @@ export async function POST(req: NextRequest) {
     ]
       .filter(Boolean)
       .map(String);
-    const existing = await findExistingSegment("audience_creation", terms);
+    // Reuse Review's segment search when it read successfully. Review now
+    // searches the IDENTICAL terms (aep-context.ts's segmentSearchTerms was
+    // aligned to this exact derivation), so a successful "no match" from
+    // Review is as authoritative as one we'd compute here - reusing it
+    // saves the adobe_list_segments read. A failed read (read: false) is not
+    // reused; we search ourselves.
+    const priorSegment: SegmentMatch | undefined = priorReview?.segmentMatch;
+    const reusedSegment = !!priorSegment?.read;
+    const existing = reusedSegment ? priorSegment! : await findExistingSegment("audience_creation", terms);
 
     // Off by default - see this file's docstring and activation.ts. Only
     // runs the (read-only) destination check when the brief itself
@@ -250,7 +295,7 @@ export async function POST(req: NextRequest) {
     // Only a CONCLUSIVE "no" opens an attribute request. "undetermined" must not:
     // opening the 2.7a branch because we failed to look is the quarter-long tail
     // started by our own blind spot.
-    const attrState = attributeRequestState(body.priorOutputs || {}, attributesAvailable !== false, missing);
+    const attrState = await attributeRequestState(body.runId, attributesAvailable !== false, missing);
 
     const statusMessage = [
       path.buildPath === "fac"
@@ -309,6 +354,9 @@ export async function POST(req: NextRequest) {
       message: status === "needs_input" ? attrState.note : statusMessage,
       metadata: {
         buildPathReason: path.reason,
+        // What was reused from Review's earlier probe vs. re-read here - so
+        // the saved MCP calls are visible in observability, not invisible.
+        reusedFromReview: { schemaProbe: reusedProbe, segmentMatch: reusedSegment, pqlGuidance: reusedPql },
         schemasRead: probe.read,
         schemaProbeConclusive: probe.conclusive,
         schemasReadError: probe.error,
@@ -324,6 +372,11 @@ export async function POST(req: NextRequest) {
         attributesMissing: missing,
         schemaEvidence: probe.evidence,
         existingSegment: existing.id ? { id: existing.id, name: existing.name } : null,
+        // B7's request-age metric, now real wall-clock seconds off the
+        // durable attribute_requests row (null when nothing is open).
+        requestAgeSeconds: attrState.ageSeconds,
+        attributeRequestId: attrState.requestId,
+        attributeRequestStatus: attrState.status,
         // Full PQL guidance (including the local reference's content - see
         // pql-context.ts) travels with the run, not just a pointer to a
         // file someone has to go find separately. Null when the FAC path

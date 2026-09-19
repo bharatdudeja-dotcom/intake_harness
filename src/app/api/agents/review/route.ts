@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
+import { detectRejection, type CommentLike } from "@/lib/agents/review/rejection";
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
+import { requiredFields } from "@/lib/agents/shared/campaign-brief";
 import {
   postReviewComment,
   updateReviewNotesField,
@@ -39,6 +41,13 @@ import {
  * signed in - and a failure is REPORTED, not swallowed. Reporting it is the
  * whole point: an agent that treats "I could not read the rejection" as "there
  * was no rejection" reproduces the bug it was built to fix.
+ *
+ * WHICH text is the rejection is decided by lib/agents/review/rejection.ts's
+ * detectRejection, not a keyword grep: it reads structured status/decision
+ * fields when the connector attaches them, scores rejection prose far more
+ * broadly than the old five stems (a "needs the LOB before we proceed" now
+ * registers), and picks the most-recent authoritative record rather than the
+ * last one by array order. See that module for why each of those mattered.
  *
  * DOCUMENTING THE HANDOFF TO AGENT 3 (lib/agents/review/aep-context.ts)
  *
@@ -104,14 +113,22 @@ async function fetchRejection(objId: string | null) {
     // Shapes differ between connectors, so read defensively and say when the
     // response was not something we recognise.
     const rows = (result as { comments?: unknown[]; data?: unknown[] } | null);
-    const list = (rows?.comments || rows?.data || (Array.isArray(result) ? result : [])) as Array<Record<string, unknown>>;
-    const rejection = list
-      .map((c) => String(c.message || c.text || c.note || ""))
-      .filter((t) => /reject|return|more info|insufficient|resubmit/i.test(t))
-      .pop();
+    const list = (rows?.comments || rows?.data || (Array.isArray(result) ? result : [])) as CommentLike[];
+
+    // Structured detection replaces the old keyword-grep + .pop(): it reads
+    // status/decision fields when present, scores rejection prose far more
+    // broadly than five stems, and picks the most-recent authoritative
+    // record rather than the last one by array order. See
+    // lib/agents/review/rejection.ts for exactly why each of those mattered.
+    const signal = detectRejection(list);
     return {
-      reason: rejection || null,
+      reason: signal.reason,
       source: "workfront_comments",
+      detectedVia: signal.source,
+      considered: signal.considered,
+      // "Read the stream, found no rejection" and "the stream returned
+      // nothing recognisable" are different facts - keep them distinct, same
+      // as before.
       error: list.length ? null : "the comment stream returned nothing we recognised as comments",
     };
   } catch (err) {
@@ -124,7 +141,6 @@ function preflight(fields: Record<string, string>): TriageResult {
   // Reuse the same translator, fed a synthetic reason built from what is
   // actually absent. One code path means the pre-flight and the post-rejection
   // paths cannot drift apart in what they consider a problem.
-  const { requiredFields } = require("@/lib/agents/shared/campaign-brief") as typeof import("@/lib/agents/shared/campaign-brief");
   const absent = requiredFields().filter((f) => !String(fields[f.key] || "").trim());
   if (!absent.length) {
     return { findings: [], redraft: { ...fields }, changed: [], needsHuman: false, summary: "Nothing the review queue should reject this for." };
@@ -257,7 +273,13 @@ export async function POST(req: NextRequest) {
           intakeFields: triage.redraft,
           loopCount: loopCount + 1,
         },
-        metadata: { mode: "triage", needsHuman: true, loopCount: loopCount + 1 },
+        metadata: {
+          mode: "triage",
+          needsHuman: true,
+          loopCount: loopCount + 1,
+          rejectionDetectedVia: "detectedVia" in fetched ? fetched.detectedVia : input.rejectionReason ? "passed_in" : "none",
+          rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
+        },
       };
     }
 
@@ -289,6 +311,8 @@ export async function POST(req: NextRequest) {
         corrected: triage.changed,
         questions: triage.findings.filter((f) => !f.proposed).length,
         loopCount: loopCount + 1,
+        rejectionDetectedVia: "detectedVia" in fetched ? fetched.detectedVia : input.rejectionReason ? "passed_in" : "none",
+        rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
       },
     };
   });

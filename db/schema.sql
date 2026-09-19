@@ -91,9 +91,24 @@ CREATE INDEX IF NOT EXISTS idx_runs_promoted ON runs(promoted) WHERE promoted;
 -- the next agent. Widens the CHECK constraint the original CREATE TABLE
 -- shipped with — DROP + re-ADD is the only idempotent way to change a CHECK
 -- in place, so this stays safe to re-run.
+-- 'in_progress' (added alongside 'awaiting_approval') is the durable,
+-- pollable state a run sits in when an agent accepted long-running work and
+-- will finish it out-of-band via a PATCH to its task_run (fire-and-poll for
+-- the B4/B5 GTO/FAC sub-workflow that can run for a quarter). Distinct from
+-- the transient 'running' status, which only ever lives for one
+-- orchestrator request. See src/lib/pipeline/types.ts.
 ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
 ALTER TABLE runs ADD CONSTRAINT runs_status_check
-    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
+    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval', 'in_progress'));
+
+-- task_runs shipped with an inline CHECK allowing only completed/needs_input/
+-- failed. Widen it to include 'in_progress' the same idempotent DROP+ADD way,
+-- so an accepted-but-not-finished step can be recorded and later PATCHed to a
+-- terminal status. The constraint name is Postgres's auto-generated default
+-- for the inline CHECK on the original CREATE TABLE.
+ALTER TABLE task_runs DROP CONSTRAINT IF EXISTS task_runs_status_check;
+ALTER TABLE task_runs ADD CONSTRAINT task_runs_status_check
+    CHECK (status IN ('completed', 'needs_input', 'failed', 'in_progress'));
 
 -- Model usage, when an agent genuinely reports it. NULL on every agent
 -- today — none of the four call a model, they're deterministic parsers and
@@ -178,6 +193,40 @@ INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS segmentation_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS kind_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS promote_admins TEXT[];
+
+-- Open GTO / attribute requests (B4/B7), given a DURABLE, wall-clock home.
+--
+-- WHY THIS EXISTS: audience-creation/route.ts's attributeRequestState used
+-- to carry the open request on the RUN'S OWN output and increment an
+-- `ageSeconds` counter by 1 on each pass. That made "age" a count of how
+-- many times the run advanced, not elapsed time - so B7's whole point ("an
+-- open request with no visible age is how a quarter-long tail hides") went
+-- unmeasured, and the request vanished the moment the run ended rather than
+-- outliving it the way a real GTO request (which can run for a quarter)
+-- does.
+--
+-- Keyed by (run_id, attribute_signature): the same run asking for the same
+-- set of missing attributes is the SAME request, re-evaluated - not a new
+-- one - so the age keeps accruing across passes and across process
+-- restarts. opened_at is the real clock; age is always NOW() - opened_at,
+-- computed at read time, never stored and never incremented by hand.
+-- resolved_at is set when a later probe finds the attributes present, which
+-- is the automatic 2.7 re-evaluation B4 asks for.
+CREATE TABLE IF NOT EXISTS attribute_requests (
+    request_id          TEXT PRIMARY KEY,
+    run_id              UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    -- A stable fingerprint of the missing attribute set, so re-evaluating
+    -- the same ask finds the same row instead of opening a duplicate.
+    attribute_signature TEXT NOT NULL,
+    missing_attributes  TEXT[] NOT NULL DEFAULT '{}',
+    status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    opened_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at         TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (run_id, attribute_signature)
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_requests_run ON attribute_requests(run_id);
+CREATE INDEX IF NOT EXISTS idx_attribute_requests_open ON attribute_requests(status) WHERE status = 'open';
 
 -- The MCP gateway, ported from Agent Manager's lib/mcp-servers.js /
 -- lib/mcp-oauth.js / lib/mcp-gateway.js: a registry of upstream MCP

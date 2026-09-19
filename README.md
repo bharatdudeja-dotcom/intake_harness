@@ -123,6 +123,10 @@ and must return:
 - `completed` → `output` becomes the next agent's `input`.
 - `needs_input` → the run pauses (e.g. the marketer needs to confirm
   something); `message` should say what's needed.
+- `in_progress` → the agent accepted long-running work and will finish it
+  out-of-band via `PATCH /api/runs/[runId]/task-runs/[taskRunId]` (see
+  "Long-running work: fire-and-poll" below); the run sits pollable at
+  `in_progress` meanwhile rather than blocking the request.
 - `failed` → the run stops; `message` should say why.
 - `metadata` is recorded on the step but never forwarded downstream — use it
   for the health signals the doc calls out (loop counts, request age,
@@ -240,14 +244,32 @@ DROP TABLE IF EXISTS pipeline_runs;
   doc's own blockers. No persistent cross-run store yet — see the TODO in
   the route for the "crawl, walk, run loop" B9 describes.
 
-## Known limitation: synchronous execution
+## Long-running work: fire-and-poll
 
-`runPipeline` currently awaits every agent call and returns the final
-state in one request/response cycle. That's fine while every agent is a
-fast stub. Once Audience Creation is doing real work — especially the
-GTO/FAC sub-workflow in B4/B5, which the doc says can run for a quarter —
-this needs to become fire-and-poll: `POST /api/runs` returns `{ run_id }`
-immediately, and the agent whose work is long-running updates its own
-task_runs row out-of-band (e.g. a webhook callback into a
-`PATCH /api/runs/[runId]/task-runs/[taskRunId]` route) while the
-marketer-facing UI keeps polling `GET /api/runs/[runId]`.
+`runPipeline` awaits each agent call and, for fast agents, returns the
+final state in one request/response cycle — bounded by
+`AGENT_CALL_TIMEOUT_MS` (60s). That is fine while an agent is quick, but the
+GTO/FAC sub-workflow in B4/B5 can run for a quarter, and blocking a single
+request on it would blow that timeout and strand the run at `running`.
+
+So an agent that has accepted long-running work returns
+`status: "in_progress"` instead of awaiting it. The orchestrator records the
+step, sets the run to `in_progress` (a durable, pollable state — distinct
+from the transient `running`), and returns immediately. When the real work
+finishes, the agent (or a webhook it triggered) calls:
+
+```
+PATCH /api/runs/[runId]/task-runs/[taskRunId]
+  { "status": "completed" | "needs_input" | "failed", output?, message?, metadata? }
+```
+
+which finalizes that task_run with its real timing and advances the pipeline
+exactly as a synchronously-completed step would (approval gate and
+`requiresApproval` chaining included — see `completeInProgressStep` in
+`orchestrator.ts`). A duplicate/late PATCH is rejected with 409 rather than
+double-advancing. The marketer-facing UI polls `GET /api/runs/[runId]`
+throughout; `in_progress` is what it sits on until the callback lands.
+
+Agents that finish quickly keep returning `completed`/`needs_input`/`failed`
+synchronously — nothing about the existing contract changed, `in_progress`
+is purely additive.

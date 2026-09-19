@@ -18,15 +18,34 @@ import {
   findExistingSegment,
   profileDatasetSummary,
   neededAttributes,
+  criteriaKeywords,
   type SchemaProbe,
   type SegmentMatch,
   type DatasetProbe,
 } from "@/lib/agents/audience/aep";
 import { groundPqlGuidance, formatPqlGuidanceNote, type PqlGuidance } from "./pql-context";
 
-/** Same derivation as audience-creation/route.ts's `terms` - what to search existing segments for. */
-function segmentSearchTerms(fields: Record<string, string>): string[] {
-  return [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
+/**
+ * What to search existing segments for. IDENTICAL to
+ * audience-creation/route.ts's `terms` on purpose - so Agent 3 can reuse
+ * this match (via contextAccess) instead of repeating the search.
+ *
+ * Includes the audience's ACTUAL criteria keywords, not just the intake
+ * categorization fields. This is the bug aep.ts's criteriaKeywords docstring
+ * describes: a brief asking for "an audience where ECID exists" only ever
+ * matches a real segment literally named "Has ECID" if "ecid" is one of the
+ * words searched for - the categorization fields alone (campaign_name,
+ * line_of_business, ...) never contain it. Review used to search the narrow
+ * set and find nothing, so a reused match would have been uselessly empty.
+ */
+function segmentSearchTerms(fields: Record<string, string>, brief?: string): string[] {
+  return [
+    fields.campaign_name,
+    fields.lifecycle_journey,
+    fields.line_of_business,
+    fields.customer_type,
+    ...criteriaKeywords([brief, fields.audience_description].filter(Boolean).join(" ")),
+  ]
     .filter(Boolean)
     .map(String);
 }
@@ -43,7 +62,7 @@ export type AepContext = {
 /** Run all four reads for this brief, in parallel - each is independent and none writes anything. */
 export async function gatherAepContext(fields: Record<string, string>, brief?: string): Promise<AepContext> {
   const neededAttrs = neededAttributes(fields, brief);
-  const terms = segmentSearchTerms(fields);
+  const terms = segmentSearchTerms(fields, brief);
   // What the audience is actually FOR, in plain words - the same text
   // neededAttributes reads, since that's the criteria PQL would need to
   // express, not the intake-form categorization fields around it.

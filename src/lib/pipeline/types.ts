@@ -24,9 +24,20 @@ export type TaskId = AgentName;
  *                  (e.g. B1's marketer round-trip, B3's marketer validation
  *                  at 2.5). The pipeline pauses here rather than failing;
  *                  a human resolves it and the run is resumed.
+ * "in_progress"  — the agent ACCEPTED long-running work and will finish it
+ *                  out-of-band (B4/B5's GTO/FAC sub-workflow can run for a
+ *                  quarter). The orchestrator records the step as in_progress
+ *                  and returns immediately instead of blocking on a long
+ *                  await that would blow AGENT_CALL_TIMEOUT_MS and strand the
+ *                  run at "running". The agent (or a webhook) later PATCHes
+ *                  its task_run to a terminal status via
+ *                  PATCH /api/runs/[runId]/task-runs/[taskRunId], which
+ *                  advances the pipeline. See orchestrator.ts's
+ *                  completeInProgressStep. Fire-and-poll: the marketer-facing
+ *                  UI keeps polling GET /api/runs/[runId] meanwhile.
  * "failed"       — unrecoverable error for this run.
  */
-export type AgentStatus = "completed" | "needs_input" | "failed";
+export type AgentStatus = "completed" | "needs_input" | "in_progress" | "failed";
 
 export interface AgentRequest<TInput = unknown> {
   /** The runs.run_id this call belongs to. */
@@ -74,8 +85,15 @@ export interface RunRow {
    * run, but the orchestrator stops and waits for
    * POST /api/runs/[runId]/continue rather than calling it automatically.
    * The per-agent equivalent of a tool-use permission prompt.
+   *
+   * "in_progress" — an agent accepted long-running work and is finishing it
+   * out-of-band (see AgentStatus). Distinct from the transient "running"
+   * (which is only ever set for the duration of a single orchestrator
+   * request): "in_progress" is a durable, pollable state a run can sit in
+   * for as long as the real work takes, resolved by a PATCH to the step's
+   * task_run rather than by that same request completing.
    */
-  status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
+  status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval" | "in_progress";
   current_step: number;
   input: unknown;
   created_at: string;
