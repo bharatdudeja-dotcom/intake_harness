@@ -69,6 +69,39 @@ export const ATTRIBUTE_CUES: Record<string, RegExp> = {
 };
 
 /**
+ * Which AEP profile attributes THIS audience's own criteria actually
+ * reference - never assumed just because an intake field happens to be
+ * populated. Intake requires campaign_name/business_objective/customer_type/
+ * line_of_business/launch_date for every request (Workfront/reporting
+ * needs), not because every audience is built on them - "an audience where
+ * ECID exists" needs none of that, and used to get customer_type and
+ * line_of_business checked anyway because they were hardcoded as an
+ * always-required baseline.
+ *
+ * THE BUG THIS FIXES: that hardcoded baseline meant EVERY request checked
+ * customer_type/line_of_business whether the ask needed them or not. When
+ * they came back missing (they're intake-form concepts, not necessarily
+ * literal AEP schema field names), a GTO attribute request opened for
+ * fields nothing about the actual ask required - the quarter-long tail B4
+ * exists to avoid, spent on nothing. See this function's test coverage in
+ * aep.test.ts for the exact regression this guards against.
+ *
+ * Single implementation, used by BOTH audience-creation/route.ts (Agent 3)
+ * and review/aep-context.ts (Agent 2) - it used to be two byte-identical
+ * private copies, one per file, which is exactly the kind of duplication
+ * that drifts silently: a fix applied to one and not the other would have
+ * reintroduced this same bug in whichever file got missed.
+ */
+export function neededAttributes(fields: Record<string, string>, brief?: string): string[] {
+  const text = [brief, fields.audience_description, fields.exclusion].filter(Boolean).join(" ");
+  const needed = new Set<string>();
+  for (const [key, cue] of Object.entries(ATTRIBUTE_CUES)) {
+    if (cue.test(text)) needed.add(key);
+  }
+  return [...needed];
+}
+
+/**
  * Generic request/audience-request vocabulary, excluded from
  * criteriaKeywords below so it can't spuriously match an unrelated
  * segment's name. Deliberately NOT exhaustive - just the words common

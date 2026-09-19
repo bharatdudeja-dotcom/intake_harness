@@ -7,7 +7,7 @@ import {
   identityGap,
   decideBuildPath,
   nightlyCutoff,
-  ATTRIBUTE_CUES,
+  neededAttributes,
   criteriaKeywords,
 } from "@/lib/agents/audience/aep";
 import { detectActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
@@ -91,37 +91,6 @@ export interface AudienceCreationOutput {
    * is what happened" without inspecting a status string.
    */
   activation?: ActivationOutcome;
-}
-
-/**
- * Which AEP profile attributes THIS audience's own criteria actually
- * reference - never assumed just because an intake field happens to be
- * populated. Intake requires campaign_name/business_objective/customer_type/
- * line_of_business/launch_date for every request (Workfront/reporting
- * needs), not because every audience is built on them - "an audience where
- * ECID exists" needs none of that, and used to get customer_type and
- * line_of_business checked anyway because they were hardcoded here as an
- * always-required baseline.
- *
- * THE BUG THIS FIXES: that hardcoded baseline meant EVERY request checked
- * customer_type/line_of_business whether the ask needed them or not. When
- * they came back missing (they're intake-form concepts, not necessarily
- * literal AEP schema field names), a GTO attribute request opened for
- * fields nothing about the actual ask required - the quarter-long tail
- * B4 exists to avoid, spent on nothing.
- *
- * Reuses aep.ts's ATTRIBUTE_CUES - the same word-anchored cues that decide
- * whether a SCHEMA has a field now decide whether the BRIEF is actually
- * asking about one, so this can never recognise an attribute the schema
- * probe itself would not also recognise.
- */
-function neededAttributes(fields: Record<string, string>, brief?: string): string[] {
-  const text = [brief, fields.audience_description, fields.exclusion].filter(Boolean).join(" ");
-  const needed = new Set<string>();
-  for (const [key, cue] of Object.entries(ATTRIBUTE_CUES)) {
-    if (cue.test(text)) needed.add(key);
-  }
-  return [...needed];
 }
 
 /** The one statusMessage line for whatever activateAudience decided - only ever called when activation was actually requested. */

@@ -32,17 +32,21 @@
  * to a human rather than to a service account; ~25 approval tools, which matters
  * for a review and triage pipeline; and AEM folder linkage.
  *
- * ARGUMENT SHAPES ARE NOT YET VERIFIED AGAINST A LIVE TENANT
+ * ARGUMENT SHAPES ARE VERIFIED - VIA THE COOKBOOK GATEWAY, NOT THIS ADAPTER'S
+ * OWN ENDPOINT
  *
- * The tool NAMES below are verbatim from Adobe's published tool list. The
- * argument shapes are inferred from the Workfront API's own conventions and have
- * NOT been checked against the live schemas, because listing them requires an
- * OAuth token and nobody has signed in yet. Until that happens, treat a write
- * through this adapter as unverified: createIntakeRequest already reports what
- * it WOULD have created when a call fails, so an unverified payload surfaces as
- * a visible dry run rather than a wrong record in a client's Workfront. Verify
- * with `check_mcp_server` in Agent Manager once authenticated, then delete this
- * paragraph.
+ * The tool NAMES below are verbatim from Adobe's published tool list, and the
+ * argument shapes were inferred from the Workfront API's own conventions. This
+ * repo now reaches Workfront through MCP_GATEWAY_URL (the Cookbook gateway,
+ * `workfront-adobe` namespace) rather than the endpoint described above, and a
+ * real write through it - Agent 1 creating a live Workfront issue - was
+ * confirmed live this session (`workflow_create_any_object`, OPTASK
+ * 6aad806f00079cbaa8101e3f69e574ea, 19 Sep 2026). createIntakeRequest still
+ * reports what it WOULD have created when a call fails, so a genuinely broken
+ * payload still surfaces as a visible dry run rather than a wrong record in a
+ * client's Workfront - that safety net just hasn't needed to catch anything
+ * on the create path in practice. Re-verify with `check_mcp_server` if the
+ * gateway's own Workfront connection or OAuth session ever changes.
  */
 
 export type WorkfrontFlavour = "adobe-official" | "inhouse";

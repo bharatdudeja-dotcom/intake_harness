@@ -17,31 +17,12 @@ import {
   probeSchemas,
   findExistingSegment,
   profileDatasetSummary,
-  ATTRIBUTE_CUES,
+  neededAttributes,
   type SchemaProbe,
   type SegmentMatch,
   type DatasetProbe,
 } from "@/lib/agents/audience/aep";
 import { groundPqlGuidance, formatPqlGuidanceNote, type PqlGuidance } from "./pql-context";
-
-/**
- * Which AEP profile attributes THIS audience's own criteria actually
- * reference - mirrors audience-creation/route.ts's own `neededAttributes`
- * (see its docstring for the bug this fixes: customer_type/line_of_business
- * used to be hardcoded as always-needed, so a brief like "an audience where
- * ECID exists" got both checked anyway, both came back missing, and Agent 3
- * opened a GTO attribute request for fields nothing about the ask required).
- * Asked here first so the same false read surfaces at review, not two
- * agents later.
- */
-function neededAttributes(fields: Record<string, string>, brief?: string): string[] {
-  const text = [brief, fields.audience_description, fields.exclusion].filter(Boolean).join(" ");
-  const needed = new Set<string>();
-  for (const [key, cue] of Object.entries(ATTRIBUTE_CUES)) {
-    if (cue.test(text)) needed.add(key);
-  }
-  return [...needed];
-}
 
 /** Same derivation as audience-creation/route.ts's `terms` - what to search existing segments for. */
 function segmentSearchTerms(fields: Record<string, string>): string[] {
