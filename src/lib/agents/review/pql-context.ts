@@ -41,6 +41,16 @@
  * amount of query rephrasing here will surface syntax that was never
  * loaded, and this has now been checked thoroughly enough that re-trying
  * different search phrasings isn't worth doing again.
+ *
+ * ../../../../docs/pql-reference.md now holds a full copy of Adobe's actual
+ * PQL function reference (all 12 categories, pulled directly from
+ * experienceleague.adobe.com, 19 Sep 2026) - the exact material this module
+ * just proved is missing from the knowledge base. It is NOT wired into
+ * groundPqlGuidance below; this module still only reports what the
+ * knowledge base itself actually knows, honestly, rather than silently
+ * blending in an out-of-band source the marketer/reviewer can't see cited.
+ * If Agent 2 should actually use it, that's a deliberate follow-up (read
+ * the file, cite it explicitly in PqlGuidance), not a quiet addition here.
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
