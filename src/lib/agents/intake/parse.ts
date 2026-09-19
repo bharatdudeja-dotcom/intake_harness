@@ -20,7 +20,7 @@
  * Pure functions. No I/O, no framework — testable on its own.
  */
 
-import { findState } from "@/lib/agents/shared/us-states";
+import { findNamedPlace } from "@/lib/agents/shared/places";
 import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
 
 export type Provenance = "stated" | "derived" | "inferred";
@@ -398,26 +398,39 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   }
 
   /*
-   * A NAMED STATE IS A REGION.
+   * A NAMED PLACE IS A REGION - AND A COUNTRY IS A PLACE.
    *
-   * The region options are the six macro-regions, so "in Pennsylvania" matched
-   * nothing and the state was captured nowhere - it stayed as prose in the
-   * brief, and the audience the pipeline built was therefore national. The
-   * state list is shared with the audience agent, so the two cannot disagree
-   * about what counts as a place.
+   * This looked for US states and nothing else, so the commonest way to write
+   * a brief did not work. Tested four ways against the live tenant:
    *
-   * Stated, not inferred: the marketer wrote the state's name.
+   *     "Region: us"        -> not captured, asked "Region: which of these - uk, de, us?"
+   *     "Region: US"        -> not captured, asked the same
+   *     "the United States" -> not captured, asked the same
+   *     "in Pennsylvania"   -> captured, DE:Region = "us", asked nothing
+   *
+   * The system asked the marketer to choose `us` from a list containing `us`,
+   * on a brief whose first line said `us`. Exactly inverted from how people
+   * brief: you name the country for a national push and the state only when
+   * you actually mean the state.
+   *
+   * findNamedPlace still prefers a state when one is named, because it is the
+   * more precise answer and the field mapper can always climb to the country
+   * afterwards. The table is shared with that mapper, so the two cannot
+   * disagree about what counts as a place - the same reason the state list is
+   * shared with the audience agent.
+   *
+   * Stated, not inferred: the marketer wrote the place's name.
    */
   if (!seen.has("region")) {
-    const state = findState(brief);
-    if (state) {
+    const place = findNamedPlace(brief);
+    if (place) {
       const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === "region");
       push({
         key: "region",
         label: spec?.label ?? "Region / market",
-        value: state.name,
+        value: place.name,
         from: "stated",
-        evidence: state.name,
+        evidence: place.name,
       });
     }
   }

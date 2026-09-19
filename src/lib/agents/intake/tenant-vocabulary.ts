@@ -1,6 +1,6 @@
 import { callMcpTool } from "@/lib/mcp-client";
 import type { TaskId } from "@/lib/pipeline/types";
-import { findState } from "@/lib/agents/shared/us-states";
+import { widerPlaces } from "@/lib/agents/shared/places";
 
 /**
  * The tenant's own vocabulary, and how a marketer's words map onto it.
@@ -91,77 +91,21 @@ const SYNONYMS: Record<string, string[]> = {
   "Revision / Edit  to existing": ["revision", "edit", "amend", "change to existing", "update existing"],
 };
 
-/**
- * The same place, described more broadly each time.
+/*
+ * THE PLACE TABLE MOVED TO shared/places.ts, AND THE MOVE IS THE POINT.
  *
- * Narrowest first, so a field that can hold the exact place gets it, and only
- * a field that cannot is offered something coarser. Each step carries the words
- * to explain itself, because a value quietly widening is the failure worth
- * catching: a state filed under a country is a fact, a state filed under the
- * wrong continent is a bug.
+ * It lived here while the PARSER kept a different one that only knew US
+ * states. So the parser never captured "US" out of a brief, and this mapper -
+ * which would have mapped it happily - was never handed a value to map. The
+ * bug was not in either table; it was in there being two of them.
  *
- * Only places this can be sure about. A city it does not know widens no
- * further, and the field refuses rather than guessing.
+ * Shared now, for the same reason the state list is shared with the audience
+ * agent: the two cannot disagree about what counts as a place.
+ *
+ * The shared table also gained the entry this one was missing - the United
+ * States. It had the UK, Germany, France, Canada, India and Australia, on a
+ * project for a US cable company.
  */
-function widerPlaces(raw: string): Array<{ as: string; level: string; because: string; missing: string }> {
-  const out: Array<{ as: string; level: string; because: string; missing: string }> = [
-    { as: raw, level: "as written", because: "", missing: "" },
-  ];
-
-  const state = findState(raw);
-  if (state) {
-    out.push({ as: state.name, level: "state", because: "is a US state", missing: "state-level" });
-    out.push({ as: state.code, level: "state code", because: "is a US state", missing: "state-level" });
-    for (const us of ["us", "usa", "united states", "united states of america", "north america", "namer"]) {
-      out.push({ as: us, level: "country", because: "is in the US", missing: "state-level" });
-    }
-    return out;
-  }
-
-  const KNOWN: Array<{ test: RegExp; wider: string[]; because: string }> = [
-    {
-      test: /\b(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland|london|manchester|birmingham|glasgow|leeds)\b/i,
-      wider: ["uk", "gb", "united kingdom", "great britain", "europe", "emea"],
-      because: "is in the United Kingdom",
-    },
-    {
-      test: /\b(de|germany|deutschland|berlin|munich|m[uü]nchen|hamburg|frankfurt|cologne|k[oö]ln)\b/i,
-      wider: ["de", "germany", "deutschland", "europe", "emea"],
-      because: "is in Germany",
-    },
-    {
-      test: /\b(fr|france|paris|lyon|marseille)\b/i,
-      wider: ["fr", "france", "europe", "emea"],
-      because: "is in France",
-    },
-    {
-      test: /\b(ca|canada|toronto|vancouver|montreal|ontario|quebec)\b/i,
-      wider: ["ca", "canada", "north america", "namer"],
-      because: "is in Canada",
-    },
-    {
-      test: /\b(in|india|mumbai|delhi|bengaluru|bangalore|chennai|hyderabad)\b/i,
-      wider: ["in", "india", "apac", "asia"],
-      because: "is in India",
-    },
-    {
-      test: /\b(au|australia|sydney|melbourne|brisbane|perth)\b/i,
-      wider: ["au", "australia", "apac", "oceania"],
-      because: "is in Australia",
-    },
-  ];
-
-  for (const k of KNOWN) {
-    if (k.test.test(raw)) {
-      for (const w of k.wider) {
-        out.push({ as: w, level: "country", because: k.because, missing: "city-level or state-level" });
-      }
-      return out;
-    }
-  }
-
-  return out;
-}
 
 /** Every field the form exposes for this entity, with its allowed values. */
 export async function readFormFields(taskId: TaskId, entity: "issue" | "project"): Promise<FormField[]> {

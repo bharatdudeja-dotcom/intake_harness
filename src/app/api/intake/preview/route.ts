@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseBrief, nextQuestions } from "@/lib/agents/intake/parse";
 import { planFormWrites, questionsFromPlan } from "@/lib/agents/intake/form-plan";
 
+/*
+ * Two. Not a tuning knob - the process rule, quoted in nextQuestions:
+ * past two, the agent has failed rather than the marketer.
+ */
+const MAX_QUESTIONS = 2;
+
 /**
  * What WOULD be created, before anything is.
  *
@@ -51,7 +57,45 @@ export async function POST(req: NextRequest) {
     error: (err as Error).message,
   }));
 
-  const missing = nextQuestions(parsed, 4).map((f) => ({ field: f.key, ask: f.ask ?? `What is the ${f.label}?` }));
+  /*
+   * TWO QUESTIONS. THE RULE WAS ALREADY WRITTEN; THIS IS WHERE IT WAS BROKEN.
+   *
+   * nextQuestions defaults to two, and says why in its own doc comment:
+   * "Asking for eleven fields is how a loop count passes two, and past two the
+   * agent has failed, not the marketer." This call passed 4 - and then a
+   * SECOND, entirely uncapped list went out beside it as `questions`. A live
+   * preview returned four in `missing` plus one more in `questions`, on a brief
+   * that had already said most of it.
+   *
+   * Two lists also meant nobody was counting. Whatever each one thought it was
+   * doing, the marketer saw the sum.
+   *
+   * So they are merged and cut to two, and the two that survive are the ones a
+   * PERSON has to answer - a judgement the system has no standing to make -
+   * rather than whichever happened to sort first. Everything else the form
+   * would like is still reported under `unanswered`, where it informs without
+   * demanding.
+   */
+  const asks = [
+    ...nextQuestions(parsed, MAX_QUESTIONS).map((f) => ({
+      field: f.key,
+      ask: f.ask ?? `What is the ${f.label}?`,
+    })),
+    ...("writes" in plan ? questionsFromPlan(plan as never) : []).map((q) => ({
+      field: typeof q === "string" ? q : (q as { field?: string }).field ?? "",
+      ask: typeof q === "string" ? q : String((q as { ask?: string }).ask ?? q),
+    })),
+  ];
+
+  const seenAsk = new Set<string>();
+  const missing = asks
+    .filter((a) => {
+      const key = a.field || a.ask;
+      if (seenAsk.has(key)) return false;
+      seenAsk.add(key);
+      return true;
+    })
+    .slice(0, MAX_QUESTIONS);
 
   return NextResponse.json({
     /** The title the request will carry. */
@@ -65,9 +109,14 @@ export async function POST(req: NextRequest) {
     cannotHold: "mismatched" in plan ? plan.mismatched : [],
     /** The form asks; the brief has not said. */
     unanswered: "unanswered" in plan ? plan.unanswered : [],
-    /** Essentials with no answer at all - these WILL be asked before filing. */
+    /**
+     * The questions a person actually has to answer - at most two, and the
+     * same two in both fields. `questions` used to be a separate, uncapped
+     * list, which is how a marketer ended up facing five. It is kept as an
+     * alias so existing callers do not break, but it can no longer disagree.
+     */
     missing,
-    questions: "writes" in plan ? questionsFromPlan(plan as never) : [],
+    questions: missing,
     formFieldsSeen: "formFieldCount" in plan ? plan.formFieldCount : 0,
     /*
      * Said plainly, because the next call is the irreversible one.
