@@ -20,7 +20,7 @@
  * Pure functions. No I/O, no framework — testable on its own.
  */
 
-import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
+import { CAMPAIGN_BRIEF_FIELDS, requiredFields, audienceFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
 
 export type Provenance = "stated" | "derived" | "inferred";
 
@@ -39,6 +39,14 @@ export type ParsedIntake = {
   extracted: ExtractedField[];
   /** Required fields the brief does not answer. These drive needs_input. */
   missing: FieldSpec[];
+  /**
+   * Audience-completeness fields (FieldSpec's `askForAudience`) the brief
+   * does not answer. These ALSO drive needs_input, via nextQuestions below -
+   * just only once `missing` is empty. Kept separate from `missing` so a
+   * reader (and the run's own metadata) can tell "genuinely blocked" from
+   * "buildable, but the audience record isn't complete yet".
+   */
+  missingAudience: FieldSpec[];
   /** Fields the agent guessed. Correct in most cases; must still be confirmed. */
   inferred: ExtractedField[];
 };
@@ -385,9 +393,10 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   for (const f of extracted) fields[f.key] = f.value;
 
   const missing = requiredFields().filter((f: FieldSpec) => !fields[f.key]);
+  const missingAudience = audienceFields().filter((f: FieldSpec) => !fields[f.key]);
   const inferred = extracted.filter((f) => f.from !== "stated");
 
-  return { fields, extracted, missing, inferred };
+  return { fields, extracted, missing, missingAudience, inferred };
 }
 
 /**
@@ -396,7 +405,15 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
  * B1 again: *"the agent asks for the two things actually missing rather than
  * re-asking the whole brief."* Asking for eleven fields is how a loop count
  * passes two, and past two the agent has failed, not the marketer.
+ *
+ * `missing` (buildability) always goes first and exhausts before
+ * `missingAudience` (audience-completeness, explicit product direction -
+ * see FieldSpec's askForAudience docstring) gets a turn - a request that
+ * cannot be built yet is not the moment to ask about refresh cadence. Still
+ * exactly `limit` per round either way, so this changes WHAT eventually
+ * gets asked, not the pacing B1 exists to protect.
  */
 export function nextQuestions(parsed: ParsedIntake, limit = 2): FieldSpec[] {
-  return parsed.missing.slice(0, limit);
+  if (parsed.missing.length) return parsed.missing.slice(0, limit);
+  return parsed.missingAudience.slice(0, limit);
 }

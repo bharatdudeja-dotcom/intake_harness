@@ -37,6 +37,23 @@ export type FieldSpec = {
   /** Required for an audience to be buildable at all. Drives needs_input. */
   required?: boolean;
   /**
+   * Ask for this as part of Agent 1's AUDIENCE-completeness pass - distinct
+   * from `required` on purpose. `required` means "no audience can be built
+   * or targeted without this" (see requiredFields' own docstring below);
+   * these fields are the opposite case - the audience CAN be built without
+   * an answer, but the answer is one of the things a real Workfront custom
+   * form for audience-only requests needs captured (LCE | Campaign
+   * Deployment Request, "Audience Specifications & Model Integration"
+   * section - read live, 19 Sep 2026, ticket 1475050/"9Box"). Explicit
+   * product direction: ask for these too, not just extract them
+   * opportunistically and leave them blank when the brief doesn't happen to
+   * state them. Sequenced AFTER `required` fields in nextQuestions - never
+   * asked before the hard baseline is satisfied - and still capped at 2 per
+   * round, so this doesn't change B1's pacing, only what eventually gets
+   * asked once the baseline clears. See parse.ts's nextQuestions.
+   */
+  askForAudience?: boolean;
+  /**
    * Allowed values, where the form constrains them. Matched against the brief
    * verbatim by parse.ts, longest-first.
    */
@@ -117,6 +134,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "lifecycle_journey",
     label: "Lifecycle journey",
+    askForAudience: true,
     options: ["Upgrade", "Winback", "Onboarding", "Cross-sell"],
     optionsPartial: true,
     aliases: ["journey", "lifecycle stage"],
@@ -128,7 +146,10 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // "Evergreen (ongoing)" is the exact string the LCE form's own "Is this
     // a one-time or evergreen campaign?" question uses too - strong evidence
     // this is the same field under two forms, so "One-time" was added here
-    // rather than opening a second, near-duplicate field for it.
+    // rather than opening a second, near-duplicate field for it. That LCE
+    // question lives in the form's AUDIENCE section, not the campaign
+    // section - it's asking whether the AUDIENCE persists past one send.
+    askForAudience: true,
     options: ["Evergreen (ongoing)", "Fixed window", "One-time"],
     optionsPartial: true,
     aliases: ["duration", "how long", "one-time or evergreen"],
@@ -149,7 +170,9 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // same concept as "Near-real time trigger" - added as its own accepted
     // value (not force-mapped onto our wording) so it still matches if a
     // real form's field literally uses that word, same reasoning as
-    // campaign_duration above.
+    // campaign_duration above. Lives in the LCE form's Audience
+    // Specifications section, not a campaign-mechanics section.
+    askForAudience: true,
     options: ["Batch", "Near-real time trigger", "Triggered"],
     optionsPartial: true,
     aliases: ["activation", "trigger", "deployment type"],
@@ -188,6 +211,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // segment has to re-read the brief to find the most important clause in it.
     key: "exclusion",
     label: "Exclusion",
+    askForAudience: true,
     aliases: ["exclude", "without", "who do not have", "not already"],
     ask: "Who should be excluded - for example, customers who already have the product?",
   },
@@ -215,6 +239,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "data_availability",
     label: "Targeting data available today",
+    askForAudience: true,
     aliases: ["targeting data available", "is the data available"],
     ask: "Is all the targeting data this audience needs already available today, or does something still need to be built?",
   },
@@ -226,12 +251,14 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // guessed one - see lib/agents/audience/aep.ts.
     key: "data_location",
     label: "Where the targeting data lives",
+    askForAudience: true,
     aliases: ["where does this data live", "data source", "fac or profile"],
     ask: "Where does this targeting data live today - the AEP profile store, or an external/federated (FAC) source? They resolve to different identities and different build paths.",
   },
   {
     key: "audience_build_method",
     label: "Audience build method",
+    askForAudience: true,
     options: ["Simple Workflow Audience"],
     optionsPartial: true,
     aliases: ["how should the audience be built", "build method"],
@@ -242,6 +269,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // as a one-time snapshot and goes stale by send day."
     key: "audience_refresh_cadence",
     label: "Audience refresh cadence",
+    askForAudience: true,
     options: ["Static Campaign Audience"],
     optionsPartial: true,
     aliases: ["refresh cadence", "how often should this audience refresh"],
@@ -258,6 +286,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     // verified against the live form. Treat as a starting point.
     key: "expected_audience_size",
     label: "Expected audience size",
+    askForAudience: true,
     options: ["Small (<50K)", "Medium (50K–250K)", "Large (250K–1M)", "Very Large (1M+)"],
     optionsPartial: true,
     aliases: ["expected audience size", "audience size", "how big"],
@@ -266,6 +295,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "requires_predictive_model",
     label: "Requires a predictive model",
+    askForAudience: true,
     aliases: ["predictive model", "model not yet live"],
     ask: "Does this audience need a predictive model that isn't live yet, or can it be built from data that already exists?",
   },
@@ -326,6 +356,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
   {
     key: "trigger_already_active",
     label: "Trigger already active",
+    askForAudience: true,
     aliases: ["is this trigger already active", "already live in the platform"],
     ask: "Is this trigger already active in the platform, or does it need to be newly activated?",
   },
@@ -386,8 +417,63 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
      */
     key: "audience_description",
     label: "Audience to be targeted",
+    askForAudience: true,
     aliases: ["Audience_to_be_Targeted", "audience to be targeted", "target audience"],
     ask: "Who is the audience, in a sentence?",
+  },
+  /*
+   * FOUR MORE FIELDS FROM THE LCE FORM'S "Audience Specifications & Model
+   * Integration" SECTION - genuinely new, not modelled anywhere above.
+   * Captured off a real, live ticket (1475050, "9Box" - nine audiences
+   * segmented on Customer Quality Score x Customer Lifetime Value, read 19
+   * Sep 2026). Deliberately NO `options` on lifecycle_journey_subcategory
+   * and product_mix - the one real value seen for each ("XM", "Xfinity
+   * Mobile (W)") is a short, tenant-specific code, and this file's own
+   * established rule (see the block comment above data_availability et al.)
+   * is that a short option string gets left for the marketer to answer
+   * explicitly rather than opportunistically substring-matched against
+   * unrelated prose.
+   */
+  {
+    // Distinct from `request_type` ("Audience Build-Only" vs. "Audience +
+    // Campaign Execution") - this is a step more specific, about the
+    // audience WORK ITSELF: is it a brand-new build, or an update/refresh
+    // to something that already exists. Only "Audience Build (New)" is
+    // confirmed from the real ticket.
+    key: "audience_support_type",
+    label: "Type of audience support needed",
+    askForAudience: true,
+    options: ["Audience Build (New)"],
+    optionsPartial: true,
+    aliases: ["type of audience support", "audience support"],
+    ask: "What type of audience support do you need - a new audience build, or an update/refresh to an existing one?",
+  },
+  {
+    key: "lifecycle_journey_subcategory",
+    label: "Lifecycle journey subcategory",
+    askForAudience: true,
+    aliases: ["journey subcategory", "upgrade journey subcategory"],
+    ask: "Is there a more specific sub-category within that lifecycle journey - for example, which product line or motion within an Upgrade journey?",
+  },
+  {
+    key: "product_mix",
+    label: "Product mix",
+    askForAudience: true,
+    aliases: ["product mix"],
+    ask: "Which product or product mix is this audience built around - for example Xfinity Mobile, Internet, or TV?",
+  },
+  {
+    // The gap this closes: an audience request that reads as low-risk
+    // ("just like the one we did in Q2") versus one that is genuinely new
+    // and unproven get built and reviewed the same way today, when the
+    // second one deserves more scrutiny before the nightly cutoff (B6).
+    key: "audience_performance_history",
+    label: "Audience performance history",
+    askForAudience: true,
+    options: ["New Audience"],
+    optionsPartial: true,
+    aliases: ["historical performance", "performance history", "track record"],
+    ask: "Is this a brand-new audience, or does it have a track record you can point to - for example, a similar audience that's performed before?",
   },
   {
     /*
@@ -408,6 +494,16 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
 /** The fields without which nothing can be built. */
 export function requiredFields(): FieldSpec[] {
   return CAMPAIGN_BRIEF_FIELDS.filter((f) => f.required);
+}
+
+/**
+ * The fields Agent 1 asks for so the AUDIENCE side of the request is
+ * complete - see FieldSpec's `askForAudience` docstring for exactly how
+ * this differs from requiredFields (buildability) and how parse.ts's
+ * nextQuestions sequences the two.
+ */
+export function audienceFields(): FieldSpec[] {
+  return CAMPAIGN_BRIEF_FIELDS.filter((f) => f.askForAudience);
 }
 
 /** One field by key. */

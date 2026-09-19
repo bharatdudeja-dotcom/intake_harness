@@ -32,6 +32,19 @@ import { createIntakeRequest, toWorkfrontPayload } from "@/lib/agents/intake/wor
  * WHAT IT WILL NOT DO: invent a value. A field the brief does not state is
  * either inferred AND FLAGGED as inferred, or asked about. Filling the form in
  * to make a run go green is precisely the failure this system exists to catch.
+ *
+ * A SECOND ROUND OF QUESTIONS, ONCE THE FIRST IS ANSWERED: once every
+ * `required` field is in hand, nextQuestions doesn't stop there any more -
+ * it moves on to campaign-brief.ts's `askForAudience` fields (audience build
+ * method, size, refresh cadence, exclusions, data availability/location,
+ * predictive model, activation pattern, product mix, and more - see that
+ * file's FieldSpec docstring). Same 2-per-round pacing, same LOOP_LIMIT,
+ * just a longer list to work through before `completed`. Explicit product
+ * direction, from a real LCE Workfront form's "Audience Specifications &
+ * Model Integration" section: this app is meant to eventually write a
+ * Workfront custom form storing these answers, which means Agent 1 has to
+ * actually collect them, not just extract them opportunistically and leave
+ * the rest blank.
  */
 
 /**
@@ -90,6 +103,11 @@ function summarise(parsed: ParsedIntake) {
       evidence: f.evidence ?? null,
     })),
     missing: parsed.missing.map((f) => f.key),
+    // Audience-completeness gaps, not buildability ones - see this file's
+    // docstring and parse.ts's nextQuestions. Surfaced separately so a
+    // reader can tell "this run is stuck" from "this run just hasn't been
+    // asked about refresh cadence yet".
+    missingAudience: parsed.missingAudience.map((f) => f.key),
   };
 }
 

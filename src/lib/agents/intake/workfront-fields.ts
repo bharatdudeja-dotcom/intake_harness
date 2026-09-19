@@ -136,11 +136,17 @@ export async function resolveFieldMap(categoryID: string, entity = "issue"): Pro
      * query term that actually hits them, they would ALWAYS fall into the
      * "unmatched, dropped" bucket below even on a live form that has them -
      * not because the form lacks the field, but because we never asked
-     * about it.
+     * about it. Widened again for the audience-completeness fields Agent 1
+     * now actively asks for (see intake/route.ts's docstring) -
+     * "support"/"journey"/"mix"/"history"/"performance" are what a real
+     * form's parameter names for audience_support_type/
+     * lifecycle_journey_subcategory/product_mix/audience_performance_history
+     * would plausibly contain.
      */
     const queries = [
       "campaign", "objective", "audience", "launch", "product", "name",
       "email", "test", "priority", "creative", "data", "channel", "size", "deployment",
+      "support", "journey", "mix", "history", "performance",
     ];
     const seen = new Set<string>();
     for (const query of queries) {
