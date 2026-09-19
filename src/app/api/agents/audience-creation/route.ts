@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
+import { countAudience } from "@/lib/agents/audience/count";
 import {
   probeSchemas,
   findExistingSegment,
@@ -101,6 +102,8 @@ export interface AudienceCreationOutput {
   audience: {
     created: boolean;
     segmentId: string | null;
+    /** Where to open it in AEP. Null when nothing was created. */
+    url: string | null;
     name: string;
     /** The PQL, so a human can check the definition and not just the count. */
     definition: string;
@@ -262,8 +265,56 @@ export async function POST(req: NextRequest) {
   const terms = [fields.campaign_name, fields.lifecycle_journey, fields.line_of_business, fields.customer_type]
     .filter(Boolean)
     .map(String);
-  const existing = await findExistingSegment(terms);
+  /*
+   * REUSE IS THE DEFAULT, NOT A RULE.
+   *
+   * A marketer asked for "everything new, even if duplicate" and got the
+   * existing audience reused - correct by design, wrong for the request. Reuse
+   * is the cheapest good outcome in the map and stays the default; it is not
+   * something to impose on someone who has said otherwise.
+   *
+   * Two ways to say so: the words in the brief, or force_new on the input for a
+   * caller that already knows. The words matter because that is where a
+   * marketer puts it.
+   */
+  const askedForNew =
+    input.force_new === true ||
+    input.forceNew === true ||
+    /\b(create|build|make)\s+(a\s+)?(brand[- ]?new|new|fresh)\b[^.]{0,40}\b(audience|segment)\b/i.test(briefText) ||
+    /\b(do not|don'?t|never)\s+reuse\b/i.test(briefText) ||
+    /\beven if (it is |it's )?(a )?duplicate\b/i.test(briefText) ||
+    /\bcreate everything new\b/i.test(briefText);
+
+  const existing = askedForNew
+    ? { id: null as string | null, name: null as string | null, read: true, considered: 0, error: null as string | null,
+        skipped: "The request asked for a new audience, so the catalogue was not searched for one to reuse." }
+    : await findExistingSegment(terms);
   let estimate = await estimateCount(existing.id);
+
+  /*
+   * COUNT THE AUDIENCE WE ARE ACTUALLY USING, reused or not.
+   *
+   * The direct count went into the BUILD path only, so a reused audience never
+   * got one - the run said "the estimate failed" and offered no number, for an
+   * audience that was sitting there countable. Reuse is the cheapest good
+   * outcome in the whole map and it was the one outcome with no size attached.
+   *
+   * Counted from the definition this brief needs rather than from the reused
+   * audience's stored rule: they matched when it was reused, and this is the
+   * population the campaign is asking for. If the two ever diverge, the number
+   * describes the request.
+   */
+  if (existing.id && estimate.count == null && check.available) {
+    const wanted = buildExpression(check, targeting);
+    if (wanted && !wanted.ungrounded.length) {
+      const direct = await countAudience("audience_creation", wanted.pql);
+      if (direct.profiles != null) {
+        estimate = { count: direct.profiles, basis: direct.basis, segmentId: existing.id };
+      } else {
+        estimate = { count: null, basis: `${estimate.basis} ${direct.basis}`, segmentId: existing.id };
+      }
+    }
+  }
 
   /*
    * 3.1a - BUILD IT.
@@ -362,6 +413,9 @@ export async function POST(req: NextRequest) {
       ? {
           created: build.created,
           segmentId: build.segmentId,
+          // A link, so the audience can be opened rather than quoted as a GUID.
+          // Every other stage hands over a URL; this one did not.
+          url: build.segmentUrl,
           name: build.name,
           definition: build.pql,
           reads: expression?.explain ?? [],

@@ -175,11 +175,36 @@ function blame(
  * fields do not all fail for the same reason, and saying they do is how a
  * date-parsing bug got read as a form configuration gap for a day.
  */
+/**
+ * A FIELD THAT LIVES ON ANOTHER FORM IS NOT A FAILURE.
+ *
+ * "not on a custom form attached to this OPTASK" means exactly what it says:
+ * the parameter belongs to a different form. In this tenant the brief's fields
+ * are PROJECT fields, and the request carries the brief in its description
+ * until it is converted - so this is the client's process working, and
+ * reporting it as "refused by Workfront" told a marketer something was broken
+ * when nothing was. A genuine refusal - a bad value, a type mismatch - still
+ * reads as one.
+ */
+const NOT_ON_THIS_FORM = /not on a custom form attached to|no custom form|is not a valid field|does not exist on/i;
+
 export function describeFieldWrite(outcome: FieldWriteOutcome, objCode: string): string | null {
   if (!outcome.rejected.length) return null;
 
+  const elsewhere = outcome.rejected.filter((r) => NOT_ON_THIS_FORM.test(r.reason));
+  const genuine = outcome.rejected.filter((r) => !NOT_ON_THIS_FORM.test(r.reason));
+
+  if (!genuine.length) {
+    return (
+      `${outcome.written.length} field(s) written to this ${objCode}. ` +
+      `${elsewhere.length} value(s) belong to a form this ${objCode} does not use ` +
+      `(${elsewhere.map((r) => r.field).join(", ")}) - they travel in the description and are ` +
+      "written when the request is converted to a project. Nothing was lost and nothing failed."
+    );
+  }
+
   const byReason = new Map<string, string[]>();
-  for (const r of outcome.rejected) {
+  for (const r of genuine) {
     const list = byReason.get(r.reason) || [];
     list.push(r.field);
     byReason.set(r.reason, list);
@@ -189,7 +214,7 @@ export function describeFieldWrite(outcome: FieldWriteOutcome, objCode: string):
 
   return (
     `${outcome.written.length} field(s) written to this ${objCode}, ` +
-    `${outcome.rejected.length} refused. ` +
+    `${genuine.length} refused. ` +
     parts.join(". ") +
     "."
   );

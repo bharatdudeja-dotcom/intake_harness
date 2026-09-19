@@ -38,6 +38,7 @@
 
 import { callMcpTool } from "@/lib/mcp-client";
 import type { TaskId } from "@/lib/pipeline/types";
+import { countAudience } from "@/lib/agents/audience/count";
 import { findState, namesAPlace, statePredicate } from "@/lib/agents/shared/us-states";
 
 export type SandboxField = {
@@ -94,7 +95,33 @@ function leafFields(doc: unknown, group: string): SandboxField[] {
  * to fail the whole probe: a partial field list still answers most questions,
  * and saying "I found these 30 of 40" beats saying nothing.
  */
+/*
+ * A SHORT CACHE, because review and Agent 3 ask the same question in one run.
+ *
+ * Both stages read the sandbox's field groups - review to tell Agent 3 what is
+ * available, Agent 3 to decide what to build - and nothing carried the answer
+ * between them, so a run paid for the same twenty-odd calls twice.
+ *
+ * Sixty seconds, in process, deliberately. Long enough to cover one run,
+ * nowhere near long enough to hide a real change to the tenant's schemas -
+ * stale field data would be exactly the kind of thing that sends someone
+ * hunting for an afternoon.
+ */
+const FIELD_CACHE_MS = 60_000;
+let fieldCache: { at: number; read: FieldRead } | null = null;
+
 export async function readSandboxFields(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
+  if (fieldCache && Date.now() - fieldCache.at < FIELD_CACHE_MS && fieldCache.read.read) {
+    return fieldCache.read;
+  }
+  const fresh = await readSandboxFieldsUncached(taskId);
+  // Only a SUCCESSFUL read is cached. Caching a failure would turn one bad
+  // moment into a minute of them.
+  if (fresh.read) fieldCache = { at: Date.now(), read: fresh };
+  return fresh;
+}
+
+async function readSandboxFieldsUncached(taskId: TaskId = "audience_creation"): Promise<FieldRead> {
   let groups: Array<{ title: string; altId: string }> = [];
   try {
     const list = await callMcpTool<{ results?: Array<Record<string, unknown>> }>(
@@ -112,6 +139,14 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
 
   const fields: SandboxField[] = [];
   let tenant: string | null = null;
+
+  /*
+   * EVERY GROUP AT ONCE, not one after another.
+   *
+   * These reads are independent - each is one field group's definition - and
+   * awaiting them in sequence made the stage pay for every round trip. The
+   * tenant is derived from the altIds, which needs no call at all.
+   */
   for (const g of groups) {
     /*
      * This is the TENANT namespace, not the sandbox, and confusing the two cost
@@ -130,12 +165,17 @@ export async function readSandboxFields(taskId: TaskId = "audience_creation"): P
      * again by someone reading the type.
      */
     if (!tenant) tenant = g.altId.replace(/^_/, "").split(".")[0] || null;
-    try {
-      const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId });
-      fields.push(...leafFields(doc, g.title));
-    } catch {
-      // One unreadable group must not lose the others.
-    }
+  }
+
+  const docs = await Promise.all(
+    groups.map((g) =>
+      callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: g.altId })
+        .then((doc) => ({ g, doc }))
+        .catch(() => null), // one unreadable group must not lose the others
+    ),
+  );
+  for (const hit of docs) {
+    if (hit) fields.push(...leafFields(hit.doc, hit.g.title));
   }
 
   return {
@@ -424,9 +464,209 @@ export function buildExpression(check: AttributeCheck, fields: Record<string, st
   return { pql: predicates.join(" and "), explain, ungrounded };
 }
 
+/**
+ * Where a person goes to look at the audience.
+ *
+ * Every other stage hands over a Workfront link; this one handed over a GUID.
+ * The sandbox is part of the path, so a link built without it opens the wrong
+ * tenant's view - which is worse than no link.
+ */
+export function segmentUrl(segmentId: string | null, sandbox?: string | null): string | null {
+  if (!segmentId) return null;
+  const name = (sandbox || process.env.AEP_SANDBOX || "prod").trim();
+  return `https://experience.adobe.com/#/@${(process.env.AEP_IMS_ORG_NAME || "taplondonptrsd").trim()}` +
+    `/sname:${name}/platform/segment/browse/${segmentId}`;
+}
+
+/**
+ * Why the size is missing, in terms someone can act on.
+ *
+ * This used to concatenate the raw error, so a marketer was shown the HTML body
+ * of an nginx 404:
+ *
+ *   the segment exists but could not be sized: MCP tool
+ *   "adobe_create_segment_estimate" returned an error: ... 404:
+ *   <html><head><title>404 Not Found</title></head>...
+ *
+ * The cause is specific and fixable: the connector posts to
+ * /ups/segment/definitions/{id}/estimate, and AEP has no such endpoint - an
+ * estimate there belongs to a PREVIEW of a definition, not to a saved segment.
+ * So the run names the fix and the owner instead of pasting a stack trace at
+ * whoever happens to be reading.
+ */
+function describeSizingFailure(raw: string): string {
+  const notAnEndpoint = /404/.test(raw) && /segment\/definitions\/[0-9a-f-]+\/estimate/i.test(raw);
+  if (notAnEndpoint) {
+    return (
+      "the audience exists but has no size yet. The sizing call goes to an Adobe endpoint that " +
+      "does not exist (POST /ups/segment/definitions/{id}/estimate returns 404); in AEP an " +
+      "estimate is taken from a preview of the definition, so this is a fix in the Adobe MCP " +
+      "connector rather than anything about this audience. Until then the count comes from the " +
+      "nightly segmentation run"
+    );
+  }
+  if (/403|forbidden/i.test(raw)) {
+    return (
+      "the audience exists but has no size yet: the credentials used here may read segments and " +
+      "not size them. An Adobe administrator can grant it on the technical account's product " +
+      "profile. Until then the count comes from the nightly segmentation run"
+    );
+  }
+  return `the audience exists but could not be sized: ${raw}`;
+}
+
+/**
+ * A count from Query Service, which does exist and does work.
+ *
+ * NOT awaited. query_run takes minutes - the discovery query sat in SUBMITTED
+ * for nearly two of them - so blocking an agent step on it would turn a
+ * twenty-second stage into a timeout. This starts the query and returns its id;
+ * the number is collected afterwards.
+ *
+ * Switched on by AEP_PROFILE_TABLE, because the table that holds the attributes
+ * is a property of the tenant's datasets, not something to guess. Unset means
+ * nothing is attempted and the run says the count is coming from the nightly
+ * run, which is the truth.
+ */
+export async function startProfileCount(
+  taskId: TaskId,
+  pql: string,
+): Promise<{ queryId: string | null; sql: string | null; note: string }> {
+  const table = (process.env.AEP_PROFILE_TABLE || "").trim();
+  if (!table) {
+    return {
+      queryId: null,
+      sql: null,
+      note:
+        "No direct count was attempted: AEP_PROFILE_TABLE is not set, so the dataset holding these " +
+        "attributes is not known here. The count comes from the nightly segmentation run.",
+    };
+  }
+
+  /*
+   * The PQL translates almost literally: it is already field paths and
+   * comparisons over one profile. `= true` and `!= null` are valid SQL as
+   * written; the field paths are dotted, which Query Service accepts for
+   * nested XDM.
+   */
+  const where = pql.replace(/\bnot\s+null\b/gi, "not null");
+  const account = (process.env.AEP_ACCOUNT_ID_FIELD || "").trim();
+  const sql =
+    `select count(*) as profiles` +
+    (account ? `, count(distinct ${account}) as accounts` : "") +
+    ` from ${table} where ${where}`;
+
+  try {
+    const started = await callMcpTool<unknown>(taskId, "query_run", {
+      sql,
+      name: "cx-audience-count",
+      sandbox: process.env.AEP_SANDBOX || undefined,
+    });
+    const text = typeof started === "string" ? started : JSON.stringify(started);
+    const queryId = text.match(/"(?:id|queryId|query_id)"\s*:\s*"([^"]+)"/)?.[1] || null;
+    return {
+      queryId,
+      sql,
+      note: queryId
+        ? `A direct count is running in Adobe Query Service as query ${queryId}. It takes a few ` +
+          `minutes; collect it rather than waiting.` +
+          (account ? " It returns profiles and distinct accounts side by side." : "")
+        : `The count query was submitted but Query Service returned no id: ${text.slice(0, 200)}`,
+    };
+  } catch (err) {
+    return {
+      queryId: null,
+      sql,
+      note: `A direct count could not be started: ${(err as Error).message}`,
+    };
+  }
+}
+
+export type EditResult = {
+  updated: boolean;
+  segmentId: string;
+  /** What to do instead, when the update was refused. */
+  blockedReason: string | null;
+  supersededBy: string | null;
+};
+
+/**
+ * Change an existing audience in place, which is the only correct way to change
+ * one - and say precisely why when AEP refuses.
+ *
+ * WHY THIS IS NOT "CREATE A NEW ONE AND MOVE ON"
+ *
+ * An audience created through the API cannot be edited by a human in the AEP
+ * UI, so the API is the only way to change it. When the API is also refused,
+ * the only remaining route is a replacement - and a replacement has two
+ * consequences a person has to agree to: the old audience is left behind, and
+ * the Workfront project that was approved still carries the old name. An agent
+ * that silently creates a replacement hides both.
+ *
+ * Verified against the tenant: a description-only update returns
+ * 403 Forbidden, so this is the technical account's permission on segment
+ * update rather than anything about the audience.
+ */
+export async function editAudience(
+  taskId: TaskId,
+  segmentId: string,
+  changes: { name?: string; pql?: string; description?: string },
+): Promise<EditResult> {
+  try {
+    await callMcpTool(taskId, "adobe_update_segment", {
+      segment_id: segmentId,
+      ...(changes.name ? { name: changes.name } : {}),
+      ...(changes.pql ? { pql_expression: changes.pql } : {}),
+      ...(changes.description ? { description: changes.description } : {}),
+      sandbox: process.env.AEP_SANDBOX || undefined,
+    });
+    return { updated: true, segmentId, blockedReason: null, supersededBy: null };
+  } catch (err) {
+    const raw = (err as Error).message;
+    const forbidden = /403|forbidden/i.test(raw);
+    return {
+      updated: false,
+      segmentId,
+      blockedReason: forbidden
+        ? "Adobe refused the change (403). The credentials this pipeline uses can create audiences " +
+          "but not modify them - verified with a description-only edit, so it is not about the " +
+          "audience being published. An Adobe administrator needs to grant update on segment " +
+          "definitions to the technical account for this sandbox. " +
+          "Until then an audience cannot be changed at all: not here, and not by hand either, " +
+          "because an audience created through the API is not editable in the AEP interface. " +
+          "The only route is a replacement audience, which leaves this one behind and leaves the " +
+          "approved Workfront project carrying the old name - so that is a decision for you, not " +
+          "something to do quietly."
+        : `Adobe refused the change: ${raw}`,
+      supersededBy: null,
+    };
+  }
+}
+
+/**
+ * Record that one audience replaces another.
+ *
+ * Nothing is deleted. An audience may already be referenced by a live campaign,
+ * and an agent deleting one on its own initiative is exactly the class of
+ * irreversible act this pipeline asks a human about. This makes the old one
+ * traceable rather than merely abandoned.
+ */
+export function supersede(oldSegmentId: string, newSegmentId: string): string {
+  return (
+    `This audience replaces ${oldSegmentId}, which could not be edited in place. ` +
+    `The earlier audience still exists in Adobe Experience Platform and has not been deleted - ` +
+    `retire it deliberately once you are satisfied with ${newSegmentId}, and check that the ` +
+    `Workfront project's name still describes what was built.`
+  );
+}
+
 export type BuildResult = {
   created: boolean;
   segmentId: string | null;
+  /** Where to open it. Null when nothing was created. */
+  segmentUrl: string | null;
+  /** A Query Service count running in the background, when one was started. */
+  countQueryId: string | null;
   name: string;
   pql: string;
   count: number | null;
@@ -444,6 +684,20 @@ export type BuildResult = {
  * So it builds once the attributes are CONFIRMED present, and the count goes to
  * the marketer at 3.4 for the approval the map keeps at 3.5.
  */
+/**
+ * A name AEP will accept when it already has the one we asked for.
+ *
+ * Only used after a create is refused. "(new HHmm)" rather than a counter,
+ * because finding the next free number means listing the catalogue - which is
+ * the search a force-new request has just told us to skip.
+ */
+function disambiguate(name: string): string {
+  const now = new Date();
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  return `${name} (new ${hh}${mm})`.slice(0, 100);
+}
+
 export async function createAudience(
   taskId: TaskId,
   /*
@@ -458,34 +712,79 @@ export async function createAudience(
   args: { name: string; pql: string; description: string; mergePolicyId?: string | null },
 ): Promise<BuildResult> {
   const base: BuildResult = {
-    created: false, segmentId: null, name: args.name, pql: args.pql,
+    created: false, segmentId: null, segmentUrl: null, countQueryId: null, name: args.name, pql: args.pql,
     count: null, countBasis: "not attempted", error: null,
   };
 
-  let segmentId: string | null = null;
-  try {
+  /*
+   * COUNT WHILE THE SEGMENT IS BEING CREATED.
+   *
+   * The count is a query over the DEFINITION - it does not need the segment to
+   * exist, which was the whole reason for going to Query Service instead of the
+   * estimate endpoint. Awaiting it after the create simply added its cost to
+   * the stage.
+   */
+  const countPromise = countAudience(taskId, args.pql);
+
+  const attemptCreate = async (name: string) => {
     const made = await callMcpTool<Record<string, unknown>>(taskId, "adobe_create_segment", {
-      name: args.name,
+      name,
       pql_expression: args.pql,
       description: args.description,
       ...(args.mergePolicyId ? { merge_policy_id: args.mergePolicyId } : {}),
     });
     const text = JSON.stringify(made ?? {});
-    segmentId =
+    const id =
       String((made?.id as string) || (made?.segmentId as string) || "") ||
       text.match(/"id"\s*:\s*"([^"]+)"/)?.[1] ||
       null;
-    if (!segmentId) {
-      return { ...base, error: `the create returned no segment id. Response: ${text.slice(0, 300)}` };
+    return { id, text, name };
+  };
+
+  let segmentId: string | null = null;
+  let createdName = args.name;
+  try {
+    const first = await attemptCreate(args.name);
+    if (!first.id) {
+      await countPromise.catch(() => null);
+      return { ...base, error: `the create returned no segment id. Response: ${first.text.slice(0, 300)}` };
     }
+    segmentId = first.id;
   } catch (err) {
-    return { ...base, error: (err as Error).message };
+    /*
+     * A 400 here is usually a name AEP already has, and it says nothing about
+     * which field it objected to. So the name is not assumed to be the cause -
+     * it is TESTED, by retrying with a different one. If that fails too, the
+     * original error is what gets reported.
+     *
+     * This is what "create a new audience even if a duplicate exists" asks
+     * for: the second identical request failed on the duplicate, which is not
+     * an answer to someone who said they wanted another one.
+     */
+    const raw = (err as Error).message;
+    if (!/400|bad request|already exists|duplicate/i.test(raw)) {
+      await countPromise.catch(() => null);
+      return { ...base, error: raw };
+    }
+    try {
+      const retry = await attemptCreate(disambiguate(args.name));
+      if (!retry.id) {
+        await countPromise.catch(() => null);
+        return { ...base, error: raw };
+      }
+      segmentId = retry.id;
+      createdName = retry.name;
+    } catch {
+      await countPromise.catch(() => null);
+      return { ...base, error: raw };
+    }
   }
 
   // The count. A failure here leaves a REAL segment with no size, which is a
   // partial success and is reported as one - not as a failed build.
   let count: number | null = null;
   let basis = "";
+  let countQueryId: string | null = null;
   try {
     const started = await callMcpTool<Record<string, unknown>>(taskId, "adobe_create_segment_estimate", {
       segment_id: segmentId,
@@ -502,8 +801,25 @@ export async function createAudience(
       ? `estimated by AEP for segment ${segmentId}`
       : `the estimate was requested but returned no size yet - segment estimates are asynchronous, so poll adobe_get_segment_estimate for ${segmentId}`;
   } catch (err) {
-    basis = `the segment exists but could not be sized: ${(err as Error).message}`;
+    basis = describeSizingFailure((err as Error).message);
+    /*
+     * Sizing failed, so try the route that works: a count in Query Service.
+     * Started, never awaited - query_run takes minutes, and a stage that waits
+     * on it turns a twenty-second step into a timeout.
+     */
+    const direct = await countPromise;
+    if (direct.profiles != null) {
+      count = direct.profiles;
+      basis = direct.basis;
+    } else {
+      basis = `${basis}. ${direct.basis}`;
+    }
   }
 
-  return { created: true, segmentId, name: args.name, pql: args.pql, count, countBasis: basis, error: null };
+  // A link, not just a GUID. This is the artifact the room wants to open.
+  return {
+    created: true, segmentId, segmentUrl: segmentUrl(segmentId), countQueryId,
+    // The name AEP accepted, which is not always the one we asked for.
+    name: createdName, pql: args.pql, count, countBasis: basis, error: null,
+  };
 }

@@ -92,7 +92,7 @@ export interface RunRow {
     step_index: number;
     agent: AgentName;
     awaiting: string;
-    needs: "approval" | "upstream";
+    needs: "approval" | "upstream" | "decision";
     ref?: { objCode: string; objId: string };
   } | null;
   created_at: string;

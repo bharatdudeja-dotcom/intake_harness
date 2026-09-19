@@ -272,6 +272,19 @@ export async function resolveFieldMap(
    * A pinned map wins outright. On a stable tenant the parameter names are
    * known, and discovery is then a runtime search that can only fail.
    */
+  /*
+   * A FIELD WE CANNOT PLACE ON THIS OBJECT'S FORM IS NOT A CANDIDATE.
+   *
+   * insights_search_fields answers for the ENTITY, not for the form attached to
+   * the object being written, so it returned 44 parameters and the matcher
+   * confidently picked "DE:Campaign Name" and "DE:Audience" - real fields, on a
+   * different form. Workfront refused them, correctly, and the run reported
+   * "2 field(s) refused" as though something were broken.
+   *
+   * In this tenant the brief's fields live on the PROJECT form. The request
+   * carries the brief in its description until Agent 2 converts it, and then
+   * they land - which is the client's process, not a fault.
+   */
   const pinned = pinnedFieldMap();
   if (pinned) {
     return {
@@ -315,20 +328,31 @@ export async function resolveFieldMap(
      * fields. Asking only about issues found none of them.
      */
     const queries = ["campaign", "objective", "audience", "launch", "product", "name"];
-    const seen = new Map<string, FormField>();
-    for (const query of queries) {
-      try {
-        const chunk = await callMcpTool<unknown>(taskId, "insights_search_fields", {
+
+    /*
+     * ALL SIX AT ONCE. They are independent searches against the same entity,
+     * and awaiting them in a loop made a run pay for six round trips in
+     * sequence - about fifteen seconds of an eighteen-second stage.
+     *
+     * Order still decides which duplicate wins, so the results are merged in
+     * the original query order rather than in whatever order they return.
+     */
+    const chunks = await Promise.all(
+      queries.map((query) =>
+        callMcpTool<unknown>(taskId, "insights_search_fields", {
           // The entity we are actually writing to. Searching three entities
           // found project fields and then offered them for an issue, which
           // Workfront refuses - correctly.
           entity_ids: [entity],
           query,
-        });
-        for (const f of parameterFields(chunk)) if (!seen.has(f.name)) seen.set(f.name, f);
-      } catch (err) {
-        // One failed query must not lose the ones that worked.
-      }
+        }).catch(() => null), // one failed query must not lose the others
+      ),
+    );
+
+    const seen = new Map<string, FormField>();
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      for (const f of parameterFields(chunk)) if (!seen.has(f.name)) seen.set(f.name, f);
     }
     const fields = [...seen.values()];
     if (!fields.length) {
