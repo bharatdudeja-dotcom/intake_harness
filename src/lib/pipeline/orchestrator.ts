@@ -168,7 +168,24 @@ export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> 
   }
 
   const { priorOutputs, allOutputs, lastCompleted } = await completedTaskRunsFor(runId);
-  const currentInput = lastCompleted ? lastCompleted.output : run.input;
+  /*
+   * THE STEP'S INPUT, PLUS WHAT THE RUN CARRIES.
+   *
+   * Each step is handed the previous step's OUTPUT, which is right: that is the
+   * work so far. But a decision recorded against the RUN - "build a new
+   * audience rather than reusing the one you found" - lives on the run's input,
+   * and was therefore invisible to the step that needed it. The marketer
+   * answered, the gate opened, and Agent 3 reused the audience anyway.
+   *
+   * The step's own input still wins on every key it defines. This only adds
+   * what the run knows and the step could not.
+   */
+  const runInput = (run.input && typeof run.input === "object") ? run.input as Record<string, unknown> : {};
+  const stepInput = lastCompleted ? lastCompleted.output : run.input;
+  const currentInput =
+    stepInput && typeof stepInput === "object" && !Array.isArray(stepInput)
+      ? { ...pickRunDirectives(runInput), ...(stepInput as Record<string, unknown>) }
+      : stepInput;
 
   return advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
 }
@@ -474,6 +491,22 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
 }
 
 /** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
+/**
+ * The things a run carries that a later step must see.
+ *
+ * Not the whole run input - the brief does not belong in Agent 3's input, and
+ * copying everything would let an early field quietly override a later
+ * agent's own reading of it. These are decisions ABOUT the run, recorded
+ * against it because there was nowhere else to put them.
+ */
+function pickRunDirectives(runInput: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ["force_new", "forceNew"]) {
+    if (runInput[key] !== undefined) out[key] = runInput[key];
+  }
+  return out;
+}
+
 async function completedTaskRunsFor(
   runId: string,
 ): Promise<{
