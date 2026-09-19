@@ -300,12 +300,26 @@ async function callAgent(baseUrl: string, path: string, body: AgentRequest): Pro
   return (await res.json()) as AgentResponse;
 }
 
-/** A single run plus every task_runs row recorded for it, in step order. */
+/**
+ * A single run plus every task_runs row recorded for it, in step order.
+ *
+ * `task_run_id` is a required SECOND sort key, not decoration - Intake's
+ * own internal question-loop rounds (parse.ts's nextQuestions/loopCount)
+ * all share step_index 0, since none of them advance the pipeline step.
+ * `ORDER BY step_index` alone leaves same-step rows in whatever order
+ * Postgres happens to return them, which SQL never guarantees is insertion
+ * order. Both UI files' `pendingTaskRun` reads `taskRuns[taskRuns.length -
+ * 1]` to find the CURRENT pending question - on an unspecified tie order,
+ * that could show a stale, already-answered round instead of the real one,
+ * which is exactly the confusing "still blank" symptom fixed earlier this
+ * session for a different cause (client-side staleness). This is the same
+ * failure mode from the server's own query, so it gets the same fix.
+ */
 export async function getRun(runId: string): Promise<{ run: RunRow; taskRuns: TaskRunRow[] } | null> {
   const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
   if (!run) return null;
   const taskRuns = await query<TaskRunRow>(
-    `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index`,
+    `SELECT * FROM task_runs WHERE run_id = $1 ORDER BY step_index, task_run_id`,
     [runId],
   );
   return { run, taskRuns };

@@ -377,7 +377,14 @@ export async function callMcpTool<T = unknown>(
     const value = await callMcpToolInner<T>(name, args, timeoutMs);
     const { json, truncated } = truncatedJson(value);
     record({ result: json, resultTruncated: truncated });
-    if (ctx) liveProgress.finishCall(ctx.runId, liveId, { status: "success", durationMs: Date.now() - startedAt.getTime() });
+    if (ctx) {
+      liveProgress.finishCall(ctx.runId, liveId, {
+        status: "success",
+        durationMs: Date.now() - startedAt.getTime(),
+        result: json,
+        resultTruncated: truncated,
+      });
+    }
     return value;
   } catch (err) {
     record({ error: (err as Error).message });

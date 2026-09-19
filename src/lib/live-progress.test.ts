@@ -53,6 +53,14 @@ describe("the lifecycle of one tracked run", () => {
     expect(getProgress(RUN_A).calls[0]).toMatchObject({ status: "error", error: "MCP_ENDPOINT_URL is not set." });
   });
 
+  it("a successful call's real result is visible before the step finishes - not just after", () => {
+    resetRun(RUN_A);
+    const id = startCall(RUN_A, "review", "adobe_get_schema", { schema_id: "abc" });
+    expect(getProgress(RUN_A).calls[0].result).toBeUndefined(); // nothing yet - still pending
+    finishCall(RUN_A, id, { status: "success", durationMs: 50, result: { title: "Profile" }, resultTruncated: false });
+    expect(getProgress(RUN_A).calls[0]).toMatchObject({ result: { title: "Profile" }, resultTruncated: false });
+  });
+
   it("accumulates calls across several agent steps chained under one action (the approval-gate removal case)", () => {
     // Review, then Audience Creation, in the same top-level action - see
     // orchestrator.ts's advanceOneStep chaining when requiresApproval is

@@ -41,6 +41,10 @@ export type LiveToolCall = {
   startedAt: string;
   status: "pending" | "success" | "error";
   durationMs?: number;
+  /** Present once status is "success" - the same truncated value mcp-client.ts's ToolCallRecord stores, so the Runs page can show the real response before the step even finishes, not just after. */
+  result?: unknown;
+  resultTruncated?: boolean;
+  /** Present once status is "error". */
   error?: string;
 };
 
@@ -87,7 +91,9 @@ export function startCall(runId: string, taskId: string, name: string, args: Rec
 export function finishCall(
   runId: string,
   id: number,
-  outcome: { status: "success" | "error"; durationMs: number; error?: string },
+  outcome:
+    | { status: "success"; durationMs: number; result?: unknown; resultTruncated?: boolean }
+    | { status: "error"; durationMs: number; error: string },
 ): void {
   if (id < 0) return;
   const p = runs.get(runId);
