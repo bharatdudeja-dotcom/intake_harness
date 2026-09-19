@@ -187,6 +187,86 @@ let rpcId = 0
  * that pattern is exactly what has kept the upstream pipeline looking healthy
  * while failing.
  */
+/**
+ * Exchange the stored refresh token for a new access token.
+ *
+ * Adobe's Workfront tokens last about a day, and when ours lapsed every call
+ * failed with 401: the gateway dropped all 97 tools and it read as a
+ * permissions problem. The sign-in had already stored a refresh_token, and
+ * spending it works with nobody present - so an expiry is a token to exchange,
+ * not an outage to escalate.
+ *
+ * Returns the new access token, or null when it cannot be done. Never throws
+ * and never logs the token.
+ */
+async function refreshAccessToken (server) {
+    const oauth = server && server.oauth
+    const endpoint = oauth && oauth.as && oauth.as.token_endpoint
+    if (!oauth || !oauth.refresh_token || !oauth.client_id || !endpoint) return null
+
+    const form = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: oauth.refresh_token,
+        client_id: oauth.client_id
+    })
+    if (oauth.client_secret) form.set('client_secret', oauth.client_secret)
+
+    let payload
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: form.toString()
+        })
+        if (!res.ok) return null
+        payload = await res.json()
+    } catch (e) {
+        return null
+    }
+    if (!payload || !payload.access_token) return null
+
+    /*
+     * Persist it in the shape the sign-in wrote, so nothing downstream can tell
+     * the difference - including the new refresh token, which Adobe rotates.
+     * Losing that would make this work exactly once.
+     */
+    try {
+        /*
+         * The same path the sign-in uses, so the stored shape is identical and
+         * nothing downstream can tell a refresh from a fresh sign-in. Required
+         * lazily: store pulls in storage and status, and mcp-servers is loaded
+         * early enough that a top-level require would risk a cycle.
+         */
+        const store = require('./store')
+        const settingsLib = require('./settings')
+        const current = (await store.getSettingsOverride()) || {}
+        const list = Array.isArray(current.mcp_servers) ? current.mcp_servers : []
+        const row = list.find(x => x && x.id === server.id)
+        if (row) {
+            row.auth = payload.access_token
+            row.oauth = {
+                ...(row.oauth || {}),
+                // Adobe ROTATES the refresh token. Dropping the new one would
+                // make this work exactly once.
+                refresh_token: payload.refresh_token || (row.oauth || {}).refresh_token,
+                expires_at: payload.expires_in
+                    ? new Date(Date.now() + (Number(payload.expires_in) * 1000)).toISOString()
+                    : (row.oauth || {}).expires_at,
+                refreshed_at: new Date().toISOString()
+            }
+            const stored = await store.saveSettingsOverride({ ...current, mcp_servers: list })
+            settingsLib._setCache(stored)
+        }
+    } catch (e) {
+        // The token is good even if writing it down failed; the call can still
+        // proceed, and the next 401 will simply refresh again.
+    }
+
+    // Keep the in-memory server usable for the retry below.
+    server.auth = `Bearer ${payload.access_token}`
+    return payload.access_token
+}
+
 async function callTool (server, name, args = {}, timeoutMs = 45000) {
     const state = readiness(server)
     if (!state.ready) throw new Error(`${server && server.id}: ${state.reason}`)
@@ -204,6 +284,18 @@ async function callTool (server, name, args = {}, timeoutMs = 45000) {
             signal: controller.signal
         })
         const text = await res.text()
+        if (res.status === 401 && !args.__refreshed) {
+            /*
+             * Not an outage - a token that needs exchanging. One attempt, and
+             * if the fresh token is refused too the original 401 stands: a
+             * revoked grant needs a person, and retrying would be a storm.
+             */
+            const fresh = await refreshAccessToken(server)
+            if (fresh) {
+                clearTimeout(timer)
+                return callTool(server, name, { ...args, __refreshed: true }, timeoutMs)
+            }
+        }
         if (!res.ok) throw new Error(`${server.id} returned HTTP ${res.status} for ${name}`)
         const body = parseMcpBody(text, res.headers && res.headers.get('content-type'))
         if (body.error) throw new Error(`${name}: ${body.error.message || 'unknown MCP error'}`)

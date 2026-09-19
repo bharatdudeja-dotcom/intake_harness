@@ -293,6 +293,9 @@ h3.head { font-size: 15px; margin-bottom: 4px; }
    Lightening the fill instead would have pushed the label below AA - measured at 4.12:1 - so the
    border carries the shape and the text contrast is left intact. */
 .swatch.ring { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor; }
+/* A destructive action should not look like the others. */
+.btn.danger { color: var(--reject); border-color: color-mix(in srgb, var(--reject) 40%, transparent); }
+.btn.danger:hover { background: var(--reject-soft); border-color: var(--reject); }
 .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 20px; padding: 2px 9px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); white-space: nowrap; flex: 0 0 auto; }
 @supports not (color: color-mix(in srgb, red 50%, transparent)) { .badge { border-color: currentColor; } }
 .badge .lucide { width: 12px; height: 12px; }
@@ -742,6 +745,59 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
    Data layer - everything goes through the dashboard-api proxy.
    The proxy injects SERVICE_API_KEY server-side; no credential exists here.
    ===================================================================== */
+/**
+ * Delete a job, permanently, from the store.
+ *
+ * The MCP tool has been admin-only since D84 and nothing in the interface
+ * reached it, so removing a test run meant asking an assistant to call a tool.
+ *
+ * The confirmation is deliberate rather than a reflex: the title is shown, the
+ * consequences are named, and an agent run - which is evidence of what actually
+ * happened - takes a second, explicit step. Deleting the failed attempts after
+ * a retry is how a pipeline comes to look like it worked first time, and that
+ * is the one thing this product exists to prevent.
+ */
+async function deleteJob (id, title) {
+  const first = window.confirm(
+    `Delete "${title}"?\n\n` +
+    'This removes it from the database, so it disappears from every screen, for everyone. ' +
+    'It cannot be undone.'
+  )
+  if (!first) return
+
+  /*
+   * THE REFUSAL IS THE SECOND QUESTION.
+   *
+   * My first version guessed here - "does this look like an agent run?" - from
+   * a list that does not always carry the upstream reference. When the guess was
+   * wrong the person confirmed, and then hit a refusal telling them to pass a
+   * flag the interface gives them no way to pass.
+   *
+   * So delete_job is asked plainly. It holds back a run, or anything another
+   * person's work references, and says why; that reason is put to the person in
+   * its own words, and only then is force sent.
+   */
+  try {
+    await callTool('delete_job', { id })
+    toast('Deleted')
+    closeDrawer()
+    await reloadLight()
+    return
+  } catch (e) {
+    if (!/force/i.test(e.message || '')) { banner(e.message); return }
+
+    if (!window.confirm(`Agent Manager held this back:\n\n${e.message}\n\nDelete it anyway?`)) return
+    try {
+      await callTool('delete_job', { id, force: true })
+      toast('Deleted')
+      closeDrawer()
+      await reloadLight()
+    } catch (e2) {
+      banner(e2.message)
+    }
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Agents (the cookbook's "practices", renamed). A client watching this
  * dashboard should be able to tell at a glance which agent touched a run, and
@@ -1930,6 +1986,7 @@ async function openWorklog (id) {
         <button class="btn" id="export-replay" data-id="${esc(r.id)}"><i data-lucide="share-2"></i> Export replay skill</button>
         <button class="btn" id="attach-diagram" data-id="${esc(r.id)}"><i data-lucide="paperclip"></i> Attach diagram/image</button>
         <button class="btn" id="pdf-job"><i data-lucide="file-down"></i> PDF</button>
+        ${state.roles.includes('admin') ? `<button class="btn danger" data-delete-job="${esc(r.id)}" data-delete-title="${esc(r.title)}"><i data-lucide="trash-2"></i> Delete</button>` : ''}
       </div>
       ${['draft', 'ready'].includes(jobStage(meta)) ? '<p class="help">Approve the run to hand it to the Oracle. It proposes; a named person decides.</p>' : ''}
     </div>
@@ -3574,6 +3631,7 @@ document.addEventListener('click', async (e) => {
     else if (t.dataset.bakeTask) { openConsent('bake', t.dataset.bakeTask) } // D64: bake happens from Active Tasks
     // D84: bake from wherever a ready-but-unsubmitted job is shown, so the missing step is
     // actionable at the point the user notices it.
+    else if (t.dataset.deleteJob) { deleteJob(t.dataset.deleteJob, t.dataset.deleteTitle || t.dataset.deleteJob) }
     else if (t.dataset.bakeJob) { openConsent('bake', t.dataset.bakeJob) }
     // The single Approve control. Same underlying finalize as the cookbook's
     // bake, renamed to what it now means: hand the run to the Oracle.
