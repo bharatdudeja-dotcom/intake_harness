@@ -565,13 +565,151 @@ async function findSimilarRuns (brief, project, context) {
     return { similar: similar.slice(0, 5), duplicates: duplicates.slice(0, 5) }
 }
 
+/*
+ * Workfront's own approval records, as CODES.
+ *
+ * `redrock_approverStatus` is the approver-status record behind every approval:
+ * one row per approver per stage, carrying `approvableObjCode` /
+ * `approvableObjID` and a status of AD (Approved), RJ (Rejected), AA (Awaiting
+ * Approval) or NA (Not Available). It is the thing Workfront itself decides
+ * from, so it is what this asks.
+ *
+ * The condition argument is `condition`, an and/or node wrapping a `conditions`
+ * array of `{fieldId, operator, values}`. Passing a bare clause, or calling the
+ * argument `filters`, is accepted and then SILENTLY IGNORED - the query returns
+ * every row in the tenant and the first one looks like an answer. That is worth
+ * knowing, because it fails by returning plausible data rather than an error.
+ */
+const APPROVER = 'redrock_approverStatus'
+const approverField = (f) => `${APPROVER}.${APPROVER}_${f}`
+
+/**
+ * One approver row's verdict, from either the code or its display name.
+ *
+ * find_workfront_data hands back display names ("Awaiting Approval") while the
+ * field metadata lists codes ("AA"), so both are accepted rather than betting
+ * on which surface a given tenant or version returns.
+ *
+ * @param {string} raw
+ * @returns {'approved'|'rejected'|'pending'|'none'}
+ */
+function approverVerdict (raw) {
+    const v = String(raw == null ? '' : raw).trim().toLowerCase()
+    if (v === 'ad' || v === 'approved') return 'approved'
+    if (v === 'rj' || v === 'rejected') return 'rejected'
+    if (v === 'aa' || v === 'awaiting approval') return 'pending'
+    return 'none'
+}
+
+/**
+ * Is this object approved, according to Workfront's approval records?
+ *
+ * Returns null when there is nothing structured to go on - no rows, or the
+ * query could not be run - so the caller falls back to reading the object
+ * summary. An object approved by a plain status change, with no approval
+ * process attached, has no rows at all, and that case is real.
+ *
+ * @param {string} objCode
+ * @param {string} objId
+ * @returns {Promise<{approved: boolean, status: string, detail: string}|null>}
+ */
+async function structuredApprovalState (objCode, objId) {
+    let data
+    try {
+        data = await mcpGateway.callProxied(
+            'workfront-adobe__insights_find_workfront_data',
+            {
+                field_paths: [
+                    { field_id: approverField('status') },
+                    { field_id: approverField('approvableObjCode') },
+                    { field_id: approverField('approvableObjID') },
+                    { field_id: approverField('approvedByID') }
+                ],
+                condition: {
+                    operator: 'and',
+                    conditions: [
+                        { fieldId: approverField('approvableObjID'), operator: 'eq', values: [String(objId)] }
+                    ]
+                },
+                limit: 100
+            },
+            settings.mcpServers()
+        )
+    } catch (e) {
+        return null
+    }
+
+    const payload = (typeof data === 'string') ? (() => { try { return JSON.parse(data) } catch (e) { return null } })() : data
+    const rows = (payload && Array.isArray(payload.rows)) ? payload.rows : null
+    if (!rows || !rows.length) return null
+
+    /*
+     * Only rows for the object actually asked about. If the condition were ever
+     * ignored again - a renamed argument, a version change - this is what stops
+     * another object's approval being read as this one's.
+     */
+    const mine = rows.filter(r => {
+        const cell = r[approverField('approvableObjID')]
+        return cell && String(cell.value).toLowerCase() === String(objId).toLowerCase()
+    })
+    if (!mine.length) return null
+
+    const verdicts = mine.map(r => {
+        const cell = r[approverField('status')]
+        return approverVerdict(cell && cell.value)
+    })
+
+    /*
+     * PENDING BEATS REJECTED BEATS APPROVED, and the order is deliberate.
+     *
+     * There is no timestamp on an approver-status record, so where a row says
+     * one thing and another says the opposite, they cannot be put in order.
+     * Reading that as approved is the failure that matters - a campaign
+     * proceeding on an approval nobody gave - so the pessimistic reading wins.
+     * A stale rejection at worst sends someone to look at Workfront, which is
+     * where the answer is anyway.
+     */
+    const n = (v) => verdicts.filter(x => x === v).length
+    if (n('pending')) {
+        return {
+            approved: false,
+            status: 'AA',
+            detail: `Workfront's approval records show ${n('pending')} approver(s) still to respond.`
+        }
+    }
+    if (n('rejected')) {
+        return {
+            approved: false,
+            status: 'RJ',
+            detail: "Workfront's approval records show a REJECTION against this request."
+        }
+    }
+    if (n('approved')) {
+        return {
+            approved: true,
+            status: 'AD',
+            detail: `Workfront's approval records show it approved (${n('approved')} of ${mine.length} approver rows).`
+        }
+    }
+
+    // Every row is "Not Available": stages exist but nobody has acted.
+    return {
+        approved: false,
+        status: 'NA',
+        detail: "Workfront has approval stages on this request but no approver has recorded a decision."
+    }
+}
+
 /**
  * Is this Workfront record actually approved, according to Workfront?
  *
- * Reads the object and looks at its status. Workfront encodes a pending
- * approval as a `:A` suffix on the status code - an issue submitted for
- * approval reads `INP:A` (In Progress, Pending Approval) - and drops the suffix
- * once the approval clears. `:R` is rejected.
+ * Asks Workfront's approval records first, because they are codes. Only when
+ * there are none - an object approved by a status change with no approval
+ * process attached - does it fall back to reading the object summary, which is
+ * PROSE, and prose is why this check used to be intermittent: it was grepped
+ * for the literal phrase "approved this", assumed the update log was
+ * newest-first, and quietly reported "never approved" whenever the summary was
+ * worded differently, ordered differently or truncated.
  *
  * Returns a tri-state, and the middle one matters most: `null` means the check
  * could not be performed, and the caller treats that as NOT approved. Failing
@@ -579,6 +717,9 @@ async function findSimilarRuns (brief, project, context) {
  * to get a false approval past a checker is to break the checker.
  */
 async function workfrontApprovalState (objCode, objId) {
+    const structured = await structuredApprovalState(objCode, objId)
+    if (structured) return { ...structured, url: workfrontLink(objCode, objId) }
+
     const entity = objCode === 'PROJ' ? 'project' : 'issue'
     let summary
     try {
@@ -665,11 +806,24 @@ async function findRunByWorkfrontId (objId, context) {
     const wanted = String(objId || '').trim().toLowerCase()
     if (!wanted) return null
 
-    const entries = await store.listResources({
-        visibleTo: resolvePrincipal(context),
-        visibleSubmitted: callerCanReview(context)
-    }).catch(() => [])
-
+    /*
+     * WHICH RUN CREATED A WORKFRONT OBJECT IS A FACT ABOUT THE SYSTEM, NOT
+     * ABOUT THE CALLER.
+     *
+     * This used to list through the caller's visibility, and that is the second
+     * reason approving was intermittent: the store held seventeen runs and a
+     * service-key caller could see one, so approve_intake answered "no run in
+     * Agent Manager created Workfront object X" for a run that plainly had.
+     * Same request, same Workfront state, different answer depending on who
+     * asked - which is the definition of the flakiness this is fixing.
+     *
+     * Unscoping it leaks nothing. The caller must already hold the Workfront id
+     * to ask, all they get back is an internal run id, and the decision that id
+     * unlocks is independently verified against Workfront before anything is
+     * recorded. Visibility still governs what jobs a person can LIST and READ;
+     * it has no business deciding whether a fact is true.
+     */
+    const entries = await store.listResources({}).catch(() => [])
     const runs = entries.filter(e => e.upstream)
 
     for (const e of runs) {
@@ -687,6 +841,35 @@ async function findRunByWorkfrontId (objId, context) {
             if (!payload) continue
             if (narrate.findWorkfrontRefs(payload.output)
                 .some(r => String(r.objId).toLowerCase() === wanted)) return e.id
+        }
+    }
+
+    /*
+     * LAST, ASK THE PIPELINES WHAT THEY CREATED.
+     *
+     * Six of the seventeen runs in the store carry no workfront_refs at all,
+     * although several of them plainly created a request - capture can miss the
+     * attempt that did the work, which is exactly what recordGateDecision found
+     * on the Pennsylvania run and already works around. Doing it there but not
+     * here meant a job could be approvable once found and unfindable in the
+     * first place.
+     *
+     * This is the slow path and it runs only when the two cheap ones found
+     * nothing, so the common case is unaffected.
+     */
+    for (const e of runs) {
+        const up = e.upstream
+        if (!up || !up.run_id) continue
+        try {
+            const { system } = agentSystems.resolve(up.system_id, undefined, settings.agentSystems())
+            if (!system) continue
+            const upstream = await agentSystems.getRun(system, up.run_id)
+            for (const st of agentSystems.toSteps(upstream)) {
+                if (narrate.findWorkfrontRefs(st.output)
+                    .some(r => String(r.objId).toLowerCase() === wanted)) return e.id
+            }
+        } catch (err) {
+            // An unreachable pipeline is not evidence either way; keep looking.
         }
     }
     return null
@@ -4294,5 +4477,10 @@ module.exports = {
     registerTools,
     registerResources,
     registerPrompts,
-    SERVER_INSTRUCTIONS
+    SERVER_INSTRUCTIONS,
+    // Exported for tests. Whether a request is approved decides whether a
+    // campaign goes out, so the precedence between conflicting approver rows is
+    // worth pinning down in a test rather than leaving to a reading of the code.
+    approverVerdict,
+    structuredApprovalState
 }
