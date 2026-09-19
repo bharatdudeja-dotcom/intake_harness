@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
   // Every read below (probeSchemas, findExistingSegment) calls MCP tools -
   // wrapped so every call, request and response, ends up in
   // metadata.toolCalls for the UI.
-  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse<AudienceCreationOutput>> => {
+  const { result, toolCalls } = await withToolCallLog(body.runId, "audience_creation", async (): Promise<AgentResponse<AudienceCreationOutput>> => {
     const needed = neededAttributes(fields, brief);
     const probe = await probeSchemas("audience_creation", needed);
 

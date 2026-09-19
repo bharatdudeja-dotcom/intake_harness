@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
   // resolveFieldMap/writeCustomFields) - wrapped so every one of those
   // calls, request and response, ends up in metadata.toolCalls for the UI,
   // without any of those functions needing to know they're being watched.
-  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse> => {
+  const { result, toolCalls } = await withToolCallLog(body.runId, "intake", async (): Promise<AgentResponse> => {
     // A rework loop carries the fields already confirmed, so the marketer is
     // never asked twice for the same thing.
     const parsed = parseBrief(brief, body.input?.fields || {});

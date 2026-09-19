@@ -59,6 +59,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PIPELINE } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
+import * as liveProgress from "./live-progress";
 
 /**
  * One MCP call, request and response together — the raw ground truth
@@ -94,7 +95,8 @@ function truncatedJson(value: unknown): { json: unknown; truncated: boolean } {
   return { json: `${text.slice(0, TRUNCATE_AT)}… (truncated, ${text.length} chars total)`, truncated: true };
 }
 
-const toolCallLogStorage = new AsyncLocalStorage<ToolCallRecord[]>();
+type ToolCallContext = { log: ToolCallRecord[]; runId: string; taskId: TaskId };
+const toolCallLogStorage = new AsyncLocalStorage<ToolCallContext>();
 
 /**
  * Run `fn`, collecting every callMcpTool call made anywhere inside it —
@@ -105,10 +107,22 @@ const toolCallLogStorage = new AsyncLocalStorage<ToolCallRecord[]>();
  * in `AgentResponse.metadata.toolCalls`, which the orchestrator already
  * persists verbatim to task_runs.metadata (see orchestrator.ts) - no schema
  * change, no per-call-site plumbing.
+ *
+ * `runId`/`taskId` are new alongside `fn` (every call site updated) - not
+ * for this function's own return value, but so callMcpTool below can also
+ * publish each call to live-progress.ts AS IT HAPPENS, not just collect it
+ * for the final return. Same AsyncLocalStorage context serves both jobs;
+ * see live-progress.ts for why a live, mid-request view needed adding at
+ * all.
  */
-export async function withToolCallLog<T>(fn: () => Promise<T>): Promise<{ result: T; toolCalls: ToolCallRecord[] }> {
+export async function withToolCallLog<T>(
+  runId: string,
+  taskId: TaskId,
+  fn: () => Promise<T>,
+): Promise<{ result: T; toolCalls: ToolCallRecord[] }> {
   const log: ToolCallRecord[] = [];
-  const result = await toolCallLogStorage.run(log, fn);
+  liveProgress.setCurrentAgent(runId, taskId);
+  const result = await toolCallLogStorage.run({ log, runId, taskId }, fn);
   return { result, toolCalls: log };
 }
 
@@ -342,10 +356,10 @@ export async function callMcpTool<T = unknown>(
   assertToolAllowed(taskId, name);
 
   const startedAt = new Date();
+  const ctx = toolCallLogStorage.getStore();
   const record = (partial: Pick<ToolCallRecord, "result" | "resultTruncated"> | Pick<ToolCallRecord, "error">) => {
-    const log = toolCallLogStorage.getStore();
-    if (!log) return; // no withToolCallLog wrapper active - fine, this call just isn't traced
-    log.push({
+    if (!ctx) return; // no withToolCallLog wrapper active - fine, this call just isn't traced
+    ctx.log.push({
       name,
       args,
       startedAt: startedAt.toISOString(),
@@ -353,14 +367,27 @@ export async function callMcpTool<T = unknown>(
       ...partial,
     });
   };
+  // Published the moment the call STARTS, not just when it finishes - this
+  // is the whole point (see live-progress.ts's docstring): a poller mid-
+  // request needs to see "calling X right now", not just the finished list
+  // withToolCallLog returns once the whole step is done.
+  const liveId = ctx ? liveProgress.startCall(ctx.runId, taskId, name, args) : -1;
 
   try {
     const value = await callMcpToolInner<T>(name, args, timeoutMs);
     const { json, truncated } = truncatedJson(value);
     record({ result: json, resultTruncated: truncated });
+    if (ctx) liveProgress.finishCall(ctx.runId, liveId, { status: "success", durationMs: Date.now() - startedAt.getTime() });
     return value;
   } catch (err) {
     record({ error: (err as Error).message });
+    if (ctx) {
+      liveProgress.finishCall(ctx.runId, liveId, {
+        status: "error",
+        durationMs: Date.now() - startedAt.getTime(),
+        error: (err as Error).message,
+      });
+    }
     throw err;
   }
 }

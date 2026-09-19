@@ -3,18 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { PIPELINE } from "@/lib/pipeline/registry";
-import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
+import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "./status-badge";
 import { ToolCallTrace, type ToolCallOutput } from "./tool-call-trace";
 import { ToolCallLog, type ToolCallLogEntry } from "./tool-call-log";
+import { LiveToolCallLog, type LiveToolCall } from "./live-tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
 
 // Falls back to the raw task_id for a historical "escalation" row — the
 // registry no longer has an entry for it (Agent 4 was removed), but old
-// task_runs with that task_id still need to render something.
-function agentLabel(taskId: AgentName): string {
+// task_runs with that task_id still need to render something. Also used as
+// LiveToolCallLog's agentLabel - accepts a plain string there since the
+// live poll's currentTaskId isn't narrowed to AgentName the way a real
+// task_runs row's task_id is.
+function agentLabel(taskId: string): string {
   return PIPELINE.find((a) => a.name === taskId)?.label ?? taskId;
 }
 
@@ -45,11 +49,58 @@ export function PipelineChat() {
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [liveCalls, setLiveCalls] = useState<LiveToolCall[]>([]);
+  const [liveTaskId, setLiveTaskId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [runDetail, busy]);
+
+  /*
+   * Poll GET /api/runs/[runId]/live while a request that runs agents is in
+   * flight, so the button lighting up isn't the only signal the user gets -
+   * see live-tool-call-log.tsx / live-progress.ts for why this exists.
+   *
+   * Only runs once a run_id exists, which means the very first call
+   * (startRun, before any run_id is known) still shows only the plain
+   * "Running…" spinner - runPipeline creates the run row and executes
+   * Intake in the same request, so there is no run_id to poll with until
+   * that whole response comes back. Every later action (submitAnswers,
+   * approveNext, retryStuck) already has runDetail's run_id, so THOSE get
+   * full live visibility - which is also where chained multi-agent steps
+   * (Review -> Audience Creation) make the silent wait longest.
+   */
+  useEffect(() => {
+    // No synchronous setState here on the "not busy" branch, on purpose -
+    // rendering below is already gated on `busy`, so stale liveCalls simply
+    // never gets shown, and every new busy cycle's first poll() resolves
+    // near-instantly (a local fetch against a server whose live-progress
+    // store orchestrator.ts already resets fresh per action) - so the only
+    // setState calls here are inside poll's async callback, which is
+    // exactly the pattern react-hooks/set-state-in-effect wants.
+    if (!busy || !runDetail) return;
+    const runId = runDetail.run.run_id;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/runs/${runId}/live`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { calls: LiveToolCall[]; currentTaskId: string | null };
+        if (cancelled) return;
+        setLiveCalls(data.calls ?? []);
+        setLiveTaskId(data.currentTaskId ?? null);
+      } catch {
+        // Best-effort - a failed poll just tries again next tick.
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [busy, runDetail]);
 
   async function loadDetail(runId: string) {
     const res = await fetch(`/api/runs/${runId}`);
@@ -323,9 +374,12 @@ export function PipelineChat() {
         )}
 
         {busy && (
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
-            Running {busyLabel}…
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
+              Running {busyLabel}…
+            </div>
+            <LiveToolCallLog calls={liveCalls} currentTaskId={liveTaskId} agentLabel={agentLabel} />
           </div>
         )}
 

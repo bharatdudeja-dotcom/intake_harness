@@ -6,8 +6,14 @@ import { PIPELINE } from "@/lib/pipeline/registry";
 import { StatusBadge } from "../status-badge";
 import { ToolCallTrace, type ToolCallOutput } from "../tool-call-trace";
 import { ToolCallLog, type ToolCallLogEntry } from "../tool-call-log";
+import { LiveToolCallLog, type LiveToolCall } from "../live-tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
+
+/** Falls back to the raw task_id for a historical "escalation" row or the live poll's currentTaskId. */
+function agentLabel(taskId: string): string {
+  return PIPELINE.find((a) => a.name === taskId)?.label ?? taskId;
+}
 
 /** The shape intake's "needs_input" output puts under `questions` (see src/app/api/agents/intake/route.ts). */
 type PendingQuestion = {
@@ -130,6 +136,48 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
 
   const [advancing, setAdvancing] = useState(false);
   const [retrying, setRetrying] = useState(false);
+
+  const [liveCalls, setLiveCalls] = useState<LiveToolCall[]>([]);
+  const [liveTaskId, setLiveTaskId] = useState<string | null>(null);
+  const anyActionInFlight = resuming || advancing || retrying;
+
+  /*
+   * Poll GET /api/runs/[runId]/live while resuming/approving/retrying THIS
+   * run is in flight - see pipeline-chat.tsx's identical effect and
+   * live-tool-call-log.tsx / live-progress.ts for why. `runningAgain`
+   * (Run again) is deliberately NOT included: it starts a brand-new run
+   * with its own run_id, which this page doesn't learn until that whole
+   * request returns - same limitation pipeline-chat.tsx's startRun has, for
+   * the same reason.
+   */
+  useEffect(() => {
+    // No synchronous setState on the "nothing in flight" branch, on
+    // purpose - see pipeline-chat.tsx's identical effect for why (rendering
+    // below is already gated on anyActionInFlight, and the first poll() of
+    // a new action resolves near-instantly against a store orchestrator.ts
+    // already reset fresh).
+    if (!anyActionInFlight || !selectedRunId) return;
+    const runId = selectedRunId;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/runs/${runId}/live`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { calls: LiveToolCall[]; currentTaskId: string | null };
+        if (cancelled) return;
+        setLiveCalls(data.calls ?? []);
+        setLiveTaskId(data.currentTaskId ?? null);
+      } catch {
+        // Best-effort - a failed poll just tries again next tick.
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [anyActionInFlight, selectedRunId]);
 
   async function retryStuck() {
     if (!selectedRunId) return;
@@ -474,6 +522,10 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     {resuming ? "Submitting…" : "Submit and resume"}
                   </button>
                 </div>
+              )}
+
+              {anyActionInFlight && (
+                <LiveToolCallLog calls={liveCalls} currentTaskId={liveTaskId} agentLabel={agentLabel} />
               )}
 
               <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">

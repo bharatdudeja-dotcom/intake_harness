@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
+import * as liveProgress from "@/lib/live-progress";
 
 /**
  * Runs exactly the NEXT agent for a run over real HTTP to that agent's own
@@ -156,7 +157,12 @@ export async function retryRun(runId: string, baseUrl: string): Promise<RunRow> 
   const { priorOutputs, lastCompleted } = await completedTaskRunsFor(runId);
   const currentInput = lastCompleted ? lastCompleted.output : run.input;
 
-  return advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
+  liveProgress.resetRun(runId);
+  try {
+    return await advanceOneStep(run, run.current_step, currentInput, priorOutputs, baseUrl);
+  } finally {
+    liveProgress.clearRun(runId);
+  }
 }
 
 /** Starts a run and executes only its first agent (Intake). */
@@ -166,7 +172,12 @@ export async function runPipeline(initialInput: unknown, baseUrl: string): Promi
     [JSON.stringify(initialInput)],
   );
 
-  return advanceOneStep(run, 0, initialInput, {}, baseUrl);
+  liveProgress.resetRun(run.run_id);
+  try {
+    return await advanceOneStep(run, 0, initialInput, {}, baseUrl);
+  } finally {
+    liveProgress.clearRun(run.run_id);
+  }
 }
 
 /**
@@ -195,7 +206,12 @@ export async function resumeRun(runId: string, resumedInput: unknown, baseUrl: s
     [runId],
   );
 
-  return advanceOneStep(running, running.current_step, resumedInput, priorOutputs, baseUrl);
+  liveProgress.resetRun(runId);
+  try {
+    return await advanceOneStep(running, running.current_step, resumedInput, priorOutputs, baseUrl);
+  } finally {
+    liveProgress.clearRun(runId);
+  }
 }
 
 /**
@@ -221,7 +237,12 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
     [runId],
   );
 
-  return advanceOneStep(running, running.current_step, currentInput, priorOutputs, baseUrl);
+  liveProgress.resetRun(runId);
+  try {
+    return await advanceOneStep(running, running.current_step, currentInput, priorOutputs, baseUrl);
+  } finally {
+    liveProgress.clearRun(runId);
+  }
 }
 
 /** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */

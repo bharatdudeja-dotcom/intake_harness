@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
   // gatherAepContext's three AEP reads, postReviewComment/
   // updateReviewNotesField) - wrapped so every call, request and response,
   // ends up in metadata.toolCalls for the UI.
-  const { result, toolCalls } = await withToolCallLog(async (): Promise<AgentResponse> => {
+  const { result, toolCalls } = await withToolCallLog(body.runId, "review", async (): Promise<AgentResponse> => {
     const objId = input.workfront?.created ? String(input.workfront.objId || "") : "";
     const fetched = await fetchRejection(objId || null);
     const reason = String(input.rejectionReason || fetched.reason || "").trim();
