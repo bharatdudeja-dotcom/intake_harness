@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # THE INTAKE BRIEF ACCEPTANCE TEST.
 #
-# Run this to see, in one screen, whether the intake agent behaves. Every case
-# here is a defect three audit agents found by using the system as a Comcast
-# campaign manager would, then reproduced against the live parser.
+# Answers one question: does the intake agent read a brief the way a Workfront
+# marketer would? Every case is a real defect, found by agents using the system
+# as a Comcast campaign manager would, then reproduced against the live parser.
 #
-# It creates NOTHING: preview_intake reads the brief and the form and returns
-# what WOULD be filed. No Workfront object, no run, no email.
+# It creates NOTHING. Every case goes through preview_intake, which reads the
+# brief and the form and returns what WOULD be filed - no Workfront object, no
+# run, no email. That matters: this is what someone reaches for when the demo
+# is an hour away.
 #
-#   ssh ... 'bash -s' < verify_intake.sh
+#   bash scripts/verify-intake.sh
+#   HARNESS=http://34.203.238.63:3100 bash scripts/verify-intake.sh
 set -u
 H=${HARNESS:-http://localhost:3100}
 
@@ -24,16 +27,26 @@ def preview(brief, timeout=240):
     with urllib.request.urlopen(r, timeout=timeout) as resp:
         return json.load(resp)
 
+CHANGED_MIND = (
+    "10G upgrade push for existing Xfinity Internet customers in Ohio. Channel: email. "
+    "Launch 20 October. Campaign name: Ohio 10G Q4.\n\n"
+    "Actually, scrap that - add direct mail, pull the in-market date forward to "
+    "6 October, and the offer moves to $20/mo."
+)
+
+PUSH_AS_VERB = (
+    "Winback for lapsed Xfinity Internet customers in Ohio. Channel: email. "
+    "Launch 14 March. Campaign name: OH Winback.\n\n"
+    "Actually scrap the email idea - and push it to paid social instead."
+)
+
 CASES = [
   ("1. AMENDMENT      the marketer changes their mind mid-brief",
-   "Expect: the two dates are BOTH seen, and the disagreement is question one.",
-   "10G upgrade push for existing Xfinity Internet customers in Ohio. Channel: email. "
-   "Launch 20 October. Campaign name: Ohio 10G Q4.\n\n"
-   "Actually, scrap that - add direct mail, pull the in-market date forward to "
-   "6 October, and the offer moves to $20/mo."),
+   "Expect: BOTH dates seen, and the disagreement is question one.",
+   CHANGED_MIND),
 
   ("2. CONTRADICTION  acquisition aimed at existing customers",
-   "Expect: flagged. Prospects are not in the profile store, so this changes the build.",
+   "Expect: flagged. Prospects are not held at all, so this changes the whole build.",
    "Acquisition campaign targeting net-new prospects who have never been Xfinity "
    "customers. Audience: our existing residential subscribers with Xfinity TV. "
    "Channel: email. Campaign name: Contradiction Test."),
@@ -50,22 +63,19 @@ CASES = [
    "In-market 14 February. Offer is a $350 prepaid card. Campaign name: IL Winback Card."),
 
   ("5. COUNTRY        naming the country must work, like naming a state",
-   "Expect: Region us, zero questions. 'Region: US' used to be ignored entirely.",
+   "Expect: United States, zero questions. 'Region: US' used to be ignored entirely.",
    "10G upgrade push for existing Xfinity Internet customers across the US who have "
    "not upgraded in a while. Channel: email. Launch 14 February. Campaign name: "
    "10G Upgrade Q1. Growth/Upsell, residential. Audience and campaign execution."),
 
   ("6. LEGAL DEADLINE a sign-off date is not a rival launch date",
-   "Expect: launch 20 November, NO conflict. A deadline read as a launch date hid the deadline.",
+   "Expect: launch 20 November, NO conflict. Read as a launch date, it hid the deadline.",
    "Holiday promo for Xfinity Internet in the Northeast. Channel: email. Legal sign-off "
    "by 1 October, in market 20 November. Campaign name: Holiday Promo NE."),
 
-  ("7. PUSH AS A VERB   'push it to paid social' is not the Push channel",
+  ("7. PUSH AS A VERB  'push it to paid social' is not the Push channel",
    "Expect: no Push. A fabricated channel gets approved, briefed and built.",
-   "Winback for lapsed Xfinity Internet customers in Ohio. Channel: email. Launch 14 March. "
-   "Campaign name: OH Winback.
-
-Actually scrap the email idea - and push it to paid social instead."),
+   PUSH_AS_VERB),
 ]
 
 PASS = FAIL = 0
@@ -95,30 +105,31 @@ for title, expect, brief in CASES:
     n = len(d.get("missing") or [])
     ok = n <= 2
 
-    # READING THE BRIEF is testable with Workfront down. WRITING TO THE FORM is
-    # not: planFormWrites reads the live form, so when Workfront is 401 every
-    # willWrite is {} and a form assertion fails for a reason that has nothing
-    # to do with the code under test. Reporting that as FAIL sends the next
-    # person hunting a regression that is not there.
+    # Reading the brief is testable with Workfront down; WRITING to the form is
+    # not. planFormWrites reads the live form, so when Workfront is signed out
+    # every willWrite is {} and a form assertion fails for a reason that has
+    # nothing to do with the code under test. Reporting that as FAIL sends the
+    # next person hunting a regression that is not there.
     form_readable = bool(d.get("formFieldsSeen"))
+    conflict_keys = [c.get("key") for c in (d.get("conflicts") or [])]
 
     if title.startswith("1."):
-        ok = ok and any(c.get("key") == "launch_date" for c in (d.get("conflicts") or []))
+        ok = ok and "launch_date" in conflict_keys
     if title.startswith("2."):
-        ok = ok and bool(d.get("conflicts"))
+        ok = ok and bool(conflict_keys)
     if title.startswith("3."):
         ok = ok and "Budget" in cap and "Offer" not in cap
     if title.startswith("4."):
         ok = ok and "Offer" in cap
-    if title.startswith("6."):
-        ok = ok and not any(c.get("key") == "launch_date" for c in (d.get("conflicts") or []))
-        ok = ok and cap.get("Launch date", ("", ""))[0] == "20 November"
-    if title.startswith("7."):
-        ok = ok and "Push" not in str(cap.get("Channels", ("", ""))[0])
     if title.startswith("5."):
         ok = ok and cap.get("Region / market", ("", ""))[0] == "United States" and n == 0
         if form_readable:
             ok = ok and (d.get("willWrite") or {}).get("DE:Region") == "us"
+    if title.startswith("6."):
+        ok = ok and "launch_date" not in conflict_keys
+        ok = ok and cap.get("Launch date", ("", ""))[0] == "20 November"
+    if title.startswith("7."):
+        ok = ok and "Push" not in str(cap.get("Channels", ("", ""))[0])
 
     print("  => %s%s" % ("PASS" if ok else "FAIL",
           "" if form_readable else "   (form checks skipped: Workfront unreachable)"))
@@ -127,7 +138,7 @@ for title, expect, brief in CASES:
 print()
 print("  %d passed, %d failed" % (PASS, FAIL))
 print()
-print("  Reading the brief is fully covered above. Writing to the Workfront form")
-print("  is NOT: that needs the Workfront MCP signed in, and every willWrite is")
-print("  {} until it is. Sign in, re-run, and the form assertions come alive.")
+print("  This covers READING the brief. It does NOT cover writing to the Workfront")
+print("  form: that needs the Workfront MCP signed in, and every willWrite is {}")
+print("  until it is. Sign in, re-run, and the form assertions come alive.")
 PY
