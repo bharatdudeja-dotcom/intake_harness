@@ -985,7 +985,7 @@ describe('writing is a narrower permission than reading (D102)', () => {
         await as(CHEF_KEY, 'bake_job', { id })
         await as(ADMIN_KEY, 'headchef_approve', { job_id: id })
 
-        // Everyone can read it now, which is the entire point of the shared graph.
+        // Everyone can read it now, which is the entire point of the CX Agentic Graph.
         expect(await as(SAUL_KEY, 'get_job', { id })).not.toHaveProperty('isError', true)
         // Nobody but its author can change it.
         expect((await as(SAUL_KEY, 'append_step', { job_id: id, kind: 'decision', content: 'edit', source: 's' })).isError).toBe(true)

@@ -388,7 +388,7 @@ Only things about a run that already exists:
   - approve_step / approve_steps to mark the parts of a run worth keeping, then bake_job
     to hand the run to the Oracle, which reads it against every earlier run and
     PROPOSES what should be learned. A named human always decides; the Oracle never
-    admits anything to the Shared Knowledge Graph by itself.
+    admits anything to the CX Agentic Graph by itself.
     These are about the RECORD. If someone wants the campaign to proceed, they want
     approve_intake instead - see the section above.
 
@@ -503,7 +503,7 @@ function briefTerms (text) {
  *
  * So:
  *
- *   `similar` (REUSABLE)   approved runs only - the Shared Knowledge Graph. A
+ *   `similar` (REUSABLE)   approved runs only - the CX Agentic Graph. A
  *                          human certified these, which is exactly what makes
  *                          them safe to build on.
  *   `duplicates` (CAUTION) unapproved runs that look like this brief. NOT
@@ -2030,7 +2030,7 @@ function registerTools (server, context = {}) {
                             : 'This waits on an earlier step, not on a person.'
                     }
                 })(),
-                // Approved runs only. This is the Shared Knowledge Graph, and a
+                // Approved runs only. This is the CX Agentic Graph, and a
                 // run in it has been certified by a person.
                 similar_runs: similar,
                 /*

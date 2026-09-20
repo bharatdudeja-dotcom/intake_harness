@@ -576,8 +576,8 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <div class="group">Knowledge</div>
     <button data-panel="cookbook"><i data-lucide="book-marked"></i> Playbooks <span class="key">5</span></button>
     <button data-panel="agents"><i data-lucide="bot"></i> Agents <span class="key">6</span><span id="headchef-badge"></span></button>
-    <button data-panel="graph"><i data-lucide="git-fork"></i> Oracle Graph <span class="key">7</span></button>
-    <button data-panel="cx"><i data-lucide="network"></i> Shared Graph <span class="key">8</span></button>
+    <button data-panel="graph"><i data-lucide="git-fork"></i> My Agentic Graph <span class="key">7</span></button>
+    <button data-panel="cx"><i data-lucide="network"></i> CX Agentic Graph <span class="key">8</span></button>
     <div class="group">Admin</div>
     <button data-panel="settings"><i data-lucide="sliders-horizontal"></i> Settings <span class="key">9</span></button>
     <button data-panel="connections"><i data-lucide="plug"></i> Connections <span class="key">0</span></button>
@@ -619,7 +619,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
             <option value="draft">Experimental</option>
             <option value="ready">Ready for the Oracle</option>
             <option value="awaiting">With the Oracle</option>
-            <option value="incx">In the Shared Knowledge Graph</option>
+            <option value="incx">In the CX Agentic Graph</option>
           </select>
           <span class="sub" id="worklog-count"></span>
         </div>
@@ -641,7 +641,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
     <p class="sub" id="cx-sub" style="margin:0 0 10px"></p>
     <div class="toolbar">
       <select id="cx-owner" class="switcher" aria-label="Filter the CX graph by person"></select>
-      <select id="cx-practice" class="switcher" aria-label="Filter the shared knowledge graph by agent"></select>
+      <select id="cx-practice" class="switcher" aria-label="Filter the CX Agentic Graph by agent"></select>
       <select id="cx-project" class="switcher" aria-label="Filter the CX graph by project"></select>
       <button class="btn" id="cx-refresh"><i data-lucide="refresh-cw"></i> Rebuild</button>
     </div>
@@ -711,7 +711,7 @@ nav button .key, nav button .nav-badge { margin-left: auto; }
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="userkey-title" style="max-width:420px">
     <div class="mark" style="margin:0 auto 12px"><i data-lucide="user-round"></i></div>
     <h3 id="userkey-title" style="text-align:center">Sign in to CX Agent Manager</h3>
-    <p class="sub" style="margin:8px 0 18px; text-align:center">Your own runs stay private to you. Approved runs and the Shared Knowledge Graph are visible to everyone.</p>
+    <p class="sub" style="margin:8px 0 18px; text-align:center">Your own runs stay private to you. Approved runs and the CX Agentic Graph are visible to everyone.</p>
     <label class="sub" for="login-id" style="display:block; margin-bottom:6px">Login id</label>
     <input class="field" type="text" id="login-id" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="e.g. your.name" style="margin-bottom:12px">
     <label class="sub" for="userkey-input" style="display:block; margin-bottom:6px">Password</label>
@@ -1539,7 +1539,7 @@ async function loadAll (silent) {
       tasks: 'the live queue', seg: 'the programme levels', settings: 'settings',
       role: 'your role', pending: 'the approvals queue', practices: 'the agent list',
       agentSystems: 'the agent systems', systemAgents: 'the agents',
-      mcpServers: 'the MCP servers', cxg: 'the shared graph', people: 'people',
+      mcpServers: 'the MCP servers', cxg: 'the CX Agentic Graph', people: 'people',
       cookoff: 'the leaderboard'
     }
     banner(`Could not load ${[...new Set(fails.map(f => SAY[f] || f))].join(', ')}. The proxy or an upstream may be unavailable.`)
@@ -1760,7 +1760,7 @@ function renderCookOff () {
 
   el.innerHTML = `<div class="cookoff">
     ${cookOffWordmark()}
-    <p class="sub" style="margin:10px 0 2px">Who is feeding the Shared Graph. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every job an Oracle admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
+    <p class="sub" style="margin:10px 0 2px">Who is feeding the CX Agentic Graph. ${CRYSTALS_PER_BAKE + CRYSTALS_PER_ADMISSION} crystals for every job an Oracle admits: ${CRYSTALS_PER_BAKE} for submitting it and ${CRYSTALS_PER_ADMISSION} for getting it in.</p>
     <p class="help" style="margin-bottom:16px">The crystal colour is <b>purity</b>: the share of what you submitted that a Oracle admitted. Only a spotless record cooks blue. Everybody sees the same board, the same ranks and the same colours.</p>
 
     <ol class="lb">
@@ -1829,7 +1829,7 @@ function renderHome () {
           <button class="btn tiny grow" data-open-job="${esc(r.id)}" style="justify-content:flex-start; text-align:left">${esc(r.title)}</button>
           <span class="sub">${r.step_count || 1} event(s)</span>
           <button class="btn tiny primary" data-submit-run="${esc(r.id)}"
-            title="Hand this run to the Oracle. It proposes; a named human still decides what reaches the shared graph."><i data-lucide="check"></i> Approve</button>
+            title="Hand this run to the Oracle. It proposes; a named human still decides what reaches the CX Agentic Graph."><i data-lucide="check"></i> Approve</button>
         </div>`).join('')}
     </div>` : ''}
 
@@ -2375,12 +2375,12 @@ function renderAgents () {
         <div style="flex:1;min-width:0">
           <div class="oracle-role">The Oracle</div>
           <b>Reads across every run, and proposes what should be learned</b>
-          <div class="sub">${rows.length} run(s) read &middot; ${inCx} in the Shared Knowledge Graph
+          <div class="sub">${rows.length} run(s) read &middot; ${inCx} in the CX Agentic Graph
             &middot; ${pending.length} awaiting a person</div>
         </div>
       </div>
       <p class="help" style="margin:10px 0 0">It proposes only. A named human always decides what
-        reaches the Shared Knowledge Graph &mdash; that gate is the point, not an obstacle.</p>
+        reaches the CX Agentic Graph &mdash; that gate is the point, not an obstacle.</p>
       ${pending.length ? `<div class="oracle-queue">
         <h4><i data-lucide="stamp"></i> Waiting for a decision <span class="sub">(${pending.length})</span></h4>
         ${pending.map(r => `
@@ -2563,7 +2563,7 @@ async function openDetail (id, view) {
     ${journeyBar(meta, steps)}
     ${['draft', 'ready'].includes(jobStage(meta)) && isMine(meta) ? `<div class="rowbtns" style="margin:10px 0">
       <button class="btn primary" data-submit-run="${esc(id)}"><i data-lucide="send"></i> Approve &rarr; hand to the Oracle</button>
-    </div><p class="help">It proposes; a named person decides what reaches the Shared Knowledge Graph.</p>` : ''}
+    </div><p class="help">It proposes; a named person decides what reaches the CX Agentic Graph.</p>` : ''}
     ${runLedger(steps)}
     <div id="detail-steps" class="steps"></div>
     ${meta.approved_by ? `<div class="card section-gap"><h3 class="head"><i data-lucide="badge-check"></i> Consent record</h3><div class="kv"><span class="k">Approved by</span><span class="v">${esc(meta.approved_by)}</span></div><div class="kv"><span class="k">At</span><span class="v">${fmtDate(meta.approved_at)}</span></div>${meta.approval_note ? `<div class="kv"><span class="k">Note</span><span class="v">${esc(meta.approval_note)}</span></div>` : ''}</div>` : ''}
@@ -2744,8 +2744,8 @@ ${m.oauth_connected
       ${(s.kinds || []).map(k => `<label class="flabel" for="kind-${esc(k.type)}">${esc(k.type)} <span class="sub">(${esc(k.approval)})</span></label><input class="field" id="kind-${esc(k.type)}" data-kind="${esc(k.type)}" value="${esc(k.label)}" style="max-width:320px">`).join('')}
     </div>
     <div class="card section-gap">
-      <h3 class="head"><i data-lucide="crown"></i> Oracles (who admits work to the Shared Graph)</h3>
-      <p class="help">The people who may admit submitted jobs into the Shared Graph. You are ${esc(roleLabel(state.role))}. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
+      <h3 class="head"><i data-lucide="crown"></i> Oracles (who admits work to the CX Agentic Graph)</h3>
+      <p class="help">The people who may admit submitted jobs into the CX Agentic Graph. You are ${esc(roleLabel(state.role))}. Edit this roster with the <span class="mono">set_head_chefs</span> tool.</p>
       <div class="rowbtns">${(s.head_chefs && s.head_chefs.length) ? s.head_chefs.map(h => `<span class="chip"><i data-lucide="crown"></i>${esc(h)}</span>`).join('') : '<span class="sub">No Oracles configured.</span>'}</div>
     </div>
     <div class="card section-gap" id="my-password-card">
@@ -2794,7 +2794,7 @@ ${m.oauth_connected
     </div>
     <div class="card section-gap" id="team-roles-card">
       <h3 class="head"><i data-lucide="users"></i> Team / Roles (admin)</h3>
-      <p class="help">Everyone is a <b>Marketer</b>. A <b>Oracle approver</b> decides what the Oracle proposes is promoted into the Shared Knowledge Graph. An <b>Admin</b> manages roles and settings.</p>
+      <p class="help">Everyone is a <b>Marketer</b>. A <b>Oracle approver</b> decides what the Oracle proposes is promoted into the CX Agentic Graph. An <b>Admin</b> manages roles and settings.</p>
       <div id="team-roles-body"><span class="sub">Loading…</span></div>
       <div class="rowbtns">
         <input class="field" id="team-add-owner" placeholder="user identity (email / username)" style="max-width:320px">
@@ -2968,7 +2968,7 @@ clients will stop connecting.
               Oracle.
   propose     the Oracle reads the run against every earlier run and proposes
               what should be learned. It only ever proposes.
-  promote     a named person decides what enters the Shared Knowledge Graph.
+  promote     a named person decides what enters the CX Agentic Graph.
 
 That last line is the point. Ask "who decided this was true" and the answer is always
 a person, by name, with the evidence they decided on.
@@ -3394,7 +3394,7 @@ async function buildGraph () {
     ['draft', 'dot', '--exp', 'in progress'],
     ['ready', 'sq', '--ready', 'ready to approve'],
     ['awaiting', 'tri', '--baked', 'with the Oracle'],
-    ['incx', 'hex', '--house', 'in the Shared Graph']
+    ['incx', 'hex', '--house', 'in the CX Agentic Graph']
   ].map(([key, shape, token, label]) =>
     `<span class="${stageCounts[key] ? '' : 'none'}">` +
     `<span class="swatch ${shape}" style="background:var(${token})"></span><b>${stageCounts[key]}</b> ${label}</span>`
@@ -3638,7 +3638,7 @@ document.addEventListener('click', async (e) => {
     else if (t.dataset.submitRun) { openConsent('bake', t.dataset.submitRun) }
     // D86: assignment is the only route by which unfinished work becomes visible to a colleague.
     else if (t.dataset.unassignStep) { await callTool('unassign_step', { step_id: t.dataset.unassignStep, assignee: t.dataset.unassignWho }); toast('Assignment removed'); await refreshCurrent() }
-    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { job_id: t.dataset.cxApprove }); toast('Admitted to the Shared Graph'); await reloadLight() }
+    else if (t.dataset.cxApprove) { await callTool('headchef_approve', { job_id: t.dataset.cxApprove }); toast('Admitted to the CX Agentic Graph'); await reloadLight() }
     else if (t.dataset.cxReject) { await callTool('headchef_reject', { job_id: t.dataset.cxReject }); toast('Held back from the CX Graph'); await reloadLight() }
   } catch (err) { banner(err.message) }
 })
@@ -3762,7 +3762,7 @@ function openConsent (mode, id) {
   consentCtx.artifacts = n
   $('#consent-title').textContent = mode === 'bake' ? 'Approve this run' : 'Certify'
   $('#consent-desc').textContent = mode === 'bake'
-    ? `Approves ${n ? `all ${n} artifact(s) on this run` : 'this run\'s artifacts'} and hands it to the Oracle, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the Shared Graph.`
+    ? `Approves ${n ? `all ${n} artifact(s) on this run` : 'this run\'s artifacts'} and hands it to the Oracle, which reads it against every earlier run and proposes what should be learned. It proposes only - a named human still decides what reaches the CX Agentic Graph.`
     : 'Record your consent.'
   $('#consent-confirm').innerHTML = `<i data-lucide="check"></i> ${mode === 'bake' ? 'Approve' : 'Certify'}`
   $('#consent-note').value = ''; $('#consent').classList.add('show'); refreshIcons(); $('#consent-note').focus()
@@ -3838,11 +3838,11 @@ $('#attach-confirm').addEventListener('click', async () => {
  * thing doing the reading says what the picture is.
  *
  * It stays scoped to your own work, private drafts included, which is why the
- * Shared Knowledge Graph is a separate panel rather than a filter on this one.
+ * CX Agentic Graph is a separate panel rather than a filter on this one.
  * The headchef entry is gone: approvals moved into the Oracle's card in
  * Agents, so there is no panel left to title.
  */
-const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', agents: 'Agents', graph: 'Oracle Graph', cx: 'Shared Knowledge Graph', settings: 'Settings', connections: 'Connections' }
+const PANEL_TITLES = { home: 'My work', projects: 'Programmes', worklog: 'Event Log', tasks: 'Live Queue', cookbook: 'Playbooks', agents: 'Agents', graph: 'My Agentic Graph', cx: 'CX Agentic Graph', settings: 'Settings', connections: 'Connections' }
 function activePanel () { const s = document.querySelector('section.panel.active'); return s ? s.id.replace('panel-', '') : 'home' }
 function rebuildActiveGraph () { const p = activePanel(); if (p === 'graph') buildGraph(); else if (p === 'cx') renderCxNetwork() }
 /**
@@ -3868,7 +3868,7 @@ function go (panel) {
    * An error belongs to the screen that caused it.
    *
    * "Cannot submit this job: none of its steps are approved yet" was raised on
-   * the bench, then followed the viewer to the Oracle Graph and on to Settings,
+   * the bench, then followed the viewer to the My Agentic Graph and on to Settings,
    * where it sat above a configuration form it had nothing to do with. A
    * failure attached to the wrong screen is worse than none: it reads as this
    * panel being broken, and this panel is fine.
@@ -3939,7 +3939,7 @@ const paletteActions = () => {
    * This was a second hardcoded copy of the navigation, and it had drifted:
    * the palette offered "Cookbook", "Knowledge Graph" and "Company CX
    * Graph" while the sidebar two inches to its left said "Playbooks",
-   * "Oracle Graph" and "Shared Graph". Same panels, different names, one
+   * "My Agentic Graph" and "CX Agentic Graph". Same panels, different names, one
    * screen. A rename will always be applied to the thing you can see and
    * forgotten on the copy you cannot, so there is no copy now - the labels
    * are taken from the buttons themselves, minus their keyboard hint.
