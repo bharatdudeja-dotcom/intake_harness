@@ -101,6 +101,28 @@ function isNegated(text: string, option: string): boolean {
   return after.test(text);
 }
 
+/**
+ * The brief with its ROW LABELS removed.
+ *
+ * Briefs from this BU arrive as labelled rows - "Business objective:",
+ * "Audience definition:", "Requestor / BU:". A label names the question; the
+ * text after it is the answer. Matching option values against the label is
+ * matching against the form, not against what the marketer said.
+ *
+ * It produced a confidently wrong value on a real brief. `matchOption` strips
+ * the qualifier off "Business (SMB)", leaving the bare word "business" as the
+ * needle, and the brief's own label "Business objective:" matched it. A
+ * residential Xfinity campaign was filed as Business (SMB) with no SMB signal
+ * anywhere in it - and any brief using the ordinary word "business" in a label
+ * would do the same.
+ *
+ * Only a LABEL is removed: short, at the start of a line, ending in a colon.
+ * A colon mid-sentence is punctuation and is left alone.
+ */
+function withoutLabels(text: string): string {
+  return String(text || "").replace(/^[ \t]*[A-Za-z][A-Za-z0-9 /&()'-]{0,44}:[ \t]*/gm, "");
+}
+
 /** Longest option first, so "TV/Streaming" beats "TV". */
 function matchOption(text: string, options: readonly string[]): string | null {
   const hay = lower(text);
@@ -482,6 +504,13 @@ function channelSense(brief: string, option: string): boolean {
 }
 
 export function parseBrief(brief: string, known: Record<string, unknown> = {}): ParsedIntake {
+  /*
+   * Values are matched against the ANSWERS, not against the row labels.
+   * See withoutLabels: a residential campaign was filed as Business (SMB)
+   * because the label "Business objective:" matched the option value.
+   */
+  const answers = withoutLabels(brief);
+
   const extracted: ExtractedField[] = [];
   const seen = new Set<string>();
 
@@ -572,7 +601,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
       }
     }
 
-    const hit = matchOption(brief, spec.options);
+    const hit = matchOption(answers, spec.options);
     if (hit) {
       push({
         key: spec.key, label: spec.label, value: hit, from: "stated",
@@ -674,7 +703,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   // 3. Cue phrases. These are inferences and are marked as such.
   for (const cue of CUES) {
     if (seen.has(cue.key)) continue;
-    const m = brief.match(cue.cues);
+    const m = answers.match(cue.cues);
     if (m) {
       const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === cue.key);
       push({
@@ -878,7 +907,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
    */
   if (!seen.has("success_metrics")) {
     const sm = brief.match(
-      /\b(?:success (?:is )?measured on|success metrics?|measured on|kpis?|measured by)\b\s*[:-]?\s*([^.;\n]{5,120})/i,
+      /\b(?:success (?:is )?measured on|success metrics?|measured on|kpis?|measured by)\b\s*[:-]?\s*([^.\n\r]{5,160})/i,
     );
     if (sm && sm[1]) {
       push({
@@ -895,7 +924,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   //    and previously left in free text only.
   if (!seen.has("exclusion")) {
     const x = brief.match(
-      /\b(?:suppress|suppression(?:s)?(?:\s*[:\-])?|exclud(?:e|ing)|omit|leave out|remove)\s+([^.,;]{3,70})/i,
+      /\b(?:suppress|suppression(?:s)?(?:\s*[:\-])?|exclud(?:e|ing)|omit|leave out|remove)\s+([^.,;\n\r]{3,70})/i,
     );
 
     /*
