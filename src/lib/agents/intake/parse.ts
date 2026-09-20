@@ -21,6 +21,7 @@
  */
 
 import { findNamedPlace } from "@/lib/agents/shared/places";
+import { findStates } from "@/lib/agents/shared/us-states";
 import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
 
 export type Provenance = "stated" | "derived" | "inferred";
@@ -587,16 +588,42 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
    * Stated, not inferred: the marketer wrote the place's name.
    */
   if (!seen.has("region")) {
-    const place = findNamedPlace(brief);
-    if (place) {
-      const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === "region");
-      push({
-        key: "region",
-        label: spec?.label ?? "Region / market",
-        value: place.name,
-        from: "stated",
-        evidence: place.name,
-      });
+    const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === "region");
+
+    /*
+     * EVERY STATE, NOT THE FIRST.
+     *
+     * "Xfinity Internet customers in New York and New Jersey" captured New
+     * Jersey alone. Half the requested audience was dropped with nothing
+     * reported - and the audience agent builds its filter from this value, so
+     * the campaign would have gone to one state of the two.
+     *
+     * The first still fills the field; the rest are recorded, so the loss
+     * becomes a question instead of a silent halving. Same rule as the dates
+     * and the offers.
+     */
+    const states = findStates(brief);
+    if (states.length) {
+      for (const s of states) {
+        push({
+          key: "region",
+          label: spec?.label ?? "Region / market",
+          value: s.name,
+          from: "stated",
+          evidence: s.name,
+        });
+      }
+    } else {
+      const place = findNamedPlace(brief);
+      if (place) {
+        push({
+          key: "region",
+          label: spec?.label ?? "Region / market",
+          value: place.name,
+          from: "stated",
+          evidence: place.name,
+        });
+      }
     }
   }
 
@@ -863,7 +890,16 @@ function findBroadAndSpecificPlace(brief: string, region: string): Conflict | nu
   const BROAD = /^(National|Northeast|Southeast|Midwest|Southwest|West)$/i;
   if (!region || !BROAD.test(region.trim())) return null;
 
-  const locative = /\b(?:in|around|across|within|near|throughout|serving|covering)\s+(?:the\s+)?([A-Z][a-zA-Z]+(?:\s+(?:Valley|Metro|County|Area|Region|Market))?)/g;
+  /*
+   * A place name is usually more than one word, and cutting it at the first
+   * produced nonsense: "in New York" was reported as the market "New", so the
+   * question read 'The brief names "New" and also reads as national'.
+   *
+   * Up to two further capitalised words are taken, which covers New York,
+   * Treasure Valley, Salt Lake City and the Bay Area without running off into
+   * the rest of the sentence.
+   */
+  const locative = /\b(?:in|around|across|within|near|throughout|serving|covering)\s+(?:the\s+)?([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})/g;
   for (const m of brief.matchAll(locative)) {
     const name = (m[1] || "").trim();
     if (!name || NOT_A_PLACE.test(name)) continue;
