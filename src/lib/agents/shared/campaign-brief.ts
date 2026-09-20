@@ -76,7 +76,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     options: ["Growth/Upsell", "Retention", "Acquisition"],
     optionsPartial: true,
     aliases: ["objective", "goal", "business goal", "Objective of the campaign"],
-    ask: "Is this Growth/Upsell, Retention, or Acquisition? It decides which base we build from.",
+    ask: "Is this Growth/Upsell, Retention, or Acquisition? It decides who we start from, so it is worth getting right.",
   },
   {
     key: "customer_type",
@@ -85,7 +85,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     options: ["Subscriber - Existing Customers", "Prospect - Non-Customers"],
     optionsPartial: true,
     aliases: ["audience type", "who are we targeting"],
-    ask: "Existing subscribers or prospects? Existing customers come from the profile store; prospects do not, and that changes the whole build path.",
+    ask: "Existing subscribers, or prospects? We hold data on existing customers and not on prospects, so the two are built completely differently.",
   },
   {
     key: "line_of_business",
@@ -94,7 +94,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     options: ["Residential (RES)", "Business (SMB)"],
     optionsPartial: true,
     aliases: ["lob", "segment", "division"],
-    ask: "Residential or Business? They are separate data sets, so we cannot infer one from the other.",
+    ask: "Residential or Business? They are held separately, so one cannot be assumed from the other.",
   },
   {
     key: "request_type",
@@ -112,7 +112,7 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     aliases: ["in market", "go live", "live date", "launch", "Requested_Launch_Date", "Requested Launch Date"],
     // The nightly segmentation job at 21:45 (B6) means a date is not a
     // formality - every rework cycle after it costs a full day.
-    ask: "What is the in-market date? The segmentation job runs once a night, so the date sets how many rework cycles we can absorb.",
+    ask: "What is the in-market date? Audiences refresh overnight, so the date decides how much room there is to change anything afterwards.",
   },
   {
     key: "lifecycle_journey",
