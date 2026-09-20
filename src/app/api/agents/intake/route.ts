@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
-import { parseBrief, nextQuestions, type ParsedIntake } from "@/lib/agents/intake/parse";
+import { nextQuestions, type ParsedIntake } from "@/lib/agents/intake/parse";
+import { extractIntake } from "@/lib/agents/intake/llm-extract";
 import { createIntakeRequest, toWorkfrontPayload } from "@/lib/agents/intake/workfront";
 
 /**
@@ -137,9 +138,33 @@ export async function POST(req: NextRequest) {
   const { result, toolCalls } = await withToolCallLog(body.runId, "intake", async (): Promise<AgentResponse> => {
     // A rework loop carries the fields already confirmed, so the marketer is
     // never asked twice for the same thing.
-    const parsed = parseBrief(brief, body.input?.fields || {});
+    //
+    // extractIntake prefers a configured LLM to read the brief (Bedrock /
+    // Anthropic / Ollama - see lib/llm) and ALWAYS falls back to the pure
+    // deterministic parseBrief when no LLM is configured or the call fails.
+    // Either way it returns the same ParsedIntake shape, run through
+    // parseBrief's own validation, so every downstream invariant (provenance,
+    // missing/required, the loop cap) is unchanged. `extraction.source` records
+    // which path actually ran.
+    const extraction = await extractIntake(brief, body.input?.fields || {});
+    const parsed = extraction.parsed;
     const questions = nextQuestions(parsed, 2);
     const grounding = await groundQuestions(questions.map((q) => q.label));
+
+    // Which extraction path actually ran (llm vs deterministic), the model,
+    // and why we fell back if we did - folded into every response's metadata
+    // so the choice is visible in the trace, never silent.
+    const extractionMeta = {
+      extractionSource: extraction.source,
+      extractionModel: extraction.model,
+      extractionFallbackReason: extraction.fallbackReason,
+    };
+    // Only real when the LLM answered; the AgentResponse.usage field stays
+    // absent otherwise (see types.ts - never a fabricated 0).
+    const usage =
+      extraction.source === "llm" && extraction.model
+        ? { tokens: extraction.usage?.outputTokens ?? 0, model: extraction.model }
+        : undefined;
 
     // B1's verdict, owned by the agent instead of looped onto the marketer.
     if (loopCount >= LOOP_LIMIT && questions.length) {
@@ -155,7 +180,7 @@ export async function POST(req: NextRequest) {
           loopCount,
           grounding: { grounded: grounding.grounded, reason: grounding.reason },
         },
-        metadata: { loopCount, loopLimitReached: true },
+        metadata: { loopCount, loopLimitReached: true, ...extractionMeta },
       };
     }
 
@@ -179,7 +204,7 @@ export async function POST(req: NextRequest) {
           })),
           grounding,
         },
-        metadata: { loopCount: loopCount + 1, askedFor: questions.map((q) => q.key) },
+        metadata: { loopCount: loopCount + 1, askedFor: questions.map((q) => q.key), ...extractionMeta },
       };
     }
 
@@ -205,6 +230,7 @@ export async function POST(req: NextRequest) {
     return {
       status: "completed",
       message,
+      ...(usage ? { usage } : {}),
       output: {
         brief,
         ...summarise(parsed),
@@ -217,6 +243,7 @@ export async function POST(req: NextRequest) {
       },
       metadata: {
         loopCount,
+        ...extractionMeta,
         inferredCount: parsed.inferred.length,
         // A run where the agent guessed four fields is not the same as one where
         // the marketer stated them. The human at 2.5 has to know which they are
