@@ -166,14 +166,20 @@ export const PIPELINE: AgentDefinition[] = [
       // referenced field group, not inline on the class schema itself.
       "adobe_get_field_group",
       // Explicit, on-command activation ONLY (see agents/audience/
-      // activation.ts) - checking whether an audience is already wired to
-      // a named destination's dataflow, never writing one. Read-only, same
-      // as everything else here: no destination_create_dataflow/
-      // destination_update_dataflow, on purpose - see activation.ts's
-      // docstring for exactly why an unsafe write there is worse than
-      // reporting what a human needs to wire up instead.
+      // activation.ts) - checking whether an audience is already wired to a
+      // named destination's dataflow, and, since 20 Sep 2026 on explicit
+      // product direction, creating a NEW dataflow when none exists yet for
+      // that destination. Still no destination_update_dataflow (it has no
+      // segment_selectors field at all - there genuinely is no safe way to
+      // add a segment to a dataflow that ALREADY has other segments wired
+      // to it) - see activation.ts's docstring for exactly why that half
+      // stays read-only-report-only while this half doesn't.
       "destination_list_dataflows",
       "destination_get_dataflow",
+      "destination_list_target_connections",
+      "destination_get_target_connection",
+      "flow_list_flow_specs",
+      "destination_create_dataflow",
       // The orchestrator posts a "what this agent did" comment back onto the
       // Workfront issue after EVERY step completes (see
       // lib/pipeline/workfront-updates.ts), and it posts AS the completing

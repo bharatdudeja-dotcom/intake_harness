@@ -476,6 +476,19 @@ export const CAMPAIGN_BRIEF_FIELDS: readonly FieldSpec[] = [
     ask: "Is this a brand-new audience, or does it have a track record you can point to - for example, a similar audience that's performed before?",
   },
   {
+    // No `options` on purpose - a destination is whatever real AEP
+    // dataflow/target-connection name exists on this tenant (e.g. "Facebook
+    // Ads", "chaunceys custom dest"), which this file cannot enumerate in
+    // advance. "N/A"/"none" are handled explicitly at the point this field
+    // is READ (activation.ts's detectActivationIntentFromField), not here -
+    // this field only captures what the marketer said, verbatim.
+    key: "destination",
+    label: "Activation destination",
+    askForAudience: true,
+    aliases: ["destination", "where does this go", "activate to", "send to", "what destination"],
+    ask: "What destination does this audience go to? Name the platform or destination - or say \"none\" if this is audience build-only with no activation.",
+  },
+  {
     /*
      * Routing metadata, not a campaign fact — which Workfront project the
      * intake issue should land in. Deliberately NOT required and has no

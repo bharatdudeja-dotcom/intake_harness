@@ -8,12 +8,22 @@
  * rather than having to remember to wire it up.
  *
  * SAME HONESTY CONTRACT as intake/workfront.ts and review/workfront-notes.ts:
- * write actions are disabled on the tenant until a Workfront admin enables
- * them (44 of the connector's 94 tools are writes, off by default), so
- * comment-stream_create_comment 404s on most tenants today. A failure is
- * REPORTED (posted:false plus the text we WOULD have posted), never thrown —
- * this runs inside the orchestrator's record path, so "couldn't comment" must
- * never become "the run failed".
+ * on a tenant where write actions genuinely aren't enabled yet (44 of the
+ * connector's 94 tools are writes, off by default per tenant), this tool is
+ * simply absent and the call 404s. A failure is REPORTED (posted:false plus
+ * the text we WOULD have posted), never thrown — this runs inside the
+ * orchestrator's record path, so "couldn't comment" must never become "the
+ * run failed".
+ *
+ * ON THIS TENANT, WRITES ARE ENABLED - verified live (Agent 1 has created a
+ * real Workfront issue this way). The failure this app was actually hitting
+ * wasn't the tenant refusing the tool; it was calling
+ * comment-stream_create_comment with the wrong argument names entirely
+ * (objID/objCode/text, none of which the tool has) - every attempt failed
+ * with a schema validation error, reported honestly as posted:false, but
+ * indistinguishable at a glance from "writes are off". Fixed against the
+ * tool's real required shape: {content, contentHTML, objectCode, objectID,
+ * type} (checked 20 Sep 2026).
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
@@ -82,6 +92,28 @@ function formatUpdate(agent: AgentName, status: AgentStatus, message: string): s
   return `${agentLabel(agent)} — ${STATUS_PHRASE[status]}\n\n${message}`;
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * The SAME content as formatUpdate, as HTML - comment-stream_create_comment
+ * requires both `content` and `contentHTML`, and its own schema explicitly
+ * warns against mirroring plain text into bare <p> tags. Built from the
+ * same (agent, status, message) formatUpdate takes, not by re-parsing its
+ * output, so the two can never drift out of sync with each other.
+ */
+function formatUpdateHtml(agent: AgentName, status: AgentStatus, message: string): string {
+  const header = `<p><strong>${escapeHtml(agentLabel(agent))} — ${escapeHtml(STATUS_PHRASE[status])}</strong></p>`;
+  const body = message
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return `${header}<p><br></p>${body}`;
+}
+
 /**
  * Post an agent's update comment to its Workfront issue, best-effort.
  *
@@ -110,7 +142,20 @@ export async function postAgentUpdate(
     const set = workfrontToolset();
     const body = formatUpdate(agent, status, text);
     try {
-      await callMcpTool(agent, set.createComment, { objID: target.objId, objCode: target.objCode, text: body });
+      // comment-stream_create_comment's REAL required shape (verified live
+      // against its schema, 20 Sep 2026): {content, contentHTML, objectCode,
+      // objectID, type}. The names used here previously - objID/objCode/text
+      // - are not fields this tool has at all; every comment attempt failed
+      // silently (reported honestly as posted:false, but nothing ever
+      // actually reached Workfront) until this was checked against the
+      // tool's actual input schema instead of guessed.
+      await callMcpTool(agent, set.createComment, {
+        objectID: target.objId,
+        objectCode: target.objCode,
+        content: body,
+        contentHTML: formatUpdateHtml(agent, status, text),
+        type: "comment",
+      });
       return { attempted: true, posted: true, objId: target.objId, objCode: target.objCode, text: body };
     } catch (err) {
       return {

@@ -10,7 +10,7 @@ import {
   neededAttributes,
   criteriaKeywords,
 } from "@/lib/agents/audience/aep";
-import { detectActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
+import { resolveActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
 import { groundPqlGuidance, type PqlGuidance } from "@/lib/agents/review/pql-context";
 import type { AepContext } from "@/lib/agents/review/aep-context";
 import type { SchemaProbe, SegmentMatch } from "@/lib/agents/audience/aep";
@@ -56,10 +56,10 @@ import {
  * reports that rather than guessing. A number, or an activation, obtained
  * by silently writing to a client's sandbox is not worth having.
  *
- * ACTIVATION IS OFF BY DEFAULT. Nothing below changes unless the brief
- * itself explicitly asks to activate the audience somewhere
- * (activation.ts's detectActivationIntent) - build path, attribute checks,
- * and count prediction behave exactly as they always have otherwise.
+ * ACTIVATION IS OFF BY DEFAULT. Nothing below changes unless intake's own
+ * `destination` field (or, for older runs, the brief's free text) names a
+ * real destination - see activation.ts's resolveActivationIntent - build
+ * path and attribute checks behave exactly as they always have otherwise.
  */
 
 export interface AudienceCreationInput {
@@ -119,6 +119,10 @@ function formatActivationMessage(activation: ActivationOutcome): string {
       return `Activation needs manual wiring: ${activation.reason}`;
     case "no_segment_to_activate":
       return `Cannot activate yet: ${activation.reason}`;
+    case "created":
+      return `Created a new dataflow to "${activation.destinationName}" (${activation.dataflowId}) and activated this audience to it.`;
+    case "create_failed":
+      return `Could not create a dataflow to "${activation.destinationName}": ${activation.reason}`;
   }
 }
 
@@ -281,9 +285,9 @@ export async function POST(req: NextRequest) {
     const existing = reusedSegment ? priorSegment! : await findExistingSegment("audience_creation", terms);
 
     // Off by default - see this file's docstring and activation.ts. Only
-    // runs the (read-only) destination check when the brief itself
-    // explicitly asked for activation.
-    const activationIntent = detectActivationIntent(brief);
+    // runs the destination check/write when intake's own `destination`
+    // field (or, for older runs, the brief's free text) names a real one.
+    const activationIntent = resolveActivationIntent(brief, fields.destination);
     const activation = activationIntent.requested
       ? await activateAudience("audience_creation", {
           segmentId: existing.id,

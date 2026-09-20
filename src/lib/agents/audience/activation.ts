@@ -1,45 +1,58 @@
 /**
- * Explicit, on-command audience activation - Agent 3's one WRITE-ADJACENT
- * capability, and the one place in this agent that isn't "everything here
- * is a READ" (see aep.ts's own docstring). OFF BY DEFAULT: nothing in this
- * file runs unless the brief itself says, in so many words, to activate the
- * audience somewhere (detectActivationIntent). Every other decision this
- * agent makes - build path, attribute checks, count prediction - behaves
- * exactly as it always has, with or without this module ever firing.
+ * Explicit, on-command audience activation - Agent 3's one WRITE capability,
+ * and the one place in this agent that isn't "everything here is a READ"
+ * (see aep.ts's own docstring). OFF BY DEFAULT: nothing in this file
+ * attempts anything unless intake's own `destination` field (or, for older
+ * runs that predate it, the brief's free text) names a real destination -
+ * see resolveActivationIntent. Every other decision this agent makes -
+ * build path, attribute checks - behaves exactly as it always has, with or
+ * without this module ever firing.
  *
- * WHAT THIS ACTUALLY DOES, AND WHAT IT DELIBERATELY DOES NOT DO
+ * WHAT THIS ACTUALLY DOES, AND WHAT IT DELIBERATELY STILL DOES NOT DO
  *
- * Grounded against a live sandbox, 19 Sep 2026 - not guessed. Destinations
+ * Grounded against a live sandbox, 19-20 Sep 2026 - not guessed. Destinations
  * here are DATAFLOWS (destination_list_dataflows / destination_get_dataflow),
  * each carrying its own `segment_selectors`: the actual list of segments
- * activated to it. Two things follow from what's really available:
+ * activated to it. Re-verified 20 Sep 2026, schemas unchanged:
  *
- * 1. There is no tool that ADDS a segment to an EXISTING dataflow's
+ * 1. There is STILL no tool that ADDS a segment to an EXISTING dataflow's
  *    selectors. destination_update_dataflow only supports renaming and
- *    rescheduling - its schema has no segment_selectors field at all.
- *    destination_create_dataflow does take segment_selectors, but it
- *    creates a NEW dataflow with that exact list - it does not merge into
- *    an existing one. So if the named destination already exists with
- *    segments wired to it, there is no safe way to add ours without either
- *    duplicating the dataflow or silently dropping everything it already
- *    activates.
+ *    rescheduling - its schema has no segment_selectors field at all. So if
+ *    the named destination already has a dataflow with other segments wired
+ *    to it, there is no safe way to add ours without either duplicating the
+ *    dataflow or silently dropping everything it already activates - this
+ *    still reports "needs_manual_wiring" for that case, never guesses a write.
  *
- * 2. What IS safe, and is the actual answer for the brief this module was
- *    built against ("create an audience where ECID exists, and activate it
- *    to Chauncey's custom destination"): a real segment named "Has ECID"
- *    already existed, and was ALREADY activated to a real dataflow named
- *    "chaunceys custom dest" - this agent just never looked, because
- *    findExistingSegment's search terms were only intake's own
- *    categorization fields, never the audience's actual criteria (see
- *    aep.ts's criteriaKeywords). So the highest-value, lowest-risk thing
- *    this module does is confirm and report that, rather than attempt any
- *    write at all.
+ * 2. What's NEW: destination_create_dataflow DOES safely cover the case
+ *    where the named destination has NO dataflow yet at all - explicit
+ *    product direction, since that's a pure addition (nothing existing to
+ *    clobber). Getting there needs a real chain, verified live against
+ *    "chaunceys custom dest" (a real, working dataflow on this tenant):
+ *      target connection (by name) --connection_spec_id-->
+ *      flow spec (flow_list_flow_specs, matched by targetConnectionSpecIds)
+ *      --flow_spec_id + sourceConnectionSpecIds-->
+ *      a PROVEN source_connection_id, borrowed from an existing
+ *      segment-activation dataflow (findProvenSourceConnection) rather than
+ *      resolved generically - source_list_connections' own listing doesn't
+ *      expose connection_spec_id, and checking every candidate would mean
+ *      an unbounded number of detail calls. Reusing a connection a real
+ *      dataflow already uses successfully is grounded, not guessed; if
+ *      nothing suitable has ever been wired on this tenant, this declines
+ *      rather than invent an untested source_connection_id.
+ *    `destination_create_dataflow` has NO dry_run option (unlike
+ *    comment-stream_create_comment) - there is no preview step available
+ *    for this write. The segment_selectors payload shape is INFERRED from
+ *    one real dataflow's structure (destination_get_dataflow on "chaunceys
+ *    custom dest"), not exhaustively confirmed against a schema the tool
+ *    itself doesn't publish beyond "JSON array of segment activation
+ *    transformation dicts" - flagged here, not hidden, because a reader
+ *    relying on this working perfectly for every destination TYPE should
+ *    know it was built from one working example, not a spec.
  *
- * When neither of those applies - no existing segment, or an existing
- * segment that genuinely needs wiring a human has to do - this reports
- * exactly what's blocking rather than guessing at a write. An unsafe write
- * is worse than an honest dry run; that rule runs through every write in
- * this codebase, and this is no exception.
+ * 3. What was ALREADY safe, and still is: a real segment named "Has ECID"
+ *    already existed, activated to "chaunceys custom dest" - findDestination
+ *    Dataflow/selectorsIncludeSegment below confirm and report that rather
+ *    than attempting any write when the answer is already "yes, wired".
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
@@ -52,6 +65,21 @@ export type ActivationIntent = {
   evidence: string | null;
 };
 
+/** Answers intake's own field is treated as meaning "no destination, build-only" - not a literal destination named "none". */
+const NOT_REQUESTED_ANSWERS = new Set([
+  "", "n/a", "na", "none", "no", "not applicable", "no destination",
+  "build-only", "build only", "audience only", "not yet", "tbd",
+]);
+
+/** The field-based signal - see resolveActivationIntent for why this outranks brief-text parsing when it's present. */
+export function detectActivationIntentFromField(destination: string | undefined): ActivationIntent {
+  const trimmed = String(destination ?? "").trim();
+  if (!trimmed || NOT_REQUESTED_ANSWERS.has(trimmed.toLowerCase())) {
+    return { requested: false, destinationName: null, evidence: null };
+  }
+  return { requested: true, destinationName: trimmed, evidence: `intake field "destination": "${trimmed}"` };
+}
+
 /**
  * Does the brief explicitly ask to activate the audience somewhere?
  *
@@ -59,8 +87,9 @@ export type ActivationIntent = {
  * destination - never inferred from request_type's "Audience + Campaign
  * Execution", which is a Workfront-form category for routing the intake
  * issue, not a statement that a real AEP activation should happen right
- * now. The whole point of "unless the user gives an explicit command" is
- * that this has to be a real, specific ask, not a proxy for one.
+ * now. FALLBACK ONLY now - see resolveActivationIntent - kept for runs from
+ * before campaign-brief.ts had a `destination` field, or a rework loop that
+ * carried an old `fields` object forward without it.
  */
 export function detectActivationIntent(brief: string | undefined): ActivationIntent {
   const text = String(brief || "");
@@ -70,6 +99,21 @@ export function detectActivationIntent(brief: string | undefined): ActivationInt
   if (!m) return { requested: false, destinationName: null, evidence: null };
   const destinationName = m[1].trim().replace(/^(the|a|an)\s+/i, "").trim();
   return { requested: true, destinationName: destinationName || null, evidence: m[0] };
+}
+
+/**
+ * The real signal to use: intake's own `destination` field when it exists
+ * (an explicit answer to "what destination does this audience go to?"
+ * outranks a regex match against free text in both directions - a real
+ * name in the field wins even if the brief's wording is ambiguous, and an
+ * explicit "none" wins even if the brief happens to contain an
+ * activation-shaped phrase). Only falls back to brief-text parsing when the
+ * field is genuinely absent (undefined) - not merely blank/"none", which is
+ * itself the answer, not a missing one.
+ */
+export function resolveActivationIntent(brief: string | undefined, destinationField: string | undefined): ActivationIntent {
+  if (destinationField != null) return detectActivationIntentFromField(destinationField);
+  return detectActivationIntent(brief);
 }
 
 type DataflowRecord = {
@@ -85,8 +129,21 @@ type DestinationMatch = {
   considered: number;
 };
 
+/** Longest-overlap name match against a list of {id, name} rows - shared shape for dataflows and target connections. */
+function bestNameMatch(rows: Array<{ id: string; name: string }>, destinationName: string): { id: string; name: string; score: number } | null {
+  const meaningful = criteriaKeywords(destinationName);
+  let best: { id: string; name: string; score: number } | null = null;
+  for (const row of rows) {
+    if (!row.name || !row.id) continue;
+    const hay = row.name.toLowerCase();
+    const score = meaningful.filter((t) => hay.includes(t)).length;
+    if (score > 0 && (!best || score > best.score)) best = { id: row.id, name: row.name, score };
+  }
+  return best;
+}
+
 /**
- * Fuzzy-match a destination name against real, existing dataflows - the
+ * Fuzzy-match a destination name against real, existing DATAFLOWS - the
  * same word-overlap scoring aep.ts's findExistingSegment uses for segments,
  * reusing its criteriaKeywords so "Chauncey's custom destination" and a
  * real dataflow named "chaunceys custom dest" can find each other despite
@@ -103,16 +160,10 @@ async function findDestinationDataflow(taskId: TaskId, destinationName: string):
       Record<string, unknown>
     >;
 
-    const meaningful = criteriaKeywords(destinationName);
-    let best: { id: string; name: string; score: number } | null = null;
-    for (const row of rows) {
-      const name = String(row.name || "");
-      const id = String(row.id || "");
-      if (!name || !id) continue;
-      const hay = name.toLowerCase();
-      const score = meaningful.filter((t) => hay.includes(t)).length;
-      if (score > 0 && (!best || score > best.score)) best = { id, name, score };
-    }
+    const best = bestNameMatch(
+      rows.map((r) => ({ id: String(r.id || ""), name: String(r.name || "") })),
+      destinationName,
+    );
 
     if (!best) {
       return { read: true, error: null, dataflow: null, considered: rows.length };
@@ -129,6 +180,118 @@ async function findDestinationDataflow(taskId: TaskId, destinationName: string):
     };
   } catch (err) {
     return { read: false, error: (err as Error).message, dataflow: null, considered: 0 };
+  }
+}
+
+type TargetConnectionMatch = {
+  id: string;
+  name: string;
+  connectionSpecId: string | null;
+};
+
+/**
+ * Fuzzy-match a destination name against TARGET CONNECTIONS (the
+ * destination account/platform configuration itself, distinct from a
+ * dataflow - a target connection can exist with no dataflow using it yet).
+ * Finding one here, when findDestinationDataflow found no dataflow, is
+ * what makes "create a new dataflow" possible instead of just "not found".
+ */
+async function findTargetConnection(
+  taskId: TaskId,
+  destinationName: string,
+): Promise<{ read: boolean; error: string | null; match: TargetConnectionMatch | null; considered: number }> {
+  try {
+    const result = await callMcpTool<{ target_connections?: Array<Record<string, unknown>> }>(
+      taskId,
+      "destination_list_target_connections",
+      { limit: "50" },
+    );
+    const rows = (result?.target_connections || []) as Array<Record<string, unknown>>;
+    const best = bestNameMatch(
+      rows.map((r) => ({ id: String(r.id || ""), name: String(r.name || "") })),
+      destinationName,
+    );
+    if (!best) return { read: true, error: null, match: null, considered: rows.length };
+
+    const detail = await callMcpTool<Record<string, unknown>>(taskId, "destination_get_target_connection", {
+      target_connection_id: best.id,
+    });
+    return {
+      read: true,
+      error: null,
+      match: {
+        id: best.id,
+        name: best.name,
+        connectionSpecId: detail?.connection_spec_id ? String(detail.connection_spec_id) : null,
+      },
+      considered: rows.length,
+    };
+  } catch (err) {
+    return { read: false, error: (err as Error).message, match: null, considered: 0 };
+  }
+}
+
+/**
+ * Which flow spec a target connection's type uses - flow_list_flow_specs is
+ * a large catalog (2000+ lines on this tenant), so this is only ever called
+ * once we already have a specific connectionSpecId to search FOR, never to
+ * browse it.
+ */
+async function resolveFlowSpecId(taskId: TaskId, connectionSpecId: string): Promise<{ flowSpecId: string | null; error: string | null }> {
+  try {
+    const result = await callMcpTool<{ flow_specs?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(
+      taskId,
+      "flow_list_flow_specs",
+      {},
+    );
+    const rows = (Array.isArray(result) ? result : (result as { flow_specs?: unknown[] })?.flow_specs || []) as Array<
+      Record<string, unknown>
+    >;
+    for (const row of rows) {
+      const targetIds = Array.isArray(row.targetConnectionSpecIds) ? (row.targetConnectionSpecIds as unknown[]) : [];
+      if (targetIds.map(String).includes(connectionSpecId)) {
+        return { flowSpecId: row.id ? String(row.id) : null, error: null };
+      }
+    }
+    return { flowSpecId: null, error: `no flow spec on this tenant lists connection spec ${connectionSpecId} as a target` };
+  } catch (err) {
+    return { flowSpecId: null, error: (err as Error).message };
+  }
+}
+
+/**
+ * A source_connection_id PROVEN to work for segment activation on this
+ * tenant, borrowed from an existing dataflow that already has non-empty
+ * segment_selectors - rather than resolved generically (source connections'
+ * own listing doesn't expose connection_spec_id, so matching one to a
+ * specific flow spec would mean an unbounded number of detail calls).
+ * Bounded to the first 10 dataflows listed; if none of those is a
+ * segment-activation dataflow, this declines rather than guess further.
+ */
+async function findProvenSourceConnection(taskId: TaskId): Promise<{ sourceConnectionId: string | null; error: string | null }> {
+  try {
+    const list = await callMcpTool<{ dataflows?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(
+      taskId,
+      "destination_list_dataflows",
+      { limit: "50" },
+    );
+    const rows = (Array.isArray(list) ? list : (list as { dataflows?: unknown[] })?.dataflows || []) as Array<
+      Record<string, unknown>
+    >;
+    for (const row of rows.slice(0, 10)) {
+      const flowId = row.id ? String(row.id) : "";
+      if (!flowId) continue;
+      const detail = await callMcpTool<Record<string, unknown>>(taskId, "destination_get_dataflow", { flow_id: flowId });
+      const hasSegments = Array.isArray(detail?.segment_selectors) && (detail.segment_selectors as unknown[]).length > 0;
+      const sourceId = detail?.source_connection_id ? String(detail.source_connection_id) : "";
+      if (hasSegments && sourceId) return { sourceConnectionId: sourceId, error: null };
+    }
+    return {
+      sourceConnectionId: null,
+      error: "no existing segment-activation dataflow found among the first 10 listed, so a proven-compatible source connection could not be inferred",
+    };
+  } catch (err) {
+    return { sourceConnectionId: null, error: (err as Error).message };
   }
 }
 
@@ -161,12 +324,43 @@ function selectorsIncludeSegment(segmentSelectors: unknown, segmentId: string): 
   return hit;
 }
 
+/**
+ * segment_selectors as destination_create_dataflow wants it - a JSON
+ * STRING (its own schema: "JSON array of segment activation transformation
+ * dicts"), shaped from the one real example this was verified against
+ * (destination_get_dataflow on "chaunceys custom dest"). The real example's
+ * selector values also carried namespace/originName/name/description/
+ * createTime/updateTime - included where knowable (namespace is always
+ * "AEPSegments" for a platform segment; the rest is AEP's own metadata,
+ * populated server-side, not something this agent can state truthfully in
+ * advance) rather than fabricated.
+ */
+function buildSegmentSelectorsPayload(segmentId: string): string {
+  return JSON.stringify([
+    {
+      name: "GeneralTransform",
+      params: {
+        segmentSelectors: {
+          selectors: [
+            {
+              type: "PLATFORM_SEGMENT",
+              value: { id: segmentId, systemSegmentId: segmentId, namespace: "AEPSegments" },
+            },
+          ],
+        },
+      },
+    },
+  ]);
+}
+
 export type ActivationOutcome =
   | { status: "already_active"; destinationName: string; dataflowId: string }
   | { status: "no_destination_named"; reason: string }
   | { status: "destination_not_found"; requestedName: string; reason: string | null; considered: number }
   | { status: "needs_manual_wiring"; destinationName: string; dataflowId: string; reason: string }
-  | { status: "no_segment_to_activate"; reason: string };
+  | { status: "no_segment_to_activate"; reason: string }
+  | { status: "created"; destinationName: string; dataflowId: string }
+  | { status: "create_failed"; destinationName: string; reason: string };
 
 /**
  * The activation decision, given a segment findExistingSegment already
@@ -195,28 +389,77 @@ export async function activateAudience(
   }
 
   const match = await findDestinationDataflow(taskId, args.destinationName);
-  if (!match.dataflow) {
+  if (match.dataflow) {
+    if (selectorsIncludeSegment(match.dataflow.segmentSelectors, args.segmentId)) {
+      return { status: "already_active", destinationName: match.dataflow.name, dataflowId: match.dataflow.id };
+    }
+    return {
+      status: "needs_manual_wiring",
+      destinationName: match.dataflow.name,
+      dataflowId: match.dataflow.id,
+      reason:
+        `"${args.segmentName ?? args.segmentId}" is not yet on this destination's dataflow (${match.dataflow.id}), ` +
+        "and there is no tool that safely adds a segment to an EXISTING dataflow's selectors - " +
+        "destination_update_dataflow only supports renaming/rescheduling, and destination_create_dataflow would " +
+        "replace the whole selector list on a NEW dataflow rather than merge into this one. Wire this up in the " +
+        "Segment Builder/Destinations UI rather than risk dropping this destination's other activations.",
+    };
+  }
+
+  // No dataflow matched by name - but the destination might still exist as
+  // a target connection with no dataflow on it yet, which IS safe to
+  // create a new dataflow onto (nothing existing to clobber).
+  const targetMatch = await findTargetConnection(taskId, args.destinationName);
+  if (!targetMatch.match) {
     return {
       status: "destination_not_found",
       requestedName: args.destinationName,
-      reason: match.error,
+      reason:
+        targetMatch.error ??
+        `no destination matching "${args.destinationName}" was found among ${match.considered} dataflow(s) or ` +
+          `${targetMatch.considered} target connection(s) on this tenant.`,
       considered: match.considered,
     };
   }
 
-  if (selectorsIncludeSegment(match.dataflow.segmentSelectors, args.segmentId)) {
-    return { status: "already_active", destinationName: match.dataflow.name, dataflowId: match.dataflow.id };
+  if (!targetMatch.match.connectionSpecId) {
+    return {
+      status: "create_failed",
+      destinationName: targetMatch.match.name,
+      reason: "found the destination's target connection, but it has no readable connection type to build a dataflow against.",
+    };
   }
 
-  return {
-    status: "needs_manual_wiring",
-    destinationName: match.dataflow.name,
-    dataflowId: match.dataflow.id,
-    reason:
-      `"${args.segmentName ?? args.segmentId}" is not yet on this destination's dataflow (${match.dataflow.id}), ` +
-      "and there is no tool that safely adds a segment to an EXISTING dataflow's selectors - " +
-      "destination_update_dataflow only supports renaming/rescheduling, and destination_create_dataflow would " +
-      "replace the whole selector list on a NEW dataflow rather than merge into this one. Wire this up in the " +
-      "Segment Builder/Destinations UI rather than risk dropping this destination's other activations.",
-  };
+  const flowSpec = await resolveFlowSpecId(taskId, targetMatch.match.connectionSpecId);
+  if (!flowSpec.flowSpecId) {
+    return {
+      status: "create_failed",
+      destinationName: targetMatch.match.name,
+      reason: flowSpec.error ?? "could not resolve a flow spec for this destination's connection type.",
+    };
+  }
+
+  const sourceMatch = await findProvenSourceConnection(taskId);
+  if (!sourceMatch.sourceConnectionId) {
+    return {
+      status: "create_failed",
+      destinationName: targetMatch.match.name,
+      reason: sourceMatch.error ?? "could not determine a proven-compatible source connection.",
+    };
+  }
+
+  try {
+    const created = await callMcpTool<Record<string, unknown>>(taskId, "destination_create_dataflow", {
+      name: `${args.segmentName ?? args.segmentId} -> ${targetMatch.match.name}`,
+      description: "Created by Agent 3 (Audience Creation) on explicit activation request from intake.",
+      flow_spec_id: flowSpec.flowSpecId,
+      source_connection_id: sourceMatch.sourceConnectionId,
+      target_connection_id: targetMatch.match.id,
+      segment_selectors: buildSegmentSelectorsPayload(args.segmentId),
+    });
+    const dataflowId = created?.id ? String(created.id) : "";
+    return { status: "created", destinationName: targetMatch.match.name, dataflowId };
+  } catch (err) {
+    return { status: "create_failed", destinationName: targetMatch.match.name, reason: (err as Error).message };
+  }
 }

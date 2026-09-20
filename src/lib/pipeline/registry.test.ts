@@ -35,11 +35,24 @@ describe("Broken segment-estimate tools stay out of Agent 3's allowlist", () => 
   });
 });
 
-describe("least-privilege: no agent can write to AEP destinations", () => {
-  it("no agent is granted destination_create_dataflow or destination_update_dataflow", () => {
+describe("least-privilege: destination writes stay narrow", () => {
+  // destination_update_dataflow has NO segment_selectors field at all
+  // (verified live, activation.ts's docstring) - there is still no safe
+  // way to add a segment to a dataflow that already has other segments
+  // wired to it, for ANY agent. This guard stays absolute.
+  it("no agent, ever, is granted destination_update_dataflow", () => {
     for (const agent of PIPELINE) {
-      expect(agent.allowedTools).not.toContain("destination_create_dataflow");
       expect(agent.allowedTools).not.toContain("destination_update_dataflow");
+    }
+  });
+
+  // destination_create_dataflow IS now granted - explicit product
+  // direction, 20 Sep 2026 - but ONLY to audience_creation, and only for
+  // the safe case (no existing dataflow to clobber - see activation.ts).
+  it("destination_create_dataflow is granted to audience_creation only", () => {
+    for (const agent of PIPELINE) {
+      const expectGranted = agent.name === "audience_creation";
+      expect(agent.allowedTools.includes("destination_create_dataflow")).toBe(expectGranted);
     }
   });
 });
