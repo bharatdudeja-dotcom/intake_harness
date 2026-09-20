@@ -102,14 +102,20 @@ export function createBedrockClient(cfg: BedrockConfig): LlmClient {
       const payloadHash = sha256Hex(body);
 
       // --- SigV4: canonical request ---
+      // Sign the MINIMAL required set: host, x-amz-content-sha256, x-amz-date
+      // (plus the session token when present). content-type is deliberately NOT
+      // signed - fetch/undici can normalize or re-case a content-type value
+      // (e.g. appending charset), and any drift between the value we sign and
+      // the value actually sent breaks the signature. Not signing it removes
+      // that whole class of "signature does not match" failure. Headers must be
+      // listed sorted by lowercase name.
       const canonicalHeaders =
-        `content-type:application/json\n` +
         `host:${host}\n` +
         `x-amz-content-sha256:${payloadHash}\n` +
         `x-amz-date:${amzDate}\n` +
         (cfg.sessionToken ? `x-amz-security-token:${cfg.sessionToken}\n` : "");
       const signedHeaders =
-        "content-type;host;x-amz-content-sha256;x-amz-date" +
+        "host;x-amz-content-sha256;x-amz-date" +
         (cfg.sessionToken ? ";x-amz-security-token" : "");
       const canonicalRequest = [
         "POST",
@@ -161,7 +167,18 @@ export function createBedrockClient(cfg: BedrockConfig): LlmClient {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
-        throw new Error(`Bedrock InvokeModel returned HTTP ${res.status}: ${errBody.slice(0, 300)}`);
+        // A 403 signature error includes AWS's OWN expected canonical string,
+        // which is the single most useful thing for diagnosing a mismatch - so
+        // don't truncate a 403 the way we truncate other errors. Set
+        // BEDROCK_DEBUG_SIGNING=true to also log OUR canonical request next to
+        // it, so the two can be diffed line by line.
+        const isSigError = res.status === 403 && /signature/i.test(errBody);
+        if (process.env.BEDROCK_DEBUG_SIGNING === "true") {
+          console.error("=== Bedrock SigV4 debug ===\nOUR canonical request:\n" + canonicalRequest + "\n\nAWS RESPONSE:\n" + errBody);
+        }
+        throw new Error(
+          `Bedrock InvokeModel returned HTTP ${res.status}: ${isSigError ? errBody : errBody.slice(0, 300)}`,
+        );
       }
 
       const data = (await res.json()) as {
