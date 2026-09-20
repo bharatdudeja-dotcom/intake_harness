@@ -145,6 +145,19 @@ const RAW_PAYLOAD_KEYS = new Set([
     'fields', 'stated', 'inferred', 'missing', 'grounding',
     // Rendered above as a clickable link, which is the whole point.
     'workfront',
+    /*
+     * Agent 2 carries the whole of Agent 1's output forward, so the review
+     * stage reprinted the brief, the parsed fields and the intake payload a
+     * second time before reaching anything it had decided itself.
+     *
+     * intakeFields duplicates fields; workfrontPayload is the raw request body
+     * we sent; conversion is the raw API response, of which `converted` is the
+     * readable summary. Keeping the summaries and dropping the wire format is
+     * the whole distinction.
+     */
+    'intakeFields', 'workfrontPayload', 'conversion',
+    // Rendered below as a link and a plain-English definition.
+    'audience',
 ])
 
 function rows (output) {
@@ -243,6 +256,32 @@ function narrateStep (step, label, opts = {}) {
             'MCP server in Settings).',
             ''
         )
+    }
+
+    /*
+     * THE SEGMENT LINK, FOR THE SAME REASON THE WORKFRONT LINK IS ABOVE.
+     *
+     * Agent 3's `audience` arrived as a 778-character JSON blob in one table
+     * cell, with the AEP link inside it. That link is the thing a reviewer
+     * opens, and the definition in the agent's own English is the thing they
+     * check it against - both were unreadable in a cell.
+     */
+    const aud = step.output && typeof step.output === 'object' ? step.output.audience : null
+    if (aud && typeof aud === 'object' && (aud.url || aud.segmentId || aud.definition)) {
+        lines.push('**In Adobe Experience Platform**', '')
+        if (aud.url) {
+            lines.push(`- [${aud.name || 'the audience'}](${aud.url}) — open it to see the rule that was built.`)
+        } else if (aud.segmentId) {
+            lines.push(`- Segment \`${aud.segmentId}\`${aud.name ? ` — ${aud.name}` : ''}`)
+        }
+        if (Array.isArray(aud.reads) && aud.reads.length) {
+            lines.push('', 'It reaches someone who:')
+            for (const r of aud.reads) lines.push(`- ${r}`)
+        } else if (aud.definition) {
+            lines.push('', `Definition: \`${aud.definition}\``)
+        }
+        if (aud.error) lines.push('', `**It did not build:** ${aud.error}`)
+        lines.push('')
     }
 
     const table = rows(step.output)
