@@ -369,20 +369,24 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
     const candidates = records.filter((r) => PROFILE_SCHEMA_HINT.test(r.title)).slice(0, SCHEMA_SAMPLE);
     candidateCount = candidates.length;
 
+    // Up to SCHEMA_SAMPLE independent schema reads, fanned out together
+    // instead of one at a time — none depends on another's result.
+    const schemaResults = await Promise.allSettled(
+      candidates.map((c) => callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id })),
+    );
     const pendingRefs = new Set<string>();
-    for (const c of candidates) {
-      try {
-        const doc = await callMcpTool<unknown>(taskId, "adobe_get_schema", { schema_id: c.id });
-        for (const f of fieldNames(doc)) fields.add(f);
+    for (const result of schemaResults) {
+      if (result.status === "fulfilled") {
+        for (const f of fieldNames(result.value)) fields.add(f);
         // A class-based schema's own document rarely has inline properties -
         // it composes field groups via allOf/$ref (see fieldGroupRefs). Queue
         // those regardless of whether this schema's own walk found anything,
         // since a schema can mix a few inline fields with several field-group
         // refs.
-        for (const ref of fieldGroupRefs(doc)) pendingRefs.add(ref);
+        for (const ref of fieldGroupRefs(result.value)) pendingRefs.add(ref);
         inspected += 1;
-      } catch (err) {
-        lastError = (err as Error).message;
+      } else {
+        lastError = (result.reason as Error).message;
       }
     }
 
@@ -392,13 +396,19 @@ export async function probeSchemas(taskId: TaskId, needed: string[]): Promise<Sc
     // FIELD_GROUP_SAMPLE total, not per schema, so several profile-hinted
     // schemas each listing a handful of refs cannot fan out unboundedly.
     if (inspected > 0 && fields.size === 0 && pendingRefs.size > 0) {
-      for (const ref of [...pendingRefs].slice(0, FIELD_GROUP_SAMPLE)) {
-        try {
-          const doc = await callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: ref });
-          for (const f of fieldNames(doc)) fields.add(f);
+      // Same reasoning as the schema fetches above: each referenced field
+      // group is independent of the others, so they fan out together.
+      const refResults = await Promise.allSettled(
+        [...pendingRefs].slice(0, FIELD_GROUP_SAMPLE).map((ref) =>
+          callMcpTool<unknown>(taskId, "adobe_get_field_group", { field_group_id: ref }),
+        ),
+      );
+      for (const result of refResults) {
+        if (result.status === "fulfilled") {
+          for (const f of fieldNames(result.value)) fields.add(f);
           fieldGroupsInspected += 1;
-        } catch (err) {
-          lastError = (err as Error).message;
+        } else {
+          lastError = (result.reason as Error).message;
         }
       }
     }

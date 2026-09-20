@@ -86,11 +86,40 @@ function parameterNames(payload: unknown): string[] {
 }
 
 /**
+ * resolveFieldMap does the same form read (now 17 queries, widened for the
+ * LCE-form and audience-completeness fields) on EVERY intake submission
+ * even though the form's own field names don't change between requests,
+ * so it's cached here — same TTL-cache shape as the gateway's own
+ * tool-discovery cache elsewhere in this app. resetFieldMapCache exists
+ * for tests and for a Settings-triggered "the form changed, forget it"
+ * reset, neither of which exists yet.
+ */
+const FIELD_MAP_CACHE_TTL_MS = 15 * 60_000;
+const fieldMapCache = new Map<string, { at: number; value: FieldMap }>();
+
+export function resetFieldMapCache(): void {
+  fieldMapCache.clear();
+}
+
+export async function resolveFieldMap(categoryID: string, entity = "issue"): Promise<FieldMap> {
+  const key = `${categoryID}:${entity}`;
+  const hit = fieldMapCache.get(key);
+  if (hit && Date.now() - hit.at < FIELD_MAP_CACHE_TTL_MS) return hit.value;
+
+  const value = await resolveFieldMapUncached(categoryID, entity);
+  // A verified read is worth caching; an assumed fallback means the form
+  // could not be read THIS time, and the next request deserves its own
+  // attempt rather than inheriting a failure for 15 minutes.
+  if (value.verified) fieldMapCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/**
  * Resolve our field keys to Workfront's parameter names.
  *
  * @param categoryID the custom form (CTGY) the intake is filed against
  */
-export async function resolveFieldMap(categoryID: string, entity = "issue"): Promise<FieldMap> {
+async function resolveFieldMapUncached(categoryID: string, entity = "issue"): Promise<FieldMap> {
   const assumed = (): FieldMap => ({
     map: Object.fromEntries(CAMPAIGN_BRIEF_FIELDS.map((f) => [f.key, `${DE}${labelFor(f.key)}`])),
     verified: false,
@@ -148,19 +177,25 @@ export async function resolveFieldMap(categoryID: string, entity = "issue"): Pro
       "email", "test", "priority", "creative", "data", "channel", "size", "deployment",
       "support", "journey", "mix", "history", "performance",
     ];
-    const seen = new Set<string>();
-    for (const query of queries) {
-      try {
-        const chunk = await callMcpTool<unknown>("intake", "insights_search_fields", {
+    // 17 independent queries used to run one at a time — each a full round
+    // trip, stacked, on every single intake submission. None depends on
+    // another's result, so they fan out together instead; allSettled (not
+    // all) so one failed query still can't lose the ones that worked.
+    const results = await Promise.allSettled(
+      queries.map((query) =>
+        callMcpTool<unknown>("intake", "insights_search_fields", {
           // The entity we are actually writing to. Searching three entities
           // found project fields and then offered them for an issue, which
           // Workfront refuses - correctly.
           entity_ids: [entity],
           query,
-        });
-        for (const n of parameterNames(chunk)) seen.add(n);
-      } catch (err) {
-        // One failed query must not lose the ones that worked.
+        }),
+      ),
+    );
+    const seen = new Set<string>();
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        for (const n of parameterNames(result.value)) seen.add(n);
       }
     }
     const names = [...seen];
