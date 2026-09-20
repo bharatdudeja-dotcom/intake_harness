@@ -609,14 +609,25 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   }
 
   // 4. A date written in prose.
-  if (!seen.has("launch_date")) {
-    /*
-     * Every date, not the first. push() keeps the first for the field and
-     * records the rest as candidates, so an amendment becomes a question
-     * instead of vanishing.
-     */
-    for (const d of findLaunchDates(brief)) push(d);
-  }
+  /*
+   * NOT GUARDED ON `seen`, AND THAT IS THE POINT.
+   *
+   * push() already keeps the first value for a field, so a value supplied in
+   * `known` still wins. What the guard used to do was stop the brief from
+   * being READ at all once `known` had an answer - which silently disabled
+   * the amendment check in exactly the case it matters most.
+   *
+   * An LLM extractor now runs in front of this and passes its output back as
+   * `known`. So `known.launch_date` is normally set, the scan never ran, no
+   * candidates were recorded, and "pull the date forward to the 6th" stopped
+   * being noticed. The deterministic parser is the safety net under that
+   * extractor, and a safety net that switches itself off when the thing above
+   * it is working is not a safety net.
+   *
+   * Reading the brief is cheap. Reading it and finding the same answer costs
+   * nothing; reading it and finding a different one is the whole point.
+   */
+  for (const d of findLaunchDates(brief)) push(d);
 
   // 5. The campaign name, from the opening line.
   if (!seen.has("campaign_name")) {
@@ -687,7 +698,13 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
    * is introduced as money the business is SPENDING, it is not something the
    * customer is being given.
    */
-  if (!seen.has("offer")) {
+  /*
+   * Every sum, and again NOT guarded on `seen`. An LLM extractor supplying
+   * `known.offer` used to stop the brief being read for money at all, so a
+   * changed offer went unnoticed - and the budget-versus-offer distinction
+   * was never applied to what the brief actually said.
+   */
+  {
     /*
      * THE WHOLE OFFER, NOT THE FIRST NUMBER IN IT.
      *
