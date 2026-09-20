@@ -640,8 +640,17 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
    * who gets briefed and which review path the job takes.
    */
   if (!seen.has("agency")) {
+    /*
+     * The keyword is case-insensitive; the NAME is not.
+     *
+     * A whole-pattern /i flag would defeat the capture, which relies on the
+     * agency being written as a proper noun to know where the name starts and
+     * ends. The first version was lowercase-only and missed every brief,
+     * because people write "Agency is Bluestem Creative" at the start of a
+     * sentence.
+     */
     const a = brief.match(
-      /\b(?:agency|agency\s+partner|creative\s+agency|produced\s+by|handled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3})/,
+      /\b(?:[Aa]gency(?:\s+partner)?|[Cc]reative\s+[Aa]gency|[Pp]roduced\s+by|[Hh]andled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3})/,
     );
     if (a && a[1]) {
       push({
