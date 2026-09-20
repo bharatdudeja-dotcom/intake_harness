@@ -224,7 +224,25 @@ const WRITE_TOOLS = new Set([
      * The D79 guard test caught this being absent, which is exactly what it is
      * for - the gate is only as good as its completeness.
      */
-    'approve_intake', 'reject_intake', 'answer_intake', 'continue_job', 'preview_intake',
+    'approve_intake', 'reject_intake', 'answer_intake', 'continue_job',
+    /*
+     * preview_intake is deliberately NOT in this set, and used to be.
+     *
+     * It creates nothing - no Workfront object, no run, no mail. It exists so
+     * a marketer can see what WOULD be filed while it is still free to change.
+     * Gating it behind the write guard meant a read-only viewer, the identity
+     * that most needs to look without touching, was refused the one operation
+     * that cannot touch anything - and told to go and ask for more access in
+     * order to preview.
+     *
+     * It had been appended to the line above, whose comment justifies the
+     * entries by "opens the gate at 1.5, which makes the pipeline run agents
+     * and write to Workfront". That reasoning never applied to a preview.
+     *
+     * The D79 guard matches names beginning save|start|append|approve|... so
+     * it never covered this either way. Removing it refuses nothing that
+     * changes data.
+     */
     // Changes which MCP servers agents can reach, and which upstreams execute them.
     'set_mcp_server', 'set_agent_system'
 ])
@@ -388,7 +406,7 @@ Only things about a run that already exists:
   - approve_step / approve_steps to mark the parts of a run worth keeping, then bake_job
     to hand the run to the Oracle, which reads it against every earlier run and
     PROPOSES what should be learned. A named human always decides; the Oracle never
-    admits anything to the Shared Knowledge Graph by itself.
+    admits anything to the CX Agentic Graph by itself.
     These are about the RECORD. If someone wants the campaign to proceed, they want
     approve_intake instead - see the section above.
 
@@ -503,7 +521,7 @@ function briefTerms (text) {
  *
  * So:
  *
- *   `similar` (REUSABLE)   approved runs only - the Shared Knowledge Graph. A
+ *   `similar` (REUSABLE)   approved runs only - the CX Agentic Graph. A
  *                          human certified these, which is exactly what makes
  *                          them safe to build on.
  *   `duplicates` (CAUTION) unapproved runs that look like this brief. NOT
@@ -1086,7 +1104,21 @@ function registerTools (server, context = {}) {
     server.tool = (name, description, schema, handler) => registerRaw(name, description, schema,
         async (...handlerArgs) => {
             if (WRITE_TOOLS.has(name) && callerHasRole(context, 'viewer')) {
-                return errorResult(`Refused: this is a read-only (viewer) identity, and '${name}' changes data. Ask an admin for a chef role to contribute.`)
+                /*
+                 * "Ask an admin for a chef role" - the cookbook engine's
+                 * vocabulary, put to a Comcast marketer. There is no chef here
+                 * and there never was: the role is called Marketer in this
+                 * product, and the dashboard has said so since the rename.
+                 *
+                 * Also says what they CAN still do, because the commonest
+                 * reason to hit this is wanting to look at something, and
+                 * reading and previewing are both open to a viewer.
+                 */
+                return errorResult(
+                    `Refused: this is a read-only identity, and '${name}' changes data. ` +
+                    'You can still read anything shared with you, and preview an intake without filing it. ' +
+                    'To file or approve work, ask an admin for the Marketer role.'
+                )
             }
             return handler(...handlerArgs)
         })
@@ -2030,7 +2062,7 @@ function registerTools (server, context = {}) {
                             : 'This waits on an earlier step, not on a person.'
                     }
                 })(),
-                // Approved runs only. This is the Shared Knowledge Graph, and a
+                // Approved runs only. This is the CX Agentic Graph, and a
                 // run in it has been certified by a person.
                 similar_runs: similar,
                 /*

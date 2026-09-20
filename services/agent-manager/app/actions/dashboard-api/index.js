@@ -518,7 +518,7 @@ async function main (params) {
         // service key) instead of their own.
         if (requireIdentity(params) && !userToken && !login && !userKey) {
             logger.warn('Identity required but neither a Bearer token nor a user access key was presented')
-            return rpcError(401, -32002, 'Sign in to open your own view. Your runs are private to you; approved runs and the Shared Knowledge Graph are visible to everyone.', rpc.id, cors)
+            return rpcError(401, -32002, 'Sign in to open your own view. Your runs are private to you; approved runs and the CX Agentic Graph are visible to everyone.', rpc.id, cors)
         }
 
         const mode = userToken ? 'per-user-token' : (login ? 'user-login' : (userKey ? 'per-user-key' : 'shared-service-key'))

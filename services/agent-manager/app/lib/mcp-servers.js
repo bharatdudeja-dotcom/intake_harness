@@ -315,7 +315,7 @@ async function callTool (server, name, args = {}, timeoutMs = 45000) {
 }
 
 /** What a server actually exposes. Used to verify a new entry from Settings. */
-async function listTools (server, timeoutMs = 30000) {
+async function listTools (server, timeoutMs = 30000, refreshed = false) {
     const state = readiness(server)
     if (!state.ready) throw new Error(`${server && server.id}: ${state.reason}`)
     const controller = new AbortController()
@@ -327,6 +327,32 @@ async function listTools (server, timeoutMs = 30000) {
             body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' }),
             signal: controller.signal
         })
+        /*
+         * DISCOVERY NEEDS THE REFRESH TOO, AND ONLY callTool HAD IT.
+         *
+         * The refresh above was written for exactly this symptom - its own
+         * comment says "the gateway dropped all 97 tools and it read as a
+         * permissions problem" - but it was wired into callTool alone. So an
+         * expired token stopped being fixed the moment the failure moved one
+         * function to the left: tools/list 401s, the server contributes zero
+         * tools, and Workfront disappears from the estate entirely.
+         *
+         * Observed on the box today: `workfront-adobe did not answer (HTTP 401)
+         * - contributing no tools`, while a refresh token sat in settings
+         * waiting to be spent. A marketer would have been told Workfront was
+         * simply not there.
+         *
+         * One attempt, like callTool: if the fresh token is refused too, the
+         * original 401 stands. A revoked grant needs a person, and retrying
+         * would be a storm.
+         */
+        if (res.status === 401 && !refreshed) {
+            const fresh = await refreshAccessToken(server)
+            if (fresh) {
+                clearTimeout(timer)
+                return listTools(server, timeoutMs, true)
+            }
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const body = parseMcpBody(await res.text(), res.headers && res.headers.get('content-type'))
         if (body.error) throw new Error(body.error.message || 'unknown MCP error')

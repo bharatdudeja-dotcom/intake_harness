@@ -114,7 +114,7 @@ describe('the new-user onboarding kit (D83)', () => {
     test('explains the privacy model, which is the whole product promise', () => {
         expect(kit).toMatch(/PRIVATE to you/i)
         expect(kit).toMatch(/Oracle/i)
-        expect(kit).toMatch(/Shared Knowledge Graph/)
+        expect(kit).toMatch(/CX Agentic Graph/)
     })
 
     test('carries troubleshooting for the failures people actually hit', () => {

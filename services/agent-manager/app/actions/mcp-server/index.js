@@ -50,6 +50,33 @@ let logger = null
  * Create MCP server instance with all capabilities
  * Following the exact pattern from SDK examples
  */
+/*
+ * IRREVERSIBLE UPSTREAM OPERATIONS.
+ *
+ * Deliberately narrow: operations that destroy data or configuration and
+ * cannot be undone. NOT "writes" - a marketer's entire job is writing, and
+ * creating a request, updating a field or posting a comment must keep working.
+ *
+ * Matched on the tool's own name rather than a hand-kept list, because the
+ * gateway DISCOVERS its tools: a vendor who ships `delete_everything` next
+ * month is covered without anyone noticing they needed to be.
+ */
+const DESTROYS_UPSTREAM = /(^|_)(delete|destroy|purge|truncate|drop|reset)(_|s_|$)/i
+
+/**
+ * Is this the pipeline calling, rather than a person or an assistant?
+ *
+ * The agents authenticate with the shared service key and resolve to no owner;
+ * every other caller - OIDC, a personal access key, the dashboard - carries an
+ * identity. Anything unrecognised is treated as interactive, because the safe
+ * default is the smaller surface.
+ *
+ * @param {{ authMode?: string, userInfo?: object }} context
+ */
+function isPipelineCaller (context) {
+    return (context && context.authMode) === 'api-key' && !(context && context.userInfo)
+}
+
 /**
  * Re-expose the tools of every gateway-enabled MCP server.
  *
@@ -57,8 +84,26 @@ let logger = null
  * from each upstream's own tools/list. Name collisions are impossible because
  * every proxied tool is prefixed with the server it came from, which also means
  * a vendor shipping a tool called `approve_step` can never shadow ours.
+ *
+ * WHY AN ASSISTANT IS NOT OFFERED THE DESTRUCTIVE ONES.
+ *
+ * Every discovered tool used to be registered for every caller, which put 411
+ * tools in front of Claude Desktop - 49 of them destructive, against a live
+ * Adobe tenant. `adobe_delete_sandbox` was one. So was `adobe_delete_dataset`.
+ * A marketer types something ambiguous, a model picks a plausible-looking
+ * tool, and a sandbox is gone; there is no confirmation step between an
+ * assistant and this gateway, and no undo behind it.
+ *
+ * Registration is the enforcement point, not a display filter. An unregistered
+ * tool is genuinely uncallable - verified against the live server: a name that
+ * is not registered comes back "Tool <name> not found" rather than executing.
+ * So this removes the capability, it does not merely hide it.
+ *
+ * The pipeline keeps everything. Its agents are code, they call tools by name,
+ * and they already enforce their own per-agent allowlist upstream - the
+ * ambiguity this is protecting against is a language model's, not theirs.
  */
-async function registerGatewayTools (server) {
+async function registerGatewayTools (server, context) {
     let catalog
     try {
         catalog = await mcpGateway.catalog(settings.mcpServers())
@@ -74,7 +119,18 @@ async function registerGatewayTools (server) {
         else logger?.info(`Gateway: ${s.id} contributed ${s.tool_count} tool(s)`)
     }
 
+    const forPipeline = isPipelineCaller(context)
+    let withheld = 0
+
     for (const t of catalog.tools) {
+        // The bare tool name, without the `<serverId>__` the gateway adds -
+        // otherwise a server called "reset-service" would take its whole
+        // catalogue down with it.
+        const bare = mcpGateway.parseProxyName(t.name)?.tool || t.name
+        if (!forPipeline && DESTROYS_UPSTREAM.test(bare)) {
+            withheld++
+            continue
+        }
         try {
             server.registerTool(
                 t.name,
@@ -87,6 +143,10 @@ async function registerGatewayTools (server) {
         } catch (e) {
             logger?.warn(`Gateway: could not register ${t.name}: ${e.message}`)
         }
+    }
+
+    if (withheld) {
+        logger?.info(`Gateway: withheld ${withheld} irreversible tool(s) from a non-pipeline caller`)
     }
 }
 
@@ -119,7 +179,7 @@ async function createMcpServer (context = {}) {
     registerTools(server, context)
     registerResources(server, context)
     registerPrompts(server, context)
-    await registerGatewayTools(server)
+    await registerGatewayTools(server, context)
 
     if (logger) {
         logger.info('MCP Server created with tools, resources, prompts, and logging capabilities')
