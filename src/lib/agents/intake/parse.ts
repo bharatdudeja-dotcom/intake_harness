@@ -648,9 +648,14 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
      * ends. The first version was lowercase-only and missed every brief,
      * because people write "Agency is Bluestem Creative" at the start of a
      * sentence.
+     *
+     * A full stop is NOT part of a name. Allowing it let the match run past
+     * the end of the sentence - "Bluestem Creative. Campaign" - which is the
+     * same class of error as truncating: the value looks plausible and is
+     * wrong.
      */
     const a = brief.match(
-      /\b(?:[Aa]gency(?:\s+partner)?|[Cc]reative\s+[Aa]gency|[Pp]roduced\s+by|[Hh]andled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3})/,
+      /\b(?:[Aa]gency(?:\s+partner)?|[Cc]reative\s+[Aa]gency|[Pp]roduced\s+by|[Hh]andled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&'-]*(?:\s+[A-Z][A-Za-z0-9&'-]*){0,3})/,
     );
     if (a && a[1]) {
       push({
