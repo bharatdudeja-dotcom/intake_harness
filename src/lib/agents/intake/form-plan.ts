@@ -34,8 +34,19 @@ export type FieldPlan = {
   writes: Record<string, string>;
   /** What each write means, for the artifact. */
   explains: string[];
-  /** The brief said something, and the field would not take it. */
-  mismatched: { label: string; given: string; why: string }[];
+  /**
+   * The brief said something and it did not get written. TWO different
+   * reasons, and the difference decides whether the marketer is asked:
+   *
+   *   "value"    - the field exists and will not take this value. They can
+   *                answer that, so it becomes a question.
+   *   "no-field" - nothing on this form can hold it at all. They can do
+   *                nothing about it, so it is disclosed and NOT asked.
+   *
+   * Asking "this form has no Budget field, which should it be?" wastes one
+   * of only two questions on something the marketer cannot fix.
+   */
+  mismatched: { label: string; given: string; why: string; kind: "value" | "no-field" }[];
   /** The form holds this and the brief is silent - worth asking about. */
   unanswered: { label: string; allowed: string[] }[];
   /** What was read, so a reader can see the basis. */
@@ -130,6 +141,7 @@ export async function planFormWrites(
           label: concept.labels[0],
           given: String(given),
           why: `this form has no ${concept.labels[0]} field, so it cannot be filed here - it stays in the brief text`,
+          kind: "no-field",
         });
       }
       continue;
@@ -184,6 +196,7 @@ export async function planFormWrites(
         label: field.label,
         given: String(source),
         why: `${field.label} needs a date and "${source}" could not be read as one`,
+        kind: "value",
       });
       claimed.add(field.name);
       continue;
@@ -198,7 +211,7 @@ export async function planFormWrites(
         `${field.label} = ${mapped.value}` + (mapped.note ? ` (${mapped.note})` : ""),
       );
     } else {
-      mismatched.push({ label: field.label, given: mapped.given, why: mapped.why });
+      mismatched.push({ label: field.label, given: mapped.given, why: mapped.why, kind: "value" });
     }
   }
 
@@ -218,6 +231,8 @@ export function questionsFromPlan(plan: FieldPlan): string[] {
   const out: string[] = [];
 
   for (const m of plan.mismatched) {
+    // A missing field is not a question. See FieldPlan.mismatched.
+    if (m.kind === "no-field") continue;
     out.push(
       `${m.label}: the brief says "${m.given}", and this Workfront form only accepts ${m.why.replace(/^"[^"]*" is not one of the values this field accepts \(/, "").replace(/\)$/, "")}. Which should it be - or should the request record the detail somewhere else?`,
     );
