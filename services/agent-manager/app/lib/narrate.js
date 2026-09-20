@@ -121,9 +121,37 @@ function seconds (ms) {
  * table rather than a blob. Nested objects are summarised, not expanded - the
  * raw payload is kept below for anyone who needs the whole thing.
  */
+/*
+ * THE RAW PAYLOAD IS ALREADY CAPTURED. THIS TABLE IS FOR READING.
+ *
+ * Every key of a step's output was printed here, so Agent 1 rendered the whole
+ * brief, the parsed `fields` JSON, and the `stated` / `inferred` / `missing` /
+ * `grounding` arrays - four screens of it - above the one line anybody acts
+ * on, which is the link to the Workfront request.
+ *
+ * None of it is lost: the full output is stored on the step and served by the
+ * API. Printing it again in a reviewer's face is not transparency, it is the
+ * link being buried, which is the exact failure the link was moved above the
+ * table to avoid.
+ *
+ * Anything NOT on this list still shows. A stage that produces something a
+ * human should read - a predicted count, an identity gap, a status message -
+ * is unaffected.
+ */
+const RAW_PAYLOAD_KEYS = new Set([
+    // The input. The reviewer just read it, or can open the request and see it.
+    'brief', 'input',
+    // The parse, in machine form. `captured` in the preview is the readable one.
+    'fields', 'stated', 'inferred', 'missing', 'grounding',
+    // Rendered above as a clickable link, which is the whole point.
+    'workfront',
+])
+
 function rows (output) {
     if (!output || typeof output !== 'object' || Array.isArray(output)) return []
-    return Object.entries(output).map(([key, value]) => {
+    return Object.entries(output)
+        .filter(([key]) => !RAW_PAYLOAD_KEYS.has(key))
+        .map(([key, value]) => {
         let note = 'stated by the agent'
 
         /*
