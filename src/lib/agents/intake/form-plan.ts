@@ -56,7 +56,17 @@ export type FieldPlan = {
 /** Which brief keys could answer which form field, by the field's own label. */
 const CONCEPTS: { labels: string[]; from: string[]; ask: boolean }[] = [
   { labels: ["Name of the Campaign", "Campaign Name"], from: ["campaign_name"], ask: true },
-  { labels: ["Objective of the campaign", "Objective"], from: ["business_objective"], ask: true },
+  /*
+   * The tenant calls this field "Key Objectives & Success Metrics" - both
+   * halves. We were filling it with the business objective alone and dropping
+   * the metrics the marketer actually took the trouble to write, so the
+   * metrics are offered when the objective is silent.
+   */
+  {
+    labels: ["Objective of the campaign", "Objective", "Key Objectives & Success Metrics"],
+    from: ["business_objective", "success_metrics"],
+    ask: true,
+  },
   { labels: ["Audience to be Targeted"], from: ["customer_type", "audience_description"], ask: true },
   { labels: ["Audience"], from: ["customer_type"], ask: true },
   { labels: ["Primary Channel", "Channel"], from: ["channels"], ask: true },

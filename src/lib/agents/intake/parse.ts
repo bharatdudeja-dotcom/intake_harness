@@ -116,7 +116,12 @@ function matchOption(text: string, options: readonly string[]): string | null {
 const CUES: Array<{ key: string; value: string; from: Provenance; cues: RegExp }> = [
   // "who do not have a mobile line with us yet" is an upsell, written the way a
   // marketer writes it - by describing the gap rather than naming the motion.
-  { key: "business_objective", value: "Growth/Upsell", from: "inferred", cues: /\bupsell\b|\bup-sell\b|\bupgrade path\b|\bgrow(th)? revenue\b|\bcross-?sell\b|\b(do not|don't|dont) (yet )?have\b[^.]{0,30}\b(line|service|product)\b|\badd (a )?(mobile|line)\b/i },
+  /*
+   * "Attach rate" is how Comcast writes upsell, and the first demo brief -
+   * "grow video attach rate among single-product internet subscribers" - had
+   * to be asked what its objective was. It says so in its opening line.
+   */
+  { key: "business_objective", value: "Growth/Upsell", from: "inferred", cues: /\bupsell\b|\bup-sell\b|\battach rate\b|\bvideo attach\b|\bsingle[- ]product\b|\bupgrade path\b|\bgrow(th)? revenue\b|\bcross-?sell\b|\b(do not|don't|dont) (yet )?have\b[^.]{0,30}\b(line|service|product)\b|\badd (a )?(mobile|line)\b/i },
   { key: "business_objective", value: "Retention", from: "inferred", cues: /\bretention|retain|churn|renewal\b/i },
   { key: "business_objective", value: "Acquisition", from: "inferred", cues: /\bacquisition|acquire|prospect|new customer\b/i },
   // "our existing Xfinity internet customers" - the words between "existing"
@@ -750,34 +755,74 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     }
   }
 
+  /*
+   * 6b. THE SUCCESS METRICS.
+   *
+   * All three demo briefs state them - "video add-on conversion rate and
+   * incremental ARPU", "referral submissions per thousand sent", "churn rate
+   * delta versus a matched control" - and none were captured. The tenant's
+   * form has a field called "Key Objectives & Success Metrics", and we were
+   * filling it with the business objective alone, dropping the half the
+   * marketer actually took the trouble to write.
+   *
+   * How a campaign will be judged is not decoration. It decides what the
+   * creative has to achieve and what gets reported afterwards.
+   */
+  if (!seen.has("success_metrics")) {
+    const sm = brief.match(
+      /\b(?:success (?:is )?measured on|success metrics?|measured on|kpis?|measured by)\b\s*[:-]?\s*([^.;\n]{5,120})/i,
+    );
+    if (sm && sm[1]) {
+      push({
+        key: "success_metrics",
+        label: "Success metrics",
+        value: sm[1].trim().replace(/\s+/g, " "),
+        from: "stated",
+        evidence: sm[0].trim(),
+      });
+    }
+  }
+
   // 7. The exclusion - usually the single most important clause in the brief,
   //    and previously left in free text only.
   if (!seen.has("exclusion")) {
     const x = brief.match(
-      /\b(?:who|that)\s+(?:do not|don't|dont|does not|doesn't)\s+(?:yet\s+)?have\s+([^.,]{3,60})|\bwithout\s+(?:a\s+)?([^.,]{3,60})|\bexclud(?:e|ing)\s+([^.,]{3,60})/i,
+      /\b(?:suppress|suppression(?:s)?(?:\s*[:\-])?|exclud(?:e|ing)|omit|leave out|remove)\s+([^.,;]{3,70})/i,
     );
+
+    /*
+     * A SUPPRESSION AND AN AUDIENCE DEFINITION ARE OPPOSITES, AND THIS READ
+     * ONE AS THE OTHER.
+     *
+     * The pattern used to accept "who do not have X" and "without X" as
+     * exclusions. On the first of the three demo briefs:
+     *
+     *   "Audience is existing Xfinity Internet customers who do not have
+     *    Xfinity TV ... Suppress existing TV subscribers."
+     *
+     * it produced Exclusion = "Customers without Xfinity TV" - the audience's
+     * own defining clause, filed as the thing to leave out. Acted on, that
+     * excludes precisely the people being targeted. And the real suppression,
+     * stated plainly one sentence later, was never captured at all.
+     *
+     * "Who do not have X" says who the audience IS. It belongs to the audience
+     * definition, where the segmentation agent already uses it to build
+     * xfinityTV = false. Only language that explicitly removes people -
+     * suppress, exclude, omit, leave out - is a suppression.
+     *
+     * Getting this backwards is not a near-miss. It builds a campaign for the
+     * complement of the requested audience, with a plausible count attached.
+     */
     if (x) {
-      const what = (x[1] || x[2] || x[3] || "").trim().replace(/\s+with us\s*(yet)?$/i, "");
-      /*
-       * "exclude anyone who already has X" is ALREADY an exclusion.
-       *
-       * Every branch was prefixed with "Customers without", so
-       * "exclude anyone who already has Xfinity Internet" came out as
-       * "Customers without anyone who already has Xfinity Internet". Only the
-       * "without X" and "do not have X" branches describe what the customer
-       * lacks; the explicit exclude branch describes who to leave out, in the
-       * marketer's own words, and needs no prefix.
-       */
-      const explicit = Boolean(x[3]);
-      const value = explicit
-        ? what.charAt(0).toUpperCase() + what.slice(1)
-        : `Customers without ${what}`;
+      const what = (x[1] || "").trim()
+        .replace(/\s+with us\s*(yet)?$/i, "")
+        .replace(/^(?:anyone|anybody|any|all|those|people|customers)\s+(?:who\s+)?/i, "");
       if (what) {
         push({
           key: "exclusion",
           label: "Exclusion",
-          value,
-          from: "derived",
+          value: what.charAt(0).toUpperCase() + what.slice(1),
+          from: "stated",
           evidence: x[0].trim(),
         });
       }
