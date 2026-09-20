@@ -106,7 +106,11 @@ describe('viewer is read-only at a single choke point (D79)', () => {
     ])('viewer is REFUSED the write tool %s', async (tool, args) => {
         const res = await asKey(K.viewer, tool, args)
         expect(res.isError).toBe(true)
-        expect(res.content[0].text).toMatch(/read-only \(viewer\)/i)
+        // Assert the GATE fired, not the exact sentence. Pinning marketing copy
+        // in a test makes the copy unchangeable - this one blocked a rewording
+        // that removed "chef", a word no Comcast marketer should ever see.
+        expect(res.content[0].text).toMatch(/refused/i)
+        expect(res.content[0].text).toMatch(/read-only/i)
     })
 
     test('a chef is NOT blocked by the read-only gate', async () => {

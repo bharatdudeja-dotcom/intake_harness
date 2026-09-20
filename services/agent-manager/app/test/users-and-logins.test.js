@@ -356,7 +356,11 @@ describe('delete_job (D84)', () => {
     test('a viewer is refused by the read-only gate before the admin check', async () => {
         const res = await asKey(K_VIEWER, 'delete_job', { id: jobId })
         expect(res.isError).toBe(true)
-        expect(res.content[0].text).toMatch(/read-only \(viewer\)/i)
+        // Assert the GATE fired, not the exact sentence. Pinning marketing copy
+        // in a test makes the copy unchangeable - this one blocked a rewording
+        // that removed "chef", a word no Comcast marketer should ever see.
+        expect(res.content[0].text).toMatch(/refused/i)
+        expect(res.content[0].text).toMatch(/read-only/i)
     })
 })
 
