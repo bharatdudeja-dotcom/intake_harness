@@ -110,6 +110,14 @@ export async function POST(req: NextRequest) {
     /** The form asks; the brief has not said. */
     unanswered: "unanswered" in plan ? plan.unanswered : [],
     /**
+     * Where the brief disagrees with itself - an amendment that changed a
+     * value, or two statements that cannot both be true. Shown separately from
+     * the questions because it is the one thing here the marketer will want to
+     * see even when they do not intend to answer anything: it proves the brief
+     * was read, not pattern-matched.
+     */
+    conflicts: parsed.conflicts,
+    /**
      * The questions a person actually has to answer - at most two, and the
      * same two in both fields. `questions` used to be a separate, uncapped
      * list, which is how a marketer ended up facing five. It is kept as an

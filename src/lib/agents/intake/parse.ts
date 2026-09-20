@@ -35,6 +35,23 @@ export type ExtractedField = {
   evidence?: string;
 };
 
+/**
+ * The brief said one thing, and then said a different thing.
+ *
+ * Either because the marketer amended it mid-sentence - "scrap that, pull the
+ * date forward to the 6th" - or because two statements genuinely disagree, like
+ * an acquisition campaign aimed at existing subscribers.
+ */
+export type Conflict = {
+  /** The brief field in dispute, or a pair of fields for a contradiction. */
+  key: string;
+  label: string;
+  /** Every distinct value the brief offered, in the order it offered them. */
+  values: string[];
+  /** Put to the marketer verbatim. */
+  ask: string;
+};
+
 export type ParsedIntake = {
   fields: Record<string, string>;
   extracted: ExtractedField[];
@@ -42,6 +59,12 @@ export type ParsedIntake = {
   missing: FieldSpec[];
   /** Fields the agent guessed. Correct in most cases; must still be confirmed. */
   inferred: ExtractedField[];
+  /**
+   * Where the brief disagrees with itself. Never resolved by guessing: a
+   * disagreement is the marketer's to settle, and it outranks every other
+   * question because the alternative is filing a plan they cancelled.
+   */
+  conflicts: Conflict[];
 };
 
 const lower = (s: string) => String(s || "").toLowerCase();
@@ -330,7 +353,36 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   const extracted: ExtractedField[] = [];
   const seen = new Set<string>();
 
+  /*
+   * A SECOND, DIFFERENT ANSWER IS NOT NOISE - IT IS THE MARKETER CHANGING
+   * THEIR MIND, AND IT WAS BEING THROWN AWAY.
+   *
+   * push kept the FIRST value for a key and discarded everything after it. In
+   * an amendment the original always appears first, so the correction lost.
+   * Observed live, on "add direct mail, pull the in-market date forward to
+   * 6 October, and the offer moves to $20/mo":
+   *
+   *     Channels    = Email, Direct Mail   <- the amendment was applied
+   *     Launch date = 20 October           <- the amendment was ignored
+   *     Offer                              <- never captured at all
+   *
+   * That is worse than ignoring the correction outright: it produced a plan
+   * that was neither the original nor the correction, and previewed it back
+   * confidently. The marketer would have approved a date they had cancelled.
+   *
+   * The first value still wins the FIELD - reordering by recency guesses that
+   * later means truer, which is not reliably so in prose. What changes is that
+   * the disagreement is now recorded instead of dropped, and a disagreement
+   * becomes a question. Deciding between two things the marketer said is the
+   * marketer's job, and it is a cheap question to answer.
+   */
+  const candidates = new Map<string, ExtractedField[]>();
+
   const push = (f: ExtractedField) => {
+    const prior = candidates.get(f.key);
+    if (prior) prior.push(f);
+    else candidates.set(f.key, [f]);
+
     if (seen.has(f.key)) return;
     seen.add(f.key);
     extracted.push(f);
@@ -515,8 +567,88 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   const missing = requiredFields().filter((f: FieldSpec) => !fields[f.key]);
   const inferred = extracted.filter((f) => f.from !== "stated");
+  const conflicts = findConflicts(candidates, fields);
 
-  return { fields, extracted, missing, inferred };
+  return { fields, extracted, missing, inferred, conflicts };
+}
+
+/**
+ * Where the brief disagrees with itself.
+ *
+ * Two kinds, and both used to pass silently:
+ *
+ * THE SAME FIELD, TWICE. An amendment - "scrap that, pull the date forward to
+ * the 6th". The first value won the field and the correction was discarded, so
+ * a plan the marketer had cancelled was previewed back to them confidently.
+ *
+ * TWO FIELDS THAT CANNOT BOTH BE TRUE. An acquisition campaign aimed at
+ * existing subscribers. Observed live, unflagged:
+ *
+ *     Business objective = Acquisition                      [stated]
+ *     Customer type      = Subscriber - Existing Customers  [inferred]
+ *
+ * Prospects and existing customers come from different places - prospects are
+ * not in the profile store at all - so this is not a wording quibble. It
+ * decides which build path runs, and getting it wrong is discovered after the
+ * audience is built.
+ *
+ * Nothing here guesses a winner. A brief that contradicts itself is the one
+ * case where asking is unambiguously right: the marketer knows which they
+ * meant, it takes them a second, and no amount of cleverness here can recover
+ * the intent.
+ */
+function findConflicts(
+  candidates: Map<string, ExtractedField[]>,
+  fields: Record<string, string>,
+): Conflict[] {
+  const out: Conflict[] = [];
+  const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // 1. The same field, answered twice differently.
+  for (const [key, list] of candidates) {
+    const distinct: ExtractedField[] = [];
+    for (const f of list) {
+      if (!distinct.some((d) => norm(d.value) === norm(f.value))) distinct.push(f);
+    }
+    if (distinct.length < 2) continue;
+    const label = distinct[0].label || key;
+    const values = distinct.map((d) => d.value);
+    out.push({
+      key,
+      label,
+      values,
+      ask:
+        `The brief gives ${label.toLowerCase()} twice: "${values[0]}" and "${values[1]}". ` +
+        `Which one is right? I have used "${values[0]}" so far, and I would rather ask than file the wrong one.`,
+    });
+  }
+
+  /*
+   * 2. Prospects and existing customers at the same time.
+   *
+   * Checked on the resolved fields rather than the candidates, because either
+   * side can arrive stated or inferred and the contradiction is just as real
+   * when half of it was a guess - arguably more so.
+   */
+  const objective = norm(fields.business_objective);
+  const customer = norm(fields.customer_type);
+  const wantsProspects = /acquisition|prospect|net.new|new customer/.test(objective + " " + customer);
+  const wantsExisting = /existing|current (customer|subscriber)|winback|retention|upsell|upgrade/.test(
+    objective + " " + customer,
+  );
+  if (wantsProspects && wantsExisting) {
+    out.push({
+      key: "customer_type",
+      label: "Who this is for",
+      values: [fields.business_objective || "", fields.customer_type || ""].filter(Boolean),
+      ask:
+        "This brief reads as both acquisition and existing-customer work " +
+        `(objective "${fields.business_objective || "-"}", audience "${fields.customer_type || "-"}"). ` +
+        "Which is it? Prospects and existing customers are built from different places, so it changes the whole build.",
+    });
+  }
+
+  return out;
 }
 
 /**
@@ -527,5 +659,26 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
  * passes two, and past two the agent has failed, not the marketer.
  */
 export function nextQuestions(parsed: ParsedIntake, limit = 2): FieldSpec[] {
-  return parsed.missing.slice(0, limit);
+  /*
+   * A CONTRADICTION OUTRANKS A GAP.
+   *
+   * A missing field is a thing the marketer has not said yet. A contradiction
+   * is a thing they have said twice, differently - which means the brief as
+   * filed is wrong right now, and filing it emails a queue. Given only two
+   * questions, spend them on the disagreements first.
+   *
+   * It is also the better question to be asked. "What is the in-market date?"
+   * makes the marketer do the work; "you said the 20th and then the 6th, which
+   * is it?" shows we read the brief.
+   */
+  const fromConflicts: FieldSpec[] = (parsed.conflicts || []).map((c) => ({
+    key: c.key,
+    label: c.label,
+    ask: c.ask,
+  } as FieldSpec));
+
+  const seen = new Set(fromConflicts.map((f) => f.key));
+  const gaps = parsed.missing.filter((f) => !seen.has(f.key));
+
+  return [...fromConflicts, ...gaps].slice(0, limit);
 }
