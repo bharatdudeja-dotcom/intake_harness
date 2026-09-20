@@ -4,10 +4,9 @@ import { apiError } from "@/lib/api-error";
 
 /**
  * GET: the environment capability report - whether Workfront writes are
- * enabled and whether the segment-estimate tools are reachable. These are
- * the two out-of-this-app's-control facts that decide whether the pipeline
- * can actually finish (a real Workfront create) or only dry-run and skip
- * the count. First-class and queryable, so nobody has to infer them from a
+ * enabled. This is the out-of-this-app's-control fact that decides whether
+ * the pipeline can actually finish (a real Workfront create) or only
+ * dry-run. First-class and queryable, so nobody has to infer it from a
  * single run's `created: false`.
  */
 export async function GET() {

@@ -8,8 +8,6 @@ export function StatusBadge({ status }: { status: string }) {
           ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-400"
           : status === "awaiting_approval"
             ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-400"
-            : status === "in_progress"
-              ? "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-400"
-              : "bg-zinc-100 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
+            : "bg-zinc-100 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-400";
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{status}</span>;
 }

@@ -91,24 +91,17 @@ CREATE INDEX IF NOT EXISTS idx_runs_promoted ON runs(promoted) WHERE promoted;
 -- the next agent. Widens the CHECK constraint the original CREATE TABLE
 -- shipped with — DROP + re-ADD is the only idempotent way to change a CHECK
 -- in place, so this stays safe to re-run.
--- 'in_progress' (added alongside 'awaiting_approval') is the durable,
--- pollable state a run sits in when an agent accepted long-running work and
--- will finish it out-of-band via a PATCH to its task_run (fire-and-poll for
--- the B4/B5 GTO/FAC sub-workflow that can run for a quarter). Distinct from
--- the transient 'running' status, which only ever lives for one
--- orchestrator request. See src/lib/pipeline/types.ts.
 ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
 ALTER TABLE runs ADD CONSTRAINT runs_status_check
-    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval', 'in_progress'));
+    CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
 
 -- task_runs shipped with an inline CHECK allowing only completed/needs_input/
--- failed. Widen it to include 'in_progress' the same idempotent DROP+ADD way,
--- so an accepted-but-not-finished step can be recorded and later PATCHed to a
--- terminal status. The constraint name is Postgres's auto-generated default
--- for the inline CHECK on the original CREATE TABLE.
+-- failed. Re-assert it the same idempotent DROP+ADD way. The constraint name
+-- is Postgres's auto-generated default for the inline CHECK on the original
+-- CREATE TABLE.
 ALTER TABLE task_runs DROP CONSTRAINT IF EXISTS task_runs_status_check;
 ALTER TABLE task_runs ADD CONSTRAINT task_runs_status_check
-    CHECK (status IN ('completed', 'needs_input', 'failed', 'in_progress'));
+    CHECK (status IN ('completed', 'needs_input', 'failed'));
 
 -- Model usage, when an agent genuinely reports it. NULL on every agent
 -- today — none of the four call a model, they're deterministic parsers and
