@@ -84,6 +84,18 @@ const CONCEPTS: { labels: string[]; from: string[]; ask: boolean }[] = [
    * one field along.
    */
   { labels: ["Budget"], from: ["budget"], ask: false },
+  /*
+   * Named so they are DISCLOSED rather than dropped. If this tenant's form has
+   * no Agency or Exclusion field, that is now said out loud instead of the
+   * value vanishing - and it is said without asking the marketer a question
+   * they cannot answer.
+   *
+   * The exclusion is usually the most important clause in a brief: "everyone
+   * in the Northeast except customers already on a promo rate" is two facts,
+   * and losing the second one builds the wrong audience.
+   */
+  { labels: ["Agency", "Agency Partner", "Creative Agency"], from: ["agency"], ask: false },
+  { labels: ["Exclusion", "Exclusions", "Suppression"], from: ["exclusion"], ask: false },
   { labels: ["Product Name"], from: ["product", "line_of_business"], ask: false },
   /*
    * Type is New | Revision / Edit to existing - whether this request is new
