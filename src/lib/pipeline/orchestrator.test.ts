@@ -12,7 +12,9 @@ import type { RunRow } from "./types";
  */
 
 const queryMock = vi.fn();
+const callMcpToolMock = vi.fn();
 vi.mock("@/lib/db", () => ({ query: (...args: unknown[]) => queryMock(...args) }));
+vi.mock("@/lib/mcp-client", () => ({ callMcpTool: (...args: unknown[]) => callMcpToolMock(...args) }));
 
 const { runPipeline, continueRun } = await import("./orchestrator");
 
@@ -49,6 +51,9 @@ function installDbMock(run: RunRow) {
     if (sql.includes("SELECT * FROM task_runs WHERE run_id")) {
       return []; // no prior completed task_runs needed for these tests
     }
+    if (sql.includes("SELECT status, output, metadata FROM task_runs")) {
+      return []; // advanceOneStep's own-step idempotency check (idempotent-write.ts) - no prior attempt
+    }
     if (sql.includes("INSERT INTO task_runs")) {
       return [];
     }
@@ -78,7 +83,56 @@ function installFetchMock(responses: Record<string, unknown>) {
 
 beforeEach(() => {
   queryMock.mockReset();
+  callMcpToolMock.mockReset();
   vi.unstubAllGlobals();
+});
+
+describe("the per-step Workfront-comment idempotency guard (idempotent-write.ts)", () => {
+  it("does not post a second comment when a prior attempt at this exact step already posted one", async () => {
+    const run = baseRun({ status: "running", current_step: 0 });
+    installDbMock(run);
+    // Override the guard's own query: a prior task_run at this (run_id,
+    // task_id, step_index) already exists with the SAME status and a
+    // recorded, successfully-posted comment.
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes("SELECT status, output, metadata FROM task_runs")) {
+        return [
+          {
+            status: "completed",
+            output: null,
+            metadata: {
+              workfrontUpdate: {
+                attempted: true,
+                posted: true,
+                objId: "obj-1",
+                objCode: "OPTASK",
+                text: "Intake — completed\n\nDone.",
+              },
+            },
+          },
+        ];
+      }
+      if (sql.includes("INSERT INTO runs")) return [{ ...run, status: "running", current_step: 0 }];
+      if (sql.includes("SELECT * FROM runs WHERE run_id")) return [run];
+      if (sql.includes("SELECT * FROM task_runs WHERE run_id")) return [];
+      if (sql.includes("INSERT INTO task_runs")) return [];
+      if (sql.includes("UPDATE runs SET status = 'running'")) return [{ ...run, status: "running" }];
+      if (sql.includes("UPDATE runs SET status = $2")) return [{ ...run, status: params[1], current_step: params[2] }];
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+    installFetchMock({
+      // A real workfront target on the output, so postAgentUpdate would
+      // otherwise have something to post to - this is what makes the guard's
+      // skip observable rather than vacuous (no target -> never posts either way).
+      "/api/agents/intake": { status: "completed", output: { workfront: { objId: "obj-1", objCode: "OPTASK" } } },
+    });
+
+    await runPipeline({ brief: "test" }, "http://localhost:3100");
+
+    // The whole point: no MCP call was made - not even a read - because the
+    // prior row's already-posted comment short-circuits before any of that runs.
+    expect(callMcpToolMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("the approval gate - Review to Audience Creation", () => {

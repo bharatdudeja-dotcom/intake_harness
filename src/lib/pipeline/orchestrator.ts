@@ -2,7 +2,8 @@ import { query } from "@/lib/db";
 import { PIPELINE } from "./registry";
 import type { AgentName, AgentRequest, AgentResponse, AgentStatus, RunRow, TaskRow, TaskRunRow } from "./types";
 import * as liveProgress from "@/lib/live-progress";
-import { postAgentUpdate } from "./workfront-updates";
+import { postAgentUpdate, type AgentUpdateResult } from "./workfront-updates";
+import { findPriorTaskRun } from "./idempotent-write";
 
 /**
  * Runs exactly the NEXT agent for a run over real HTTP to that agent's own
@@ -81,13 +82,28 @@ async function advanceOneStep(
   // never throws: the outcome is folded into the step's metadata so it is
   // visible in observability, and a disabled write tool / missing issue can
   // never fail the run being recorded here.
-  const workfrontUpdate = await postAgentUpdate(
+  //
+  // GUARDED THE SAME WAY workfront.ts's createIntakeRequest guards its own
+  // write: if the INSERT below already succeeded once for this exact
+  // (run_id, task_id, step_index) - recording a posted comment in its own
+  // metadata - but the run never left "running" (the runs-table UPDATE a few
+  // lines down crashed before committing), retryRun re-enters this exact
+  // step and would otherwise post a second copy of the same comment. This
+  // does NOT close the other half of that race - a crash before THIS row's
+  // own INSERT ever committed leaves nothing here to find, and only a live
+  // check against Workfront's own comment stream could close that half; see
+  // idempotent-write.ts's docstring for why that is not what this is.
+  const priorStep = await findPriorTaskRun<unknown>(
+    run.run_id,
     agent.name,
-    response.status,
-    response.message,
-    response.output,
-    priorOutputs,
+    [response.status],
+    stepIndex,
   );
+  const priorUpdate = (priorStep?.metadata as { workfrontUpdate?: AgentUpdateResult } | null)?.workfrontUpdate;
+  const workfrontUpdate: AgentUpdateResult =
+    priorUpdate?.attempted && priorUpdate.posted
+      ? { ...priorUpdate, reused: true }
+      : await postAgentUpdate(agent.name, response.status, response.message, response.output, priorOutputs);
 
   try {
     await query<TaskRunRow>(
@@ -295,6 +311,16 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
  * Idempotency/guarding: only a task_run currently in 'in_progress' for a run
  * currently at 'in_progress' can be finalized, so a duplicate/late PATCH
  * (e.g. a retried webhook) is rejected rather than double-advancing.
+ *
+ * ITS OWN postAgentUpdate call below is NOT guarded the way advanceOneStep's
+ * is (see that function's comment and idempotent-write.ts): the status flip
+ * away from 'in_progress' and the recorded workfrontUpdate both land in the
+ * SAME UPDATE statement here, so a crash between posting the comment and
+ * that UPDATE committing leaves no row anywhere showing the post happened -
+ * there is nothing a task_runs check could find. Closing that would need a
+ * live check against Workfront's own comment stream, which this repo cannot
+ * verify right now (the tenant's OAuth session is expired) - left as a known
+ * gap rather than a guess at an unverified tool schema.
  */
 export async function completeInProgressStep(
   runId: string,

@@ -22,7 +22,7 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
-import { query } from "@/lib/db";
+import { findPriorTaskRun } from "@/lib/pipeline/idempotent-write";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
 
@@ -148,21 +148,18 @@ export type CreateOutcome =
  * create - it can only skip a redundant one. If the query itself fails,
  * this returns null and createIntakeRequest proceeds exactly as if no
  * prior attempt existed, same as today.
+ *
+ * Built on findPriorTaskRun (idempotent-write.ts) - the same "prior
+ * task_runs row for this run_id/task_id" check orchestrator.ts's
+ * advanceOneStep uses to guard against re-posting a Workfront comment on
+ * retry, generalized so both write paths share one query instead of two
+ * copies of it.
  */
 async function findPriorSuccess(runId: string): Promise<Extract<CreateOutcome, { created: true }> | null> {
-  try {
-    const rows = await query<{ output: unknown }>(
-      `SELECT output FROM task_runs WHERE run_id = $1 AND task_id = 'intake' AND status = 'completed'
-       ORDER BY task_run_id DESC LIMIT 1`,
-      [runId],
-    );
-    const output = rows[0]?.output as { workfront?: CreateOutcome } | undefined;
-    const wf = output?.workfront;
-    if (wf && wf.created === true && wf.objId) return wf;
-    return null;
-  } catch {
-    return null;
-  }
+  const prior = await findPriorTaskRun<{ workfront?: CreateOutcome }>(runId, "intake", ["completed"]);
+  const wf = prior?.output?.workfront;
+  if (wf && wf.created === true && wf.objId) return wf;
+  return null;
 }
 
 /**

@@ -45,7 +45,9 @@ describe("createIntakeRequest's idempotency check", () => {
   it("queries for exactly this run's own prior completed intake task_run, not any other run's", async () => {
     queryMock.mockResolvedValue([]);
     await createIntakeRequest({ runId: "run-specific-id", intake: {}, brief: "x" }).catch(() => {});
-    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining("task_id = 'intake'"), ["run-specific-id"]);
+    // Now routed through idempotent-write.ts's shared findPriorTaskRun -
+    // parameterized rather than the run_id being inlined into the SQL text.
+    expect(queryMock).toHaveBeenCalledWith(expect.stringContaining("task_runs"), ["run-specific-id", "intake", ["completed"]]);
   });
 
   it("proceeds to a real create attempt when no prior success is found", async () => {

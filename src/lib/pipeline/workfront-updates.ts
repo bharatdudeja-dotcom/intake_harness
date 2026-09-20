@@ -85,7 +85,21 @@ export function resolveWorkfrontTarget(
 
 export type AgentUpdateResult =
   | { attempted: false; reason: string }
-  | { attempted: true; posted: boolean; objId: string; objCode: string; text: string; reason?: string };
+  | {
+      attempted: true;
+      posted: boolean;
+      /**
+       * True when this is a PRIOR posted comment for this exact run/step,
+       * found and reused rather than posted again - see orchestrator.ts's
+       * advanceOneStep, which checks findPriorTaskRun (idempotent-write.ts)
+       * before calling postAgentUpdate at all.
+       */
+      reused?: boolean;
+      objId: string;
+      objCode: string;
+      text: string;
+      reason?: string;
+    };
 
 /** The comment body: an activity-log line for a human reading the issue. */
 function formatUpdate(agent: AgentName, status: AgentStatus, message: string): string {
