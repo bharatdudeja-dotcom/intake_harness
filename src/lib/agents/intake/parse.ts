@@ -227,7 +227,32 @@ function findLaunchDates(brief: string): ExtractedField[] {
     hits.push({ at: m.index ?? 0, day: m[2], month: m[1], evidence: m[0] });
   }
   hits.sort((a, b) => a.at - b.at);
-  for (const h of hits) add(h.day, h.month, h.evidence);
+
+  /*
+   * NOT EVERY DATE IS A LAUNCH DATE, AND COLLECTING THEM ALL MADE THAT WORSE.
+   *
+   * Finding every date fixed the amendment case and immediately broke a real
+   * brief: "legal sign-off by 1 October ... in market 20 November" came back
+   * as a launch-date DISAGREEMENT between the two, the wrong one was used,
+   * and the legal deadline - the hardest constraint in that brief - appeared
+   * nowhere at all.
+   *
+   * A date introduced as a sign-off, a due date or a deadline is a different
+   * fact about the campaign. Treating it as a rival launch date invents a
+   * contradiction where the marketer was being precise, and an invented
+   * question is worse than no question: it teaches them the flags are noise.
+   *
+   * Only the words immediately before the date are considered. A mention
+   * further away is usually about something else.
+   */
+  const OTHER_KIND_OF_DATE =
+    /\b(?:legal|compliance|sign[- ]?off|approval|due|deadline|cut[- ]?off|copy|creative|asset|artwork|brief(?:ing)?|kick[- ]?off|review|qa|proof|deliver(?:y|ed|able)?|submit(?:ted|ssion)?|by)\b[^.]{0,24}$/i;
+
+  for (const h of hits) {
+    const before = text.slice(Math.max(0, h.at - 40), h.at);
+    if (OTHER_KIND_OF_DATE.test(before)) continue;
+    add(h.day, h.month, h.evidence);
+  }
 
   if (out.length) return out;
 
@@ -374,14 +399,49 @@ function findCampaignName(brief: string): ExtractedField | null {
  * listed alongside other channels. An unambiguous one ("SMS", "Direct Mail")
  * needs no such test - nobody writes those by accident.
  */
-const AMBIGUOUS_CHANNELS: Record<string, RegExp> = {
-  Push: /\bpush\s+(notification|message|alert|channel)s?\b|\b(via|through|on|by)\s+push\b|\bpush\s*[,/&]|[,/&]\s*push\b|\band\s+push\b|\bpush\s+and\b/i,
+/*
+ * "PUSH" IS A VERB FAR MORE OFTEN THAN IT IS A CHANNEL.
+ *
+ * This guard already existed and was still too generous: it accepted
+ * "and push" / "push and", which match the ordinary verb. A marketer writing
+ * "scrap that - and push it to paid social" got Push added as a channel she
+ * had never asked for, in the same breath as changing her mind about the
+ * channel she HAD asked for.
+ *
+ * An invented channel is the worst class of error here. A missing one gets
+ * noticed and added; a fabricated one is approved, briefed and built, because
+ * everything downstream treats it as something the marketer said.
+ *
+ * So Push must look like a medium: named as a notification, reached "via"
+ * or "on", or sitting in a list beside another channel. The verb no longer
+ * qualifies.
+ */
+const CHANNEL_WORDS = /(email|sms|text|direct mail|dm|paid media|paid social|display|in-?app|outbound call|call)/i;
+
+const AMBIGUOUS_CHANNELS: Record<string, (brief: string) => boolean> = {
+  Push: (brief) => {
+    // Named as the medium - "push notification", "via push".
+    if (/\bpush\s+(notification|message|alert|channel)s?\b|\b(via|through|on|by)\s+push\b/i.test(brief)) return true;
+
+    /*
+     * Or listed as one of several channels. Requires a real channel name
+     * beside it, because "we push, then follow up" is a sentence and not a
+     * channel list.
+     */
+    const listed = /(?:^|[,/&]|\band\b)\s*push\s*(?=[,/&]|\band\b|$)/gi;
+    for (const m of brief.matchAll(listed)) {
+      const at = m.index ?? 0;
+      const around = brief.slice(Math.max(0, at - 60), at + m[0].length + 60);
+      if (CHANNEL_WORDS.test(around)) return true;
+    }
+    return false;
+  },
 };
 
 /** Does this channel word actually refer to the channel here? */
 function channelSense(brief: string, option: string): boolean {
   const test = AMBIGUOUS_CHANNELS[option];
-  return test ? test.test(brief) : true;
+  return test ? test(brief) : true;
 }
 
 export function parseBrief(brief: string, known: Record<string, unknown> = {}): ParsedIntake {
