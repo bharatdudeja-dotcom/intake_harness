@@ -54,6 +54,18 @@ CASES = [
    "10G upgrade push for existing Xfinity Internet customers across the US who have "
    "not upgraded in a while. Channel: email. Launch 14 February. Campaign name: "
    "10G Upgrade Q1. Growth/Upsell, residential. Audience and campaign execution."),
+
+  ("6. LEGAL DEADLINE a sign-off date is not a rival launch date",
+   "Expect: launch 20 November, NO conflict. A deadline read as a launch date hid the deadline.",
+   "Holiday promo for Xfinity Internet in the Northeast. Channel: email. Legal sign-off "
+   "by 1 October, in market 20 November. Campaign name: Holiday Promo NE."),
+
+  ("7. PUSH AS A VERB   'push it to paid social' is not the Push channel",
+   "Expect: no Push. A fabricated channel gets approved, briefed and built.",
+   "Winback for lapsed Xfinity Internet customers in Ohio. Channel: email. Launch 14 March. "
+   "Campaign name: OH Winback.
+
+Actually scrap the email idea - and push it to paid social instead."),
 ]
 
 PASS = FAIL = 0
@@ -98,6 +110,11 @@ for title, expect, brief in CASES:
         ok = ok and "Budget" in cap and "Offer" not in cap
     if title.startswith("4."):
         ok = ok and "Offer" in cap
+    if title.startswith("6."):
+        ok = ok and not any(c.get("key") == "launch_date" for c in (d.get("conflicts") or []))
+        ok = ok and cap.get("Launch date", ("", ""))[0] == "20 November"
+    if title.startswith("7."):
+        ok = ok and "Push" not in str(cap.get("Channels", ("", ""))[0])
     if title.startswith("5."):
         ok = ok and cap.get("Region / market", ("", ""))[0] == "United States" and n == 0
         if form_readable:
