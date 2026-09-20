@@ -27,6 +27,7 @@ import { LlmConfigError, type LlmClient, type LlmProvider } from "./types";
 import { createBedrockClient } from "./providers/bedrock";
 import { createAnthropicClient } from "./providers/anthropic";
 import { createOllamaClient } from "./providers/ollama";
+import { traceExternalCall } from "@/lib/mcp-client";
 
 export type { LlmClient, LlmCompletionRequest, LlmCompletionResult } from "./types";
 export { LlmConfigError } from "./types";
@@ -58,26 +59,26 @@ export function getLlmClient(): LlmClient | null {
 
   switch (provider) {
     case "bedrock":
-      return createBedrockClient({
+      return traced(createBedrockClient({
         region: req("AWS_REGION"),
         accessKeyId: req("AWS_ACCESS_KEY_ID"),
         secretAccessKey: req("AWS_SECRET_ACCESS_KEY"),
         sessionToken: opt("AWS_SESSION_TOKEN"),
         modelId: opt("BEDROCK_MODEL_ID"),
-      });
+      }));
     case "anthropic":
-      return createAnthropicClient({
+      return traced(createAnthropicClient({
         apiKey: req("ANTHROPIC_API_KEY"),
         model: opt("ANTHROPIC_MODEL"),
         baseUrl: opt("ANTHROPIC_BASE_URL"),
-      });
+      }));
     case "ollama":
-      return createOllamaClient({
+      return traced(createOllamaClient({
         // Host is required and intentionally has no default - it changes often,
         // so the user supplies it every time (see ollama.ts).
         host: req("OLLAMA_HOST"),
         model: req("OLLAMA_MODEL"),
-      });
+      }));
     default:
       throw new LlmConfigError(
         `LLM_PROVIDER="${provider}" is not recognised. Use one of: bedrock, anthropic, ollama.`,
@@ -88,4 +89,28 @@ export function getLlmClient(): LlmClient | null {
 /** True when a provider is selected. Lets callers log/branch without building a client. */
 export function isLlmConfigured(): boolean {
   return !!opt("LLM_PROVIDER");
+}
+
+/**
+ * Wrap a client so every completion is TRACED into the same tool-call log/live
+ * view MCP calls use (see traceExternalCall) - duration, prompt size, model,
+ * token usage, and any error, all visible in the run trace with no per-call-site
+ * plumbing. Applied once in build() below, so all three providers and every
+ * caller get it for free. A no-op outside a traced context (e.g. the preview
+ * endpoint), where it just runs the call.
+ */
+function traced(client: LlmClient): LlmClient {
+  return {
+    id: client.id,
+    complete: (reqArg) =>
+      traceExternalCall(
+        `llm:${client.id}`,
+        {
+          promptChars: reqArg.prompt.length,
+          maxTokens: reqArg.maxTokens ?? null,
+          temperature: reqArg.temperature ?? 0,
+        },
+        async () => client.complete(reqArg),
+      ),
+  };
 }

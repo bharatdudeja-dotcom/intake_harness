@@ -149,6 +149,8 @@ export async function detectRejectionLlm(
 export type LlmTriageResult = {
   triage: TriageResult;
   source: Agent2Source;
+  /** The model id when source === "llm", for AgentResponse.usage / the DB model column. */
+  model: string | null;
   fallbackReason: string | null;
 };
 
@@ -279,7 +281,7 @@ export async function triageRejectionLlm(
 ): Promise<LlmTriageResult> {
   const text = String(reason || "").trim();
   if (!client || !text) {
-    return { triage: triageRejection(text, current), source: "deterministic", fallbackReason: null };
+    return { triage: triageRejection(text, current), source: "deterministic", model: null, fallbackReason: null };
   }
   try {
     const completion = await client.complete({
@@ -297,14 +299,16 @@ export async function triageRejectionLlm(
       return {
         triage: triageRejection(text, current),
         source: "deterministic",
+        model: null,
         fallbackReason: "LLM triage produced no valid findings; used the deterministic translator.",
       };
     }
-    return { triage: assemble(current, findings), source: "llm", fallbackReason: null };
+    return { triage: assemble(current, findings), source: "llm", model: completion.model, fallbackReason: null };
   } catch (err) {
     return {
       triage: triageRejection(text, current),
       source: "deterministic",
+      model: null,
       fallbackReason: `LLM triage failed (${(err as Error).message}); used the deterministic translator.`,
     };
   }

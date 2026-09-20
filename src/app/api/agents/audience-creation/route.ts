@@ -401,6 +401,10 @@ export async function POST(req: NextRequest) {
       status,
       output,
       message: status === "needs_input" ? attrState.note : statusMessage,
+      // AgentResponse.usage.model when the LLM synthesized a PQL expression, so
+      // Agent 3's LLM use shows in the run's model column / UI (token counts are
+      // in the tool-call trace via the traced wrapper).
+      ...(pqlSynthesis?.model ? { usage: { tokens: 0, model: pqlSynthesis.model } } : {}),
       metadata: {
         buildPathReason: path.reason,
         // What was reused from Review's earlier probe vs. re-read here - so
