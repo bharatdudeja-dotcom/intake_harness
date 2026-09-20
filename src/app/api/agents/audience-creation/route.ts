@@ -12,6 +12,12 @@ import {
 } from "@/lib/agents/audience/aep";
 import { resolveActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
 import { groundPqlGuidance, type PqlGuidance } from "@/lib/agents/review/pql-context";
+import {
+  synthesizePql,
+  createSegmentFromPql,
+  segmentCreationEnabled,
+  type SegmentCreation,
+} from "@/lib/agents/audience/pql-synth";
 import type { AepContext } from "@/lib/agents/review/aep-context";
 import type { SchemaProbe, SegmentMatch } from "@/lib/agents/audience/aep";
 import {
@@ -258,6 +264,36 @@ export async function POST(req: NextRequest) {
           : await groundPqlGuidance("audience_creation", criteria)
         : null;
 
+    // Synthesize a candidate PQL expression from the criteria, the CONCLUSIVELY
+    // present schema fields, and the PQL reference - but only on the rule-builder
+    // path, and only when a conclusive probe gives a real field set to verify
+    // against. Every field the model uses is checked present before the
+    // expression is trusted (see pql-synth.ts); an unverifiable reference gets
+    // the whole expression rejected. This is DRAFT-ONLY: the expression is
+    // attached for a human to build from, never auto-created (same read-only
+    // stance as the rest of this agent). No LLM / inconclusive probe / failure
+    // -> no expression, and Agent 3 behaves exactly as before.
+    const pqlSynthesis =
+      path.buildPath === "aep_rule_builder" && pqlGuidance
+        ? await synthesizePql(criteria, probe, pqlGuidance)
+        : null;
+
+    // Actually create the segment - ONLY when explicitly enabled
+    // (AUDIENCE_CREATE_SEGMENT=true, off by default like activation) AND the
+    // expression passed the verify gate. Otherwise the expression stays a
+    // draft. createSegmentFromPql follows the same honesty contract as Agent
+    // 1's Workfront create: it reports what it WOULD have created when the
+    // write tool is disabled, rather than a silent no-op. Never throws.
+    const segmentCreation: SegmentCreation | null =
+      pqlSynthesis?.synthesized && segmentCreationEnabled()
+        ? await createSegmentFromPql(
+            "audience_creation",
+            pqlSynthesis,
+            [fields.campaign_name, fields.audience_description].filter(Boolean).map(String).join(" — ") ||
+              "Audience (drafted by Agent 3)",
+          )
+        : null;
+
     // Cheapest good outcome first: an audience that already exists needs no build
     // and is the only way to get a real count without writing anything.
     //
@@ -321,6 +357,15 @@ export async function POST(req: NextRequest) {
         ? pqlGuidance.localReference.available
           ? `PQL reference: ${pqlGuidance.localReference.path} (${pqlGuidance.localReference.categoryCount} categories) - build the segment expression against this, not the knowledge base.`
           : `PQL reference unavailable: ${pqlGuidance.localReference.error}.`
+        : "",
+      pqlSynthesis
+        ? pqlSynthesis.synthesized
+          ? segmentCreation
+            ? segmentCreation.attempted && segmentCreation.created
+              ? `Created the audience segment "${segmentCreation.name}" (${segmentCreation.segmentId}) from a verified PQL expression (fields: ${pqlSynthesis.fieldsUsed.join(", ")}).`
+              : `Verified PQL expression drafted, but the segment was not created: ${segmentCreation.attempted ? segmentCreation.reason : "creation not attempted"}. See pqlSynthesis/segmentCreation in metadata.`
+            : `Drafted a candidate PQL expression (fields verified present: ${pqlSynthesis.fieldsUsed.join(", ")}) - see pqlSynthesis in metadata. Draft for a human to build from; segment creation is off (set AUDIENCE_CREATE_SEGMENT=true to enable).`
+          : `No PQL expression drafted: ${pqlSynthesis.reason}.`
         : "",
       activation ? formatActivationMessage(activation) : "",
       attrState.note,
@@ -386,6 +431,16 @@ export async function POST(req: NextRequest) {
         // file someone has to go find separately. Null when the FAC path
         // was taken - PQL doesn't apply there.
         pqlGuidance,
+        // The synthesized PQL expression and its verification outcome (null on
+        // the FAC path or when no LLM/conclusive probe was available). The
+        // draft, the fields it was verified against, and - on rejection - the
+        // fields that couldn't be verified, all travel with the run.
+        pqlSynthesis,
+        // Segment creation outcome: null when not attempted (FAC path, no
+        // verified expression, or AUDIENCE_CREATE_SEGMENT off), else the
+        // created id or an honest dry-run with the payload it would have sent.
+        segmentCreation,
+        segmentCreationEnabled: segmentCreationEnabled(),
         nightlyCutoff: cutoff,
         activationRequested: activationIntent.requested,
         activationDestination: activationIntent.destinationName,

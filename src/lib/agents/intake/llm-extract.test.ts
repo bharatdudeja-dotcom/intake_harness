@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractIntake,
+  extractFromAnswer,
   parseExtractionResponse,
   toKnownFields,
 } from "./llm-extract";
@@ -103,5 +104,39 @@ describe("extractIntake - LLM preferred, deterministic always the floor", () => 
     );
     const res = await extractIntake(brief, { campaign_name: "Human Confirmed" }, client);
     expect(res.parsed.fields.campaign_name).toBe("Human Confirmed");
+  });
+});
+
+describe("extractFromAnswer - one reply can fill several pending fields (B1 loop fix)", () => {
+  it("mines extra fields out of a free-text answer, dropping invented keys", async () => {
+    const client = stubClient(
+      JSON.stringify({
+        extractions: [
+          { key: "line_of_business", value: "Residential (RES)", provenance: "stated" },
+          { key: "region", value: "Northeast", provenance: "stated" },
+          { key: "totally_made_up", value: "x", provenance: "stated" },
+        ],
+      }),
+    );
+    const { known, source } = await extractFromAnswer(
+      "yeah, existing residential customers up in the Northeast",
+      [{ key: "line_of_business", label: "Line of business" }],
+      client,
+    );
+    expect(source).toBe("llm");
+    expect(known.line_of_business).toMatch(/Residential/);
+    expect(known.region).toBe("Northeast");
+    expect(known.totally_made_up).toBeUndefined();
+  });
+
+  it("returns empty (no enrichment) when no client is configured", async () => {
+    const { known, source } = await extractFromAnswer("residential, northeast", [], null);
+    expect(known).toEqual({});
+    expect(source).toBe("deterministic");
+  });
+
+  it("swallows an LLM error into empty enrichment so the literal merge stands", async () => {
+    const { known } = await extractFromAnswer("residential", [], stubClient(new Error("boom")));
+    expect(known).toEqual({});
   });
 });

@@ -147,6 +147,58 @@ export function toKnownFields(raw: RawExtraction[]): {
  *                as stated fact).
  * @param client  injectable for tests; defaults to the env-configured client.
  */
+/**
+ * Read a marketer's free-text ANSWER (on a rework loop) into as many fields as
+ * it supports at once, biased toward the questions that were actually pending.
+ *
+ * THE GAP THIS CLOSES: resume today does a literal key-merge - an answer only
+ * fills the exact field asked, so "yeah, existing Xfinity internet customers in
+ * the Northeast, no direct mail" - given only when customer_type was asked -
+ * throws away the region, product, and channel-exclusion signals in the same
+ * sentence, and re-asks them next round. That IS the B1 loop, just slower.
+ *
+ * Returns a `known`-style map (real keys only, trimmed, non-empty) to LAYER
+ * UNDER the marketer's explicitly typed answers - the model enriches, it never
+ * overrides what the human directly said. Empty on no-LLM/error/empty-result,
+ * so the caller simply proceeds with the literal merge exactly as today.
+ */
+export async function extractFromAnswer(
+  answerText: string,
+  pendingQuestions: Array<{ key: string; label: string }>,
+  client: LlmClient | null = getLlmClient(),
+): Promise<{ known: Record<string, string>; source: ExtractionSource; model: string | null }> {
+  const text = String(answerText || "").trim();
+  if (!client || !text) return { known: {}, source: "deterministic", model: null };
+  try {
+    const pending = pendingQuestions.length
+      ? `The marketer was asked about: ${pendingQuestions.map((q) => `${q.key} (${q.label})`).join(", ")}. ` +
+        "Map their reply to those first, but ALSO capture any other listed field the reply happens to state or imply."
+      : "Capture any listed field the reply states or implies.";
+    const completion = await client.complete({
+      system: SYSTEM,
+      prompt: [
+        "The marketer replied to a follow-up question. Extract every campaign-brief field their reply supports.",
+        pending,
+        "",
+        "Fields you may return (use these exact keys):",
+        fieldGuide(),
+        "",
+        'Respond with JSON: { "extractions": [ { "key": "...", "value": "...", "provenance": "stated|derived|inferred", "evidence": "..." } ] }',
+        "",
+        "REPLY:",
+        text,
+      ].join("\n"),
+      temperature: 0,
+      maxTokens: 1024,
+    });
+    const { known } = toKnownFields(parseExtractionResponse(completion.text));
+    return { known, source: "llm", model: completion.model };
+  } catch {
+    // Enrichment is best-effort - a failure just means the literal merge stands.
+    return { known: {}, source: "deterministic", model: null };
+  }
+}
+
 export async function extractIntake(
   brief: string,
   known: Record<string, unknown> = {},

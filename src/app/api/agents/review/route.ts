@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
+import { detectRejectionLlm, triageRejectionLlm, type Agent2Source } from "@/lib/agents/review/llm-triage";
 import {
   resolveDataSource,
   applyDataSourceResolution,
   type DataSourceResolution,
 } from "@/lib/agents/review/data-source";
 import { probeSchemas, neededAttributes } from "@/lib/agents/audience/aep";
-import { detectRejection, type CommentLike } from "@/lib/agents/review/rejection";
+import { type CommentLike } from "@/lib/agents/review/rejection";
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
 import { requiredFields } from "@/lib/agents/shared/campaign-brief";
 import {
@@ -123,16 +124,20 @@ async function fetchRejection(objId: string | null) {
     const rows = (result as { comments?: unknown[]; data?: unknown[] } | null);
     const list = (rows?.comments || rows?.data || (Array.isArray(result) ? result : [])) as CommentLike[];
 
-    // Structured detection replaces the old keyword-grep + .pop(): it reads
-    // status/decision fields when present, scores rejection prose far more
-    // broadly than five stems, and picks the most-recent authoritative
-    // record rather than the last one by array order. See
-    // lib/agents/review/rejection.ts for exactly why each of those mattered.
-    const signal = detectRejection(list);
+    // An LLM reads the stream when one is configured (a reviewer's freeform
+    // "let's hold this until the LOB is sorted" is a rejection no keyword stem
+    // catches), and ALWAYS falls back to the deterministic detectRejection -
+    // which itself reads structured status/decision fields, scores prose far
+    // more broadly than the old five stems, and picks the most-recent
+    // authoritative record. See lib/agents/review/{llm-triage,rejection}.ts.
+    const detected = await detectRejectionLlm(list);
+    const signal = detected.signal;
     return {
       reason: signal.reason,
       source: "workfront_comments",
       detectedVia: signal.source,
+      detectionEngine: detected.source as Agent2Source,
+      detectionFallbackReason: detected.fallbackReason,
       considered: signal.considered,
       // "Read the stream, found no rejection" and "the stream returned
       // nothing recognisable" are different facts - keep them distinct, same
@@ -273,12 +278,20 @@ export async function POST(req: NextRequest) {
     }
 
     // --- There is a rejection: translate it ---------------------------------
-    const rawTriage = triageRejection(reason, fields);
+    // An LLM does the translation when configured (freeform reviewer prose ->
+    // specific field + validated proposed value), always falling back to the
+    // deterministic triageRejection. Every proposed value is validated against
+    // real FieldSpec options inside triageRejectionLlm, so a hallucinated value
+    // can never reach the redraft - see lib/agents/review/llm-triage.ts.
+    const triaged = await triageRejectionLlm(reason, fields);
+    const rawTriage = triaged.triage;
+    const triageEngine = triaged.source;
+    const triageFallbackReason = triaged.fallbackReason;
 
     /*
      * Resolve the FAC-vs-profile-store question from AEP where the schema data
      * can answer it, instead of always handing it back as an open question
-     * (see agents/review/data-source.ts). triage.ts stays pure and still only
+     * (see agents/review/data-source.ts). The translation above only
      * CLASSIFIES; the read that could ANSWER it lives here, in the route. The
      * extra read-only probe runs ONLY when triage actually raised a
      * wrong_data_source finding — the common rejection paths pay nothing.
@@ -311,6 +324,9 @@ export async function POST(req: NextRequest) {
           loopCount: loopCount + 1,
           rejectionDetectedVia: "detectedVia" in fetched ? fetched.detectedVia : input.rejectionReason ? "passed_in" : "none",
           rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
+          triageEngine,
+          triageFallbackReason,
+          detectionEngine: "detectionEngine" in fetched ? fetched.detectionEngine : undefined,
         },
       };
     }
@@ -345,6 +361,9 @@ export async function POST(req: NextRequest) {
         loopCount: loopCount + 1,
         rejectionDetectedVia: "detectedVia" in fetched ? fetched.detectedVia : input.rejectionReason ? "passed_in" : "none",
         rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
+        triageEngine,
+        triageFallbackReason,
+        detectionEngine: "detectionEngine" in fetched ? fetched.detectionEngine : undefined,
         // The AEP-grounded data-source decision (null when the rejection
         // raised no wrong_data_source finding, so no probe was run).
         dataSourceResolved: dataSourceResolution ? dataSourceResolution.resolved : null,
