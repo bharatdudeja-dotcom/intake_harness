@@ -35,6 +35,23 @@ export type ExtractedField = {
   evidence?: string;
 };
 
+/**
+ * The brief said one thing, and then said a different thing.
+ *
+ * Either because the marketer amended it mid-sentence - "scrap that, pull the
+ * date forward to the 6th" - or because two statements genuinely disagree, like
+ * an acquisition campaign aimed at existing subscribers.
+ */
+export type Conflict = {
+  /** The brief field in dispute, or a pair of fields for a contradiction. */
+  key: string;
+  label: string;
+  /** Every distinct value the brief offered, in the order it offered them. */
+  values: string[];
+  /** Put to the marketer verbatim. */
+  ask: string;
+};
+
 export type ParsedIntake = {
   fields: Record<string, string>;
   extracted: ExtractedField[];
@@ -42,6 +59,12 @@ export type ParsedIntake = {
   missing: FieldSpec[];
   /** Fields the agent guessed. Correct in most cases; must still be confirmed. */
   inferred: ExtractedField[];
+  /**
+   * Where the brief disagrees with itself. Never resolved by guessing: a
+   * disagreement is the marketer's to settle, and it outranks every other
+   * question because the alternative is filing a plan they cancelled.
+   */
+  conflicts: Conflict[];
 };
 
 const lower = (s: string) => String(s || "").toLowerCase();
@@ -153,32 +176,105 @@ function titleCase(m: string): string {
  * month is "derived", because a month is not a date and the day still has to
  * be confirmed.
  */
-function findLaunchDate(brief: string): ExtractedField | null {
+/**
+ * EVERY date the brief names, in the order it names them.
+ *
+ * This used to return only the first. That was invisible until someone amended
+ * a brief - "launch 20 October ... actually, pull the in-market date forward to
+ * 6 October" - and the second date was never even looked at, so the correction
+ * could not be noticed, let alone honoured. The preview then showed 20 October
+ * back to the marketer with no sign that anything had been dropped.
+ *
+ * The first is still the one that fills the field; the rest exist so a
+ * disagreement can be SEEN. Picking the last would just be a different guess,
+ * and prose does not reliably put the truest date last.
+ */
+function findLaunchDates(brief: string): ExtractedField[] {
   const text = String(brief || "");
+  const out: ExtractedField[] = [];
+  const seenValue = new Set<string>();
 
-  // "1 November", "1st Nov", "November 1", "Nov 1st" - a real date.
-  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_PATTERN})\\b`, "i");
-  const monthFirst = new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "i");
-
-  const dm = text.match(dayFirst);
-  const md = text.match(monthFirst);
-  const exact = dm
-    ? { day: dm[1], month: dm[2], evidence: dm[0] }
-    : md
-      ? { day: md[2], month: md[1], evidence: md[0] }
-      : null;
-
-  if (exact) {
-    const full = MONTHS.find((m) => m.startsWith(exact.month.slice(0, 3).toLowerCase())) || exact.month;
-    return {
+  const add = (day: string, month: string, evidence: string) => {
+    const full = MONTHS.find((m) => m.startsWith(month.slice(0, 3).toLowerCase())) || month;
+    const value = `${day} ${titleCase(full)}`;
+    if (seenValue.has(value)) return;
+    seenValue.add(value);
+    out.push({
       key: "launch_date",
       label: "Launch date",
-      value: `${exact.day} ${titleCase(full)}`,
+      value,
       // A day and a month is a date. The marketer said it; we did not infer it.
       from: "stated",
-      evidence: exact.evidence,
-    };
+      evidence,
+    });
+  };
+
+  // "1 November", "1st Nov" - and "November 1", "Nov 1st".
+  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_PATTERN})\\b`, "gi");
+  const monthFirst = new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi");
+
+  /*
+   * Ordered by where each appears, not by which pattern matched, so "launch 20
+   * October ... forward to 6 October" reports 20 before 6 whichever shape each
+   * was written in. The order is what makes the question readable: "you said
+   * the 20th and then the 6th".
+   */
+  const hits: Array<{ at: number; day: string; month: string; evidence: string }> = [];
+  for (const m of text.matchAll(dayFirst)) {
+    hits.push({ at: m.index ?? 0, day: m[1], month: m[2], evidence: m[0] });
   }
+  for (const m of text.matchAll(monthFirst)) {
+    hits.push({ at: m.index ?? 0, day: m[2], month: m[1], evidence: m[0] });
+  }
+  hits.sort((a, b) => a.at - b.at);
+
+  /*
+   * NOT EVERY DATE IS A LAUNCH DATE, AND COLLECTING THEM ALL MADE THAT WORSE.
+   *
+   * Finding every date fixed the amendment case and immediately broke a real
+   * brief: "legal sign-off by 1 October ... in market 20 November" came back
+   * as a launch-date DISAGREEMENT between the two, the wrong one was used,
+   * and the legal deadline - the hardest constraint in that brief - appeared
+   * nowhere at all.
+   *
+   * A date introduced as a sign-off, a due date or a deadline is a different
+   * fact about the campaign. Treating it as a rival launch date invents a
+   * contradiction where the marketer was being precise, and an invented
+   * question is worse than no question: it teaches them the flags are noise.
+   *
+   * Only the words immediately before the date are considered. A mention
+   * further away is usually about something else.
+   */
+  const OTHER_KIND_OF_DATE =
+    /\b(?:legal|compliance|sign[- ]?off|approval|due|deadline|cut[- ]?off|copy|creative|asset|artwork|brief(?:ing)?|kick[- ]?off|review|qa|proof|deliver(?:y|ed|able)?|submit(?:ted|ssion)?)\b/i;
+
+  for (const h of hits) {
+    /*
+     * The qualifier has to belong to THIS date's clause.
+     *
+     * A fixed lookback window read across the comma: in "Legal sign-off by
+     * 1 October, in market 20 November" the window for 20 November reached
+     * back far enough to find "sign-off", so BOTH dates were discarded and a
+     * bare-month fallback produced "October" - the sign-off month, presented
+     * as the launch date. Worse than the bug it replaced.
+     *
+     * Clauses are what separate the two facts in that sentence, so the search
+     * stops at the punctuation that ends the previous one.
+     */
+    const before = text.slice(0, h.at);
+    const clause = before.slice(Math.max(0, before.lastIndexOf(",") + 1, before.lastIndexOf(";") + 1));
+    if (OTHER_KIND_OF_DATE.test(clause)) continue;
+    add(h.day, h.month, h.evidence);
+  }
+
+  if (out.length) return out;
+
+  const single = findBareMonth(text);
+  return single ? [single] : [];
+}
+
+function findBareMonth(brief: string): ExtractedField | null {
+  const text = String(brief || "");
 
   // A bare month, on a word boundary. "end of October" / "by November".
   const bare = text.match(new RegExp(`\\b(?:(end|late|early|mid)\\s+(?:of\\s+)?)?(${MONTH_PATTERN})\\b`, "i"));
@@ -316,21 +412,85 @@ function findCampaignName(brief: string): ExtractedField | null {
  * listed alongside other channels. An unambiguous one ("SMS", "Direct Mail")
  * needs no such test - nobody writes those by accident.
  */
-const AMBIGUOUS_CHANNELS: Record<string, RegExp> = {
-  Push: /\bpush\s+(notification|message|alert|channel)s?\b|\b(via|through|on|by)\s+push\b|\bpush\s*[,/&]|[,/&]\s*push\b|\band\s+push\b|\bpush\s+and\b/i,
+/*
+ * "PUSH" IS A VERB FAR MORE OFTEN THAN IT IS A CHANNEL.
+ *
+ * This guard already existed and was still too generous: it accepted
+ * "and push" / "push and", which match the ordinary verb. A marketer writing
+ * "scrap that - and push it to paid social" got Push added as a channel she
+ * had never asked for, in the same breath as changing her mind about the
+ * channel she HAD asked for.
+ *
+ * An invented channel is the worst class of error here. A missing one gets
+ * noticed and added; a fabricated one is approved, briefed and built, because
+ * everything downstream treats it as something the marketer said.
+ *
+ * So Push must look like a medium: named as a notification, reached "via"
+ * or "on", or sitting in a list beside another channel. The verb no longer
+ * qualifies.
+ */
+const CHANNEL_WORDS = /(email|sms|text|direct mail|dm|paid media|paid social|display|in-?app|outbound call|call)/i;
+
+const AMBIGUOUS_CHANNELS: Record<string, (brief: string) => boolean> = {
+  Push: (brief) => {
+    // Named as the medium - "push notification", "via push".
+    if (/\bpush\s+(notification|message|alert|channel)s?\b|\b(via|through|on|by)\s+push\b/i.test(brief)) return true;
+
+    /*
+     * Or listed as one of several channels. Requires a real channel name
+     * beside it, because "we push, then follow up" is a sentence and not a
+     * channel list.
+     */
+    const listed = /(?:^|[,/&]|\band\b)\s*push\s*(?=[,/&]|\band\b|$)/gi;
+    for (const m of brief.matchAll(listed)) {
+      const at = m.index ?? 0;
+      const around = brief.slice(Math.max(0, at - 60), at + m[0].length + 60);
+      if (CHANNEL_WORDS.test(around)) return true;
+    }
+    return false;
+  },
 };
 
 /** Does this channel word actually refer to the channel here? */
 function channelSense(brief: string, option: string): boolean {
   const test = AMBIGUOUS_CHANNELS[option];
-  return test ? test.test(brief) : true;
+  return test ? test(brief) : true;
 }
 
 export function parseBrief(brief: string, known: Record<string, unknown> = {}): ParsedIntake {
   const extracted: ExtractedField[] = [];
   const seen = new Set<string>();
 
+  /*
+   * A SECOND, DIFFERENT ANSWER IS NOT NOISE - IT IS THE MARKETER CHANGING
+   * THEIR MIND, AND IT WAS BEING THROWN AWAY.
+   *
+   * push kept the FIRST value for a key and discarded everything after it. In
+   * an amendment the original always appears first, so the correction lost.
+   * Observed live, on "add direct mail, pull the in-market date forward to
+   * 6 October, and the offer moves to $20/mo":
+   *
+   *     Channels    = Email, Direct Mail   <- the amendment was applied
+   *     Launch date = 20 October           <- the amendment was ignored
+   *     Offer                              <- never captured at all
+   *
+   * That is worse than ignoring the correction outright: it produced a plan
+   * that was neither the original nor the correction, and previewed it back
+   * confidently. The marketer would have approved a date they had cancelled.
+   *
+   * The first value still wins the FIELD - reordering by recency guesses that
+   * later means truer, which is not reliably so in prose. What changes is that
+   * the disagreement is now recorded instead of dropped, and a disagreement
+   * becomes a question. Deciding between two things the marketer said is the
+   * marketer's job, and it is a cheap question to answer.
+   */
+  const candidates = new Map<string, ExtractedField[]>();
+
   const push = (f: ExtractedField) => {
+    const prior = candidates.get(f.key);
+    if (prior) prior.push(f);
+    else candidates.set(f.key, [f]);
+
     if (seen.has(f.key)) return;
     seen.add(f.key);
     extracted.push(f);
@@ -450,8 +610,12 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   // 4. A date written in prose.
   if (!seen.has("launch_date")) {
-    const d = findLaunchDate(brief);
-    if (d) push(d);
+    /*
+     * Every date, not the first. push() keeps the first for the field and
+     * records the rest as candidates, so an amendment becomes a question
+     * instead of vanishing.
+     */
+    for (const d of findLaunchDates(brief)) push(d);
   }
 
   // 5. The campaign name, from the opening line.
@@ -460,15 +624,108 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     if (n) push(n);
   }
 
-  // 6. The offer. "$350 prepaid card", "600 dollar prepaid card".
-  if (!seen.has("offer")) {
-    const o = brief.match(
-      /(?:\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)\s*([a-z][a-z \-]{2,30}?)?(?=[.,]|\s+(?:on it|incentive|offer)|$)/i,
+  /*
+   * 5b. THE AGENCY, WHICH WAS NAMED IN EVERY BRIEF AND READ IN NONE.
+   *
+   * A marketer reviewing six of her own briefs found she had named the agency
+   * in all six - Argon Digital, Bluestem Creative, Meridian Point - and it
+   * appeared nowhere: not in what was captured, not in the questions, not in
+   * what the form could not hold. It was simply not looked for.
+   *
+   * That is the quietest way to lose something. A field we ask about is
+   * visible; a field we never mention leaves the marketer assuming it was
+   * understood, because they said it plainly and nothing objected.
+   *
+   * Who produces the work is not decoration on a creative request - it decides
+   * who gets briefed and which review path the job takes.
+   */
+  if (!seen.has("agency")) {
+    /*
+     * The keyword is case-insensitive; the NAME is not.
+     *
+     * A whole-pattern /i flag would defeat the capture, which relies on the
+     * agency being written as a proper noun to know where the name starts and
+     * ends. The first version was lowercase-only and missed every brief,
+     * because people write "Agency is Bluestem Creative" at the start of a
+     * sentence.
+     *
+     * A full stop is NOT part of a name. Allowing it let the match run past
+     * the end of the sentence - "Bluestem Creative. Campaign" - which is the
+     * same class of error as truncating: the value looks plausible and is
+     * wrong.
+     */
+    const a = brief.match(
+      /\b(?:[Aa]gency(?:\s+partner)?|[Cc]reative\s+[Aa]gency|[Pp]roduced\s+by|[Hh]andled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&'-]*(?:\s+[A-Z][A-Za-z0-9&'-]*){0,3})/,
     );
-    if (o) {
+    if (a && a[1]) {
       push({
-        key: "offer",
-        label: "Offer",
+        key: "agency",
+        label: "Agency",
+        value: a[1].trim(),
+        from: "stated",
+        evidence: a[0].trim(),
+      });
+    }
+  }
+
+  /*
+   * 6. The offer - "$350 prepaid card", "600 dollar prepaid card".
+   *
+   * A MONEY AMOUNT IS NOT AUTOMATICALLY AN OFFER.
+   *
+   * This matched any sum of money and filed it as the consumer offer, so
+   * "Budget is $1.8M working media" came back as
+   *
+   *     Offer = "$1.8M working media"   [stated]
+   *
+   * The value and the "stated" label are both honest - those words are in the
+   * brief - which is exactly what makes it dangerous. It reads as though the
+   * marketer told us the offer, and nothing about it looks wrong until a
+   * creative team builds against a $1.8M consumer incentive.
+   *
+   * A budget and an offer are different facts about a campaign. When the sum
+   * is introduced as money the business is SPENDING, it is not something the
+   * customer is being given.
+   */
+  if (!seen.has("offer")) {
+    /*
+     * THE WHOLE OFFER, NOT THE FIRST NUMBER IN IT.
+     *
+     * The old pattern stopped after the sum and an optional word or two, so
+     * "$39.99/mo plus a $100 gift card" was captured as "$39.99" - the price,
+     * without the incentive that is the actual offer. A marketer reading that
+     * back sees a number she recognises and no reason to look closer, which is
+     * precisely when a truncation survives review.
+     *
+     * An offer runs to the end of its clause. That is where the marketer
+     * stopped describing it.
+     */
+    /*
+     * EVERY SUM, FOR THE SAME REASON AS EVERY DATE.
+     *
+     * Only the first money match was examined, so when a marketer wrote
+     * "the offer moves to $20/mo" after naming a different one, the change
+     * disappeared entirely - no new value, and no question either, because
+     * there was nothing for the conflict check to compare. The date amendment
+     * was caught and the offer amendment silently was not, in the same brief.
+     *
+     * push() keeps the first for the field and records the rest, so a changed
+     * offer now asks rather than vanishing.
+     */
+    const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?\s*[mk]?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)/gi;
+    const WHOLE = new RegExp(MONEY.source + /(?:[^.,;\n]{0,70}?)?(?=[.,;\n]|$)/.source, "gi");
+
+    for (const o of brief.matchAll(WHOLE)) {
+      const at = o.index ?? 0;
+      // The words immediately around the sum, which is where a brief says what
+      // kind of money it is talking about.
+      const around = brief.slice(Math.max(0, at - 40), at + o[0].length + 40);
+      const isSpend =
+        /\b(budget|working media|media spend|spend|investment|funding|allocation|capex|opex)\b/i.test(around);
+
+      push({
+        key: isSpend ? "budget" : "offer",
+        label: isSpend ? "Budget" : "Offer",
         value: o[0].trim().replace(/\s+/g, " "),
         from: "stated",
         evidence: o[0].trim(),
@@ -515,8 +772,88 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   const missing = requiredFields().filter((f: FieldSpec) => !fields[f.key]);
   const inferred = extracted.filter((f) => f.from !== "stated");
+  const conflicts = findConflicts(candidates, fields);
 
-  return { fields, extracted, missing, inferred };
+  return { fields, extracted, missing, inferred, conflicts };
+}
+
+/**
+ * Where the brief disagrees with itself.
+ *
+ * Two kinds, and both used to pass silently:
+ *
+ * THE SAME FIELD, TWICE. An amendment - "scrap that, pull the date forward to
+ * the 6th". The first value won the field and the correction was discarded, so
+ * a plan the marketer had cancelled was previewed back to them confidently.
+ *
+ * TWO FIELDS THAT CANNOT BOTH BE TRUE. An acquisition campaign aimed at
+ * existing subscribers. Observed live, unflagged:
+ *
+ *     Business objective = Acquisition                      [stated]
+ *     Customer type      = Subscriber - Existing Customers  [inferred]
+ *
+ * Prospects and existing customers come from different places - prospects are
+ * not in the profile store at all - so this is not a wording quibble. It
+ * decides which build path runs, and getting it wrong is discovered after the
+ * audience is built.
+ *
+ * Nothing here guesses a winner. A brief that contradicts itself is the one
+ * case where asking is unambiguously right: the marketer knows which they
+ * meant, it takes them a second, and no amount of cleverness here can recover
+ * the intent.
+ */
+function findConflicts(
+  candidates: Map<string, ExtractedField[]>,
+  fields: Record<string, string>,
+): Conflict[] {
+  const out: Conflict[] = [];
+  const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // 1. The same field, answered twice differently.
+  for (const [key, list] of candidates) {
+    const distinct: ExtractedField[] = [];
+    for (const f of list) {
+      if (!distinct.some((d) => norm(d.value) === norm(f.value))) distinct.push(f);
+    }
+    if (distinct.length < 2) continue;
+    const label = distinct[0].label || key;
+    const values = distinct.map((d) => d.value);
+    out.push({
+      key,
+      label,
+      values,
+      ask:
+        `The brief gives ${label.toLowerCase()} twice: "${values[0]}" and "${values[1]}". ` +
+        `Which one is right? I have used "${values[0]}" so far, and I would rather ask than file the wrong one.`,
+    });
+  }
+
+  /*
+   * 2. Prospects and existing customers at the same time.
+   *
+   * Checked on the resolved fields rather than the candidates, because either
+   * side can arrive stated or inferred and the contradiction is just as real
+   * when half of it was a guess - arguably more so.
+   */
+  const objective = norm(fields.business_objective);
+  const customer = norm(fields.customer_type);
+  const wantsProspects = /acquisition|prospect|net.new|new customer/.test(objective + " " + customer);
+  const wantsExisting = /existing|current (customer|subscriber)|winback|retention|upsell|upgrade/.test(
+    objective + " " + customer,
+  );
+  if (wantsProspects && wantsExisting) {
+    out.push({
+      key: "customer_type",
+      label: "Who this is for",
+      values: [fields.business_objective || "", fields.customer_type || ""].filter(Boolean),
+      ask:
+        "This brief reads as both acquisition and existing-customer work " +
+        `(objective "${fields.business_objective || "-"}", audience "${fields.customer_type || "-"}"). ` +
+        "Which is it? Prospects and existing customers are built from different places, so it changes the whole build.",
+    });
+  }
+
+  return out;
 }
 
 /**
@@ -527,5 +864,26 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
  * passes two, and past two the agent has failed, not the marketer.
  */
 export function nextQuestions(parsed: ParsedIntake, limit = 2): FieldSpec[] {
-  return parsed.missing.slice(0, limit);
+  /*
+   * A CONTRADICTION OUTRANKS A GAP.
+   *
+   * A missing field is a thing the marketer has not said yet. A contradiction
+   * is a thing they have said twice, differently - which means the brief as
+   * filed is wrong right now, and filing it emails a queue. Given only two
+   * questions, spend them on the disagreements first.
+   *
+   * It is also the better question to be asked. "What is the in-market date?"
+   * makes the marketer do the work; "you said the 20th and then the 6th, which
+   * is it?" shows we read the brief.
+   */
+  const fromConflicts: FieldSpec[] = (parsed.conflicts || []).map((c) => ({
+    key: c.key,
+    label: c.label,
+    ask: c.ask,
+  } as FieldSpec));
+
+  const seen = new Set(fromConflicts.map((f) => f.key));
+  const gaps = parsed.missing.filter((f) => !seen.has(f.key));
+
+  return [...fromConflicts, ...gaps].slice(0, limit);
 }
