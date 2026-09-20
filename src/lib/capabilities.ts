@@ -40,6 +40,22 @@ export type CapabilityReport = {
     tools: Array<{ name: string; present: boolean }>;
     note: string;
   };
+  /**
+   * The LLM backend, when one is configured (LLM_PROVIDER set). Answers the
+   * first question on every enablement - "is my provider/host actually
+   * reachable?" - as a first-class fact, so you learn it here instead of by
+   * starting a run and watching it silently fall back to the deterministic
+   * parser. Especially for Ollama, whose host changes often.
+   */
+  llm: {
+    /** Is a provider selected at all? */
+    configured: boolean;
+    /** Which one, when configured. */
+    provider: string | null;
+    /** Reachable? "unknown" when unconfigured or not probed. */
+    reachable: boolean | "unknown";
+    note: string;
+  };
 };
 
 /** Resolve the one endpoint to ask for a tool list - gateway if set, else the AEC base. */
@@ -100,9 +116,66 @@ function present(names: Set<string>, bare: string): boolean {
   return false;
 }
 
+/**
+ * Probe LLM reachability without a full model call where possible.
+ *
+ * - Unconfigured -> configured:false, reachable:"unknown".
+ * - Ollama -> a cheap GET to the host's /api/tags (lists local models); this
+ *   is the "is the host up right now" answer that matters most, since the host
+ *   changes often.
+ * - Bedrock/Anthropic -> config-validity only (are the required creds present?).
+ *   We deliberately do NOT spend a paid token just to health-check; a present,
+ *   well-formed config is reported reachable:"unknown" with a note, since the
+ *   real check is the first extraction (which falls back safely anyway).
+ */
+async function probeLlm(): Promise<CapabilityReport["llm"]> {
+  const provider = (process.env.LLM_PROVIDER || "").trim().toLowerCase();
+  if (!provider) {
+    return { configured: false, provider: null, reachable: "unknown", note: "No LLM_PROVIDER set - Intake/Review use the deterministic parser, Agent 3 drafts no PQL." };
+  }
+
+  if (provider === "ollama") {
+    const rawHost = (process.env.OLLAMA_HOST || "").trim();
+    if (!rawHost) {
+      return { configured: true, provider, reachable: false, note: "LLM_PROVIDER=ollama but OLLAMA_HOST is not set." };
+    }
+    let base = rawHost;
+    if (!/^https?:\/\//i.test(base)) base = `http://${base}`;
+    try {
+      const url = new URL(base);
+      if (!url.port) url.port = "11434";
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const res = await fetch(`${url.toString().replace(/\/+$/, "")}/api/tags`, { signal: controller.signal });
+        return res.ok
+          ? { configured: true, provider, reachable: true, note: `Ollama reachable at ${url.host}.` }
+          : { configured: true, provider, reachable: false, note: `Ollama at ${url.host} returned HTTP ${res.status}.` };
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (err) {
+      return { configured: true, provider, reachable: false, note: `Ollama host unreachable: ${(err as Error).message}. The host may have changed - update OLLAMA_HOST.` };
+    }
+  }
+
+  if (provider === "bedrock") {
+    const ok = !!(process.env.AWS_REGION && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+    return { configured: true, provider, reachable: "unknown", note: ok ? "Bedrock credentials present; first extraction will confirm reachability (no paid health-check made)." : "LLM_PROVIDER=bedrock but AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are incomplete." };
+  }
+
+  if (provider === "anthropic") {
+    const ok = !!process.env.ANTHROPIC_API_KEY;
+    return { configured: true, provider, reachable: "unknown", note: ok ? "Anthropic API key present; first extraction will confirm reachability (no paid health-check made)." : "LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set." };
+  }
+
+  return { configured: true, provider, reachable: false, note: `Unrecognised LLM_PROVIDER="${provider}" (use bedrock, anthropic, or ollama).` };
+}
+
 export async function getCapabilities(): Promise<CapabilityReport> {
   const checkedAt = new Date().toISOString();
   const endpoint = listEndpoint();
+  const llm = await probeLlm();
 
   if (!endpoint) {
     return {
@@ -115,6 +188,7 @@ export async function getCapabilities(): Promise<CapabilityReport> {
         tools: workfrontWriteToolNames().map((name) => ({ name, present: false })),
         note: "Endpoint not configured.",
       },
+      llm,
     };
   }
 
@@ -131,6 +205,7 @@ export async function getCapabilities(): Promise<CapabilityReport> {
         tools: workfrontWriteToolNames().map((name) => ({ name, present: false })),
         note: "Tool list could not be read; write-enablement is unknown, not disabled.",
       },
+      llm,
     };
   }
 
@@ -151,5 +226,6 @@ export async function getCapabilities(): Promise<CapabilityReport> {
           "(a Workfront admin turns them on in Setup > System > Preferences). Agent 1 will dry-run: " +
           "it reports the exact payload it would have created rather than writing nothing silently.",
     },
+    llm,
   };
 }

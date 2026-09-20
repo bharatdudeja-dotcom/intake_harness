@@ -287,6 +287,10 @@ export async function POST(req: NextRequest) {
     const rawTriage = triaged.triage;
     const triageEngine = triaged.source;
     const triageFallbackReason = triaged.fallbackReason;
+    // Populate AgentResponse.usage.model when the LLM did the translation, so
+    // the run's model column / UI token line reflect Agent 2's LLM use (token
+    // COUNTS are captured in the tool-call trace via the traced wrapper).
+    const triageUsage = triaged.model ? { tokens: 0, model: triaged.model } : undefined;
 
     /*
      * Resolve the FAC-vs-profile-store question from AEP where the schema data
@@ -309,6 +313,7 @@ export async function POST(req: NextRequest) {
       return {
         status: "needs_input",
         message: triage.findings[0].ask,
+        ...(triageUsage ? { usage: triageUsage } : {}),
         output: {
           ...input,
           reviewed: true,
@@ -345,6 +350,7 @@ export async function POST(req: NextRequest) {
         `${triage.summary}. ` +
         triage.findings.map((f) => f.ask).join(" ") +
         " Confirm and it will be resubmitted.",
+      ...(triageUsage ? { usage: triageUsage } : {}),
       output: {
         ...input,
         reviewed: true,

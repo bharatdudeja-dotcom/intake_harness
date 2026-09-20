@@ -126,6 +126,41 @@ export async function withToolCallLog<T>(
   return { result, toolCalls: log };
 }
 
+/**
+ * Trace a NON-MCP external call (today: an LLM completion) into the exact same
+ * tool-call log and live view MCP calls use, so the UI renders it with zero new
+ * plumbing. Records `name` (e.g. "llm:anthropic:claude-…"), the args summary,
+ * duration, and result/error - and publishes start/finish to live-progress so a
+ * mid-request poller sees "calling the model right now" the same way it sees an
+ * MCP call in flight.
+ *
+ * A no-op passthrough when no withToolCallLog wrapper is active (e.g. the
+ * preview endpoint calls the LLM outside a run) - it simply runs `fn`. This is
+ * the one place external-call tracing lives, so LLM providers don't each
+ * reimplement it and can't drift from how MCP calls are recorded.
+ */
+export async function traceExternalCall<T>(
+  name: string,
+  args: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ctx = toolCallLogStorage.getStore();
+  if (!ctx) return fn(); // untraced context (e.g. preview) - just run it
+  const startedAt = new Date();
+  const liveId = liveProgress.startCall(ctx.runId, ctx.taskId, name, args);
+  try {
+    const value = await fn();
+    const { json, truncated } = truncatedJson(value);
+    ctx.log.push({ name, args, startedAt: startedAt.toISOString(), durationMs: Date.now() - startedAt.getTime(), result: json, resultTruncated: truncated });
+    liveProgress.finishCall(ctx.runId, liveId, { status: "success", durationMs: Date.now() - startedAt.getTime(), result: json, resultTruncated: truncated });
+    return value;
+  } catch (err) {
+    ctx.log.push({ name, args, startedAt: startedAt.toISOString(), durationMs: Date.now() - startedAt.getTime(), error: (err as Error).message });
+    liveProgress.finishCall(ctx.runId, liveId, { status: "error", durationMs: Date.now() - startedAt.getTime(), error: (err as Error).message });
+    throw err;
+  }
+}
+
 const MCP_SERVER_ROUTES: Array<{ prefix: string; path: string }> = [
   { prefix: "wf_core_", path: "/mcp/workfront/core" },
   { prefix: "wf_users_", path: "/mcp/workfront/users" },
