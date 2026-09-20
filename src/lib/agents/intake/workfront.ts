@@ -23,6 +23,7 @@
 
 import { callMcpTool } from "@/lib/mcp-client";
 import { findPriorTaskRun } from "@/lib/pipeline/idempotent-write";
+import { workfrontWritesDisabled } from "@/lib/agents/shared/workfront-writes";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
 
@@ -301,6 +302,22 @@ export async function createIntakeRequest(args: {
   intake: Record<string, unknown>;
   brief: string;
 }): Promise<CreateOutcome> {
+  // Kill switch: don't attempt the Workfront create at all (and skip the
+  // idempotency lookup that only exists to guard it). Reports a clean, honest
+  // "skipped" dry-run so the pipeline flows for testing. See
+  // agents/shared/workfront-writes.ts.
+  if (workfrontWritesDisabled()) {
+    // No Workfront calls at all - not even the field-map read. Report the
+    // payload we WOULD have sent so the trace still shows the intake shape.
+    const { fields, customFields, dropped } = toWorkfrontPayload(args.intake, args.brief, null);
+    return {
+      created: false,
+      reason: "Workfront writes are disabled (WORKFRONT_WRITES_DISABLED=true) - skipped the create for testing.",
+      wouldHaveCreated: { objCode: INTAKE_OBJECT, formId: INTAKE_FORM_ID, fields, customFields },
+      fieldNames: { verified: false, source: "skipped", dropped },
+    };
+  }
+
   const prior = await findPriorSuccess(args.runId);
   if (prior) return { ...prior, reused: true };
 
