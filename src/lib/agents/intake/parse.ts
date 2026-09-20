@@ -551,19 +551,55 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
     if (n) push(n);
   }
 
-  // 6. The offer. "$350 prepaid card", "600 dollar prepaid card".
+  /*
+   * 6. The offer - "$350 prepaid card", "600 dollar prepaid card".
+   *
+   * A MONEY AMOUNT IS NOT AUTOMATICALLY AN OFFER.
+   *
+   * This matched any sum of money and filed it as the consumer offer, so
+   * "Budget is $1.8M working media" came back as
+   *
+   *     Offer = "$1.8M working media"   [stated]
+   *
+   * The value and the "stated" label are both honest - those words are in the
+   * brief - which is exactly what makes it dangerous. It reads as though the
+   * marketer told us the offer, and nothing about it looks wrong until a
+   * creative team builds against a $1.8M consumer incentive.
+   *
+   * A budget and an offer are different facts about a campaign. When the sum
+   * is introduced as money the business is SPENDING, it is not something the
+   * customer is being given.
+   */
   if (!seen.has("offer")) {
+    const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?\s*[mk]?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)/i;
     const o = brief.match(
-      /(?:\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)\s*([a-z][a-z \-]{2,30}?)?(?=[.,]|\s+(?:on it|incentive|offer)|$)/i,
+      new RegExp(MONEY.source + /\s*([a-z][a-z \-]{2,30}?)?(?=[.,]|\s+(?:on it|incentive|offer)|$)/.source, "i"),
     );
     if (o) {
-      push({
-        key: "offer",
-        label: "Offer",
-        value: o[0].trim().replace(/\s+/g, " "),
-        from: "stated",
-        evidence: o[0].trim(),
-      });
+      const at = o.index ?? 0;
+      // The words immediately around the sum, which is where a brief says what
+      // kind of money it is talking about.
+      const around = brief.slice(Math.max(0, at - 40), at + o[0].length + 40);
+      const isSpend =
+        /\b(budget|working media|media spend|spend|investment|funding|allocation|capex|opex)\b/i.test(around);
+
+      if (isSpend) {
+        push({
+          key: "budget",
+          label: "Budget",
+          value: o[0].trim().replace(/\s+/g, " "),
+          from: "stated",
+          evidence: o[0].trim(),
+        });
+      } else {
+        push({
+          key: "offer",
+          label: "Offer",
+          value: o[0].trim().replace(/\s+/g, " "),
+          from: "stated",
+          evidence: o[0].trim(),
+        });
+      }
     }
   }
 
