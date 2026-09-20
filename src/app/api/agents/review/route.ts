@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { callMcpTool, withToolCallLog } from "@/lib/mcp-client";
 import { triageRejection, type TriageResult } from "@/lib/agents/review/triage";
+import {
+  resolveDataSource,
+  applyDataSourceResolution,
+  type DataSourceResolution,
+} from "@/lib/agents/review/data-source";
+import { probeSchemas, neededAttributes } from "@/lib/agents/audience/aep";
 import { detectRejection, type CommentLike } from "@/lib/agents/review/rejection";
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
 import { requiredFields } from "@/lib/agents/shared/campaign-brief";
@@ -267,7 +273,24 @@ export async function POST(req: NextRequest) {
     }
 
     // --- There is a rejection: translate it ---------------------------------
-    const triage = triageRejection(reason, fields);
+    const rawTriage = triageRejection(reason, fields);
+
+    /*
+     * Resolve the FAC-vs-profile-store question from AEP where the schema data
+     * can answer it, instead of always handing it back as an open question
+     * (see agents/review/data-source.ts). triage.ts stays pure and still only
+     * CLASSIFIES; the read that could ANSWER it lives here, in the route. The
+     * extra read-only probe runs ONLY when triage actually raised a
+     * wrong_data_source finding — the common rejection paths pay nothing.
+     */
+    let dataSourceResolution: DataSourceResolution | null = null;
+    let triage = rawTriage;
+    if (rawTriage.findings.some((f) => f.kind === "wrong_data_source")) {
+      const needed = neededAttributes(fields, input.brief);
+      const schemaProbe = await probeSchemas("review", needed);
+      dataSourceResolution = resolveDataSource(fields, { schemaProbe, neededAttributes: needed });
+      triage = applyDataSourceResolution(rawTriage, dataSourceResolution);
+    }
 
     if (triage.needsHuman) {
       return {
@@ -322,6 +345,12 @@ export async function POST(req: NextRequest) {
         loopCount: loopCount + 1,
         rejectionDetectedVia: "detectedVia" in fetched ? fetched.detectedVia : input.rejectionReason ? "passed_in" : "none",
         rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
+        // The AEP-grounded data-source decision (null when the rejection
+        // raised no wrong_data_source finding, so no probe was run).
+        dataSourceResolved: dataSourceResolution ? dataSourceResolution.resolved : null,
+        dataSourceDecision:
+          dataSourceResolution && dataSourceResolution.resolved ? dataSourceResolution.source : null,
+        dataSourceRationale: dataSourceResolution ? dataSourceResolution.rationale : null,
       },
     };
   });
