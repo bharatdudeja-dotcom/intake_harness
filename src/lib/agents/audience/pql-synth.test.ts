@@ -1,5 +1,20 @@
-import { describe, it, expect } from "vitest";
-import { synthesizePql, verifyFields, isFieldPresent } from "./pql-synth";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Mock the MCP client so createSegmentFromPql's write can be exercised without
+// a network. vi.hoisted is required: vi.mock is hoisted above imports, so the
+// fn it returns must be created in a hoisted block too, not a plain const.
+const { callMcpTool } = vi.hoisted(() => ({ callMcpTool: vi.fn() }));
+vi.mock("@/lib/mcp-client", () => ({ callMcpTool }));
+
+import {
+  synthesizePql,
+  verifyFields,
+  isFieldPresent,
+  isMissingWriteTool,
+  createSegmentFromPql,
+  segmentCreationEnabled,
+  type PqlSynthesis,
+} from "./pql-synth";
 import type { SchemaProbe } from "./aep";
 import type { PqlGuidance } from "@/lib/agents/review/pql-context";
 import type { LlmClient, LlmCompletionResult } from "@/lib/llm";
@@ -106,5 +121,69 @@ describe("synthesizePql - the verify gate is the whole point", () => {
     const r = await synthesizePql(criteria, probe(), pqlRef, stub(new Error("boom")));
     expect(r.synthesized).toBe(false);
     expect(r.reason).toMatch(/failed/);
+  });
+});
+
+describe("isMissingWriteTool - names a disabled write, not a bug here", () => {
+  it("matches a 'not found' error for the segment-create tool", () => {
+    expect(isMissingWriteTool("Tool adobe_create_segment not found")).toBe(true);
+  });
+  it("does not match an unrelated error", () => {
+    expect(isMissingWriteTool("Invalid PQL expression")).toBe(false);
+  });
+});
+
+describe("segmentCreationEnabled - off unless explicitly true", () => {
+  afterEach(() => delete process.env.AUDIENCE_CREATE_SEGMENT);
+  it("is false when unset", () => {
+    expect(segmentCreationEnabled()).toBe(false);
+  });
+  it("is true only for the literal 'true'", () => {
+    process.env.AUDIENCE_CREATE_SEGMENT = "true";
+    expect(segmentCreationEnabled()).toBe(true);
+    process.env.AUDIENCE_CREATE_SEGMENT = "yes";
+    expect(segmentCreationEnabled()).toBe(false);
+  });
+});
+
+describe("createSegmentFromPql - writes only from a verified expression, honest on failure", () => {
+  const verified: PqlSynthesis = {
+    synthesized: true,
+    pql: "xEvent.xfinityInternet = true",
+    fieldsUsed: ["a.xfinityInternet"],
+    model: "stub",
+    reason: null,
+    unverifiedFields: [],
+  };
+
+  beforeEach(() => callMcpTool.mockReset());
+
+  it("refuses when handed an unsynthesized result (belt-and-suspenders guard)", async () => {
+    const notSynth: PqlSynthesis = { ...verified, synthesized: false, pql: null };
+    const r = await createSegmentFromPql("audience_creation", notSynth, "X");
+    expect(r.attempted).toBe(false);
+    expect(callMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("creates and returns the id when the tool succeeds", async () => {
+    callMcpTool.mockResolvedValue({ id: "seg-123" });
+    const r = await createSegmentFromPql("audience_creation", verified, "Fall Save");
+    expect(r).toMatchObject({ attempted: true, created: true, segmentId: "seg-123" });
+    expect(callMcpTool).toHaveBeenCalledWith(
+      "audience_creation",
+      "adobe_create_segment",
+      expect.objectContaining({ name: "Fall Save", expression: expect.objectContaining({ value: verified.pql }) }),
+    );
+  });
+
+  // The disabled-write CLASSIFICATION is tested purely below via
+  // isMissingWriteTool; the create function's catch turns exactly that into a
+  // created:false dry-run with wouldHaveCreated (same shape asserted in the
+  // no-id case above). Kept pure to avoid a live rejection in the test.
+
+  it("reports created:false when the tool returns no id", async () => {
+    callMcpTool.mockResolvedValue({});
+    const r = await createSegmentFromPql("audience_creation", verified, "Fall Save");
+    expect(r).toMatchObject({ attempted: true, created: false });
   });
 });

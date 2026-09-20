@@ -12,7 +12,12 @@ import {
 } from "@/lib/agents/audience/aep";
 import { resolveActivationIntent, activateAudience, type ActivationOutcome } from "@/lib/agents/audience/activation";
 import { groundPqlGuidance, type PqlGuidance } from "@/lib/agents/review/pql-context";
-import { synthesizePql } from "@/lib/agents/audience/pql-synth";
+import {
+  synthesizePql,
+  createSegmentFromPql,
+  segmentCreationEnabled,
+  type SegmentCreation,
+} from "@/lib/agents/audience/pql-synth";
 import type { AepContext } from "@/lib/agents/review/aep-context";
 import type { SchemaProbe, SegmentMatch } from "@/lib/agents/audience/aep";
 import {
@@ -273,6 +278,22 @@ export async function POST(req: NextRequest) {
         ? await synthesizePql(criteria, probe, pqlGuidance)
         : null;
 
+    // Actually create the segment - ONLY when explicitly enabled
+    // (AUDIENCE_CREATE_SEGMENT=true, off by default like activation) AND the
+    // expression passed the verify gate. Otherwise the expression stays a
+    // draft. createSegmentFromPql follows the same honesty contract as Agent
+    // 1's Workfront create: it reports what it WOULD have created when the
+    // write tool is disabled, rather than a silent no-op. Never throws.
+    const segmentCreation: SegmentCreation | null =
+      pqlSynthesis?.synthesized && segmentCreationEnabled()
+        ? await createSegmentFromPql(
+            "audience_creation",
+            pqlSynthesis,
+            [fields.campaign_name, fields.audience_description].filter(Boolean).map(String).join(" — ") ||
+              "Audience (drafted by Agent 3)",
+          )
+        : null;
+
     // Cheapest good outcome first: an audience that already exists needs no build
     // and is the only way to get a real count without writing anything.
     //
@@ -339,7 +360,11 @@ export async function POST(req: NextRequest) {
         : "",
       pqlSynthesis
         ? pqlSynthesis.synthesized
-          ? `Drafted a candidate PQL expression (fields verified present: ${pqlSynthesis.fieldsUsed.join(", ")}) - see pqlSynthesis in metadata. This is a draft for a human to build from, not auto-created.`
+          ? segmentCreation
+            ? segmentCreation.attempted && segmentCreation.created
+              ? `Created the audience segment "${segmentCreation.name}" (${segmentCreation.segmentId}) from a verified PQL expression (fields: ${pqlSynthesis.fieldsUsed.join(", ")}).`
+              : `Verified PQL expression drafted, but the segment was not created: ${segmentCreation.attempted ? segmentCreation.reason : "creation not attempted"}. See pqlSynthesis/segmentCreation in metadata.`
+            : `Drafted a candidate PQL expression (fields verified present: ${pqlSynthesis.fieldsUsed.join(", ")}) - see pqlSynthesis in metadata. Draft for a human to build from; segment creation is off (set AUDIENCE_CREATE_SEGMENT=true to enable).`
           : `No PQL expression drafted: ${pqlSynthesis.reason}.`
         : "",
       activation ? formatActivationMessage(activation) : "",
@@ -411,6 +436,11 @@ export async function POST(req: NextRequest) {
         // draft, the fields it was verified against, and - on rejection - the
         // fields that couldn't be verified, all travel with the run.
         pqlSynthesis,
+        // Segment creation outcome: null when not attempted (FAC path, no
+        // verified expression, or AUDIENCE_CREATE_SEGMENT off), else the
+        // created id or an honest dry-run with the payload it would have sent.
+        segmentCreation,
+        segmentCreationEnabled: segmentCreationEnabled(),
         nightlyCutoff: cutoff,
         activationRequested: activationIntent.requested,
         activationDestination: activationIntent.destinationName,

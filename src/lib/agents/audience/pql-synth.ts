@@ -30,6 +30,8 @@
 import type { SchemaProbe } from "./aep";
 import type { PqlGuidance } from "@/lib/agents/review/pql-context";
 import { getLlmClient, type LlmClient } from "@/lib/llm";
+import { callMcpTool } from "@/lib/mcp-client";
+import type { TaskId } from "@/lib/pipeline/types";
 
 export type PqlSynthesis = {
   /** Did we produce a verified candidate expression? */
@@ -59,6 +61,31 @@ const NOT_SYNTHESIZED = (reason: string, extra: Partial<PqlSynthesis> = {}): Pql
   unverifiedFields: [],
   ...extra,
 });
+
+/**
+ * The outcome of trying to CREATE the segment from a verified expression.
+ *
+ * Mirrors intake/workfront.ts's createIntakeRequest honesty contract exactly:
+ * on a tenant where the write tool is disabled it reports what it WOULD have
+ * created rather than pretending success, so a run reads as an honest dry-run
+ * instead of a silent no-op.
+ */
+export type SegmentCreation =
+  | { attempted: false; reason: string }
+  | {
+      attempted: true;
+      created: true;
+      segmentId: string;
+      name: string;
+      pql: string;
+    }
+  | {
+      attempted: true;
+      created: false;
+      reason: string;
+      /** What we would have sent, for a reviewer to see the exact payload. */
+      wouldHaveCreated: { name: string; pql: string };
+    };
 
 const SYSTEM = [
   "You write a single Adobe Experience Platform PQL (Profile Query Language)",
@@ -207,5 +234,89 @@ export async function synthesizePql(
     };
   } catch (err) {
     return NOT_SYNTHESIZED(`PQL synthesis failed (${(err as Error).message}); reporting the build path without an expression`);
+  }
+}
+
+/**
+ * Is actually creating the segment turned on?
+ *
+ * OFF BY DEFAULT, deliberately - the same stance activation.ts takes for the
+ * one other place this agent could write. Everything else about Agent 3 is a
+ * read; creating a segment is the single write it can do, so it must be an
+ * explicit, opt-in decision (AUDIENCE_CREATE_SEGMENT=true), never a default.
+ * When off, a synthesized expression is still drafted and attached for a human
+ * to build from - the read-only behaviour is unchanged.
+ */
+export function segmentCreationEnabled(): boolean {
+  return String(process.env.AUDIENCE_CREATE_SEGMENT || "").trim().toLowerCase() === "true";
+}
+
+/** A write tool that 404s because writes are off, not because of a bug here - same detection intake/workfront.ts uses. Exported for unit testing the classification without a live rejection. */
+export function isMissingWriteTool(raw: string): boolean {
+  return /not found/i.test(raw) && /create_segment/i.test(raw);
+}
+
+/**
+ * Create the AEP segment from a VERIFIED synthesized expression.
+ *
+ * PRECONDITIONS THE CALLER MUST HAVE MET (this function does not re-derive
+ * them, but they are the whole safety story):
+ *   - segmentCreationEnabled() is true (explicit opt-in);
+ *   - `synthesis.synthesized` is true, i.e. the expression passed the verify
+ *     gate in synthesizePql and references only fields confirmed present.
+ * It refuses outright if handed an unsynthesized result, so a caller that
+ * forgets the guard cannot create a segment from an unverified expression.
+ *
+ * HONESTY CONTRACT, identical to createIntakeRequest: when the write tool is
+ * absent (writes disabled on the tenant), this reports `created: false` with
+ * `wouldHaveCreated` and names the cause, rather than reporting a success that
+ * wrote nothing. Never throws - the caller records the outcome and the run is
+ * never failed by an attempt to create.
+ */
+export async function createSegmentFromPql(
+  taskId: TaskId,
+  synthesis: PqlSynthesis,
+  name: string,
+): Promise<SegmentCreation> {
+  if (!synthesis.synthesized || !synthesis.pql) {
+    return { attempted: false, reason: "no verified PQL expression to create a segment from" };
+  }
+  const segmentName = name.trim() || "Untitled audience";
+
+  try {
+    const result = await callMcpTool<{ id?: string; segmentId?: string; data?: { id?: string } }>(
+      taskId,
+      "adobe_create_segment",
+      {
+        name: segmentName,
+        // AEP segment definitions carry the PQL under an expression object of
+        // type "PQL", format "pql/text". The gateway tool accepts the fields
+        // below; a shape mismatch surfaces as a normal tool error and is
+        // reported (created:false), not thrown.
+        expression: { type: "PQL", format: "pql/text", value: synthesis.pql },
+        description: `Drafted by Agent 3 from verified fields: ${synthesis.fieldsUsed.join(", ")}`,
+      },
+    );
+    const segmentId = String(result?.id || result?.segmentId || result?.data?.id || "");
+    if (!segmentId) {
+      return {
+        attempted: true,
+        created: false,
+        reason: "AEP accepted the create but returned no segment id",
+        wouldHaveCreated: { name: segmentName, pql: synthesis.pql },
+      };
+    }
+    return { attempted: true, created: true, segmentId, name: segmentName, pql: synthesis.pql };
+  } catch (err) {
+    const raw = (err as Error).message;
+    return {
+      attempted: true,
+      created: false,
+      reason: isMissingWriteTool(raw)
+        ? `${raw} — this tool is absent because segment-write is not enabled on this AEP gateway. ` +
+          "The verified expression below is what would have been created."
+        : raw,
+      wouldHaveCreated: { name: segmentName, pql: synthesis.pql },
+    };
   }
 }
