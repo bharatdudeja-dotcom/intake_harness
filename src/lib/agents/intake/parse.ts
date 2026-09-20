@@ -827,6 +827,43 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   }
 
   /*
+   * 5c. THE AUDIENCE, AS THE REQUESTER DEFINED IT.
+   *
+   * THE MOST IMPORTANT LINE IN THE BRIEF, AND IT WAS READ BY NOTHING.
+   *
+   * A real brief said, on its own labelled row:
+   *
+   *     Audience definition: xfinityInternet = true AND xfinityTV = false
+   *
+   * Nothing captured it. The audience agent inferred a different audience from
+   * the surrounding prose, built the inverse - Internet = FALSE, TV condition
+   * dropped entirely - reported success, and attached a predicted count of 22
+   * to a population nobody had asked for.
+   *
+   * When a CDP-literate requester writes the rule themselves, that is the most
+   * reliable input this pipeline will ever receive. Capturing it verbatim lets
+   * the audience agent use it instead of guessing, and lets a reviewer see the
+   * requester's own words next to what was built.
+   *
+   * Captured as STATED, because it is: they wrote it, we did not derive it.
+   */
+  if (!seen.has("audience_description")) {
+    const ad = brief.match(
+      /\b(?:audience(?:\s+definition)?|segment(?:\s+definition)?|targeting)\b\s*[:\-]\s*([^\n]{5,200})/i,
+    );
+    if (ad && ad[1]) {
+      const spec = CAMPAIGN_BRIEF_FIELDS.find((f: FieldSpec) => f.key === "audience_description");
+      push({
+        key: "audience_description",
+        label: spec?.label ?? "Audience",
+        value: ad[1].trim().replace(/\s+/g, " ").replace(/[.;]+$/, ""),
+        from: "stated",
+        evidence: ad[0].trim().slice(0, 120),
+      });
+    }
+  }
+
+  /*
    * 6b. THE SUCCESS METRICS.
    *
    * All three demo briefs state them - "video add-on conversion rate and
