@@ -120,3 +120,31 @@ describe('an expired Adobe token refreshes itself', () => {
         expect(calls.refresh).toBe(0)
     })
 })
+
+describe('discovery refreshes too, not just calls', () => {
+    /*
+     * The refresh was written for exactly this symptom and wired into callTool
+     * alone. So an expired token stopped being fixed the moment the failure
+     * moved one function to the left: tools/list 401s, the server contributes
+     * zero tools, and Workfront vanishes from the estate.
+     *
+     * Observed live on 20 Sep: "workfront-adobe did not answer (HTTP 401) -
+     * contributing no tools", with a refresh token sitting in settings unspent.
+     * A marketer would have been told Workfront was simply not there.
+     */
+    test('a 401 on tools/list is exchanged, not reported as an outage', async () => {
+        const calls = fetchThatNeedsRefresh()
+        const tools = await mcpServers.listTools({ ...SERVER, oauth: { ...SERVER.oauth } })
+        expect(calls.refresh).toBe(1)
+        expect(Array.isArray(tools)).toBe(true)
+    })
+
+    test('a refusal that survives the refresh is not retried for ever', async () => {
+        // A revoked grant needs a person. Looping would be a storm.
+        const calls = fetchThatNeedsRefresh({ refreshOk: false })
+        await expect(
+            mcpServers.listTools({ ...SERVER, oauth: { ...SERVER.oauth } })
+        ).rejects.toThrow(/401/)
+        expect(calls.refresh).toBe(1)
+    })
+})
