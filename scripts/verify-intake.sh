@@ -76,6 +76,17 @@ CASES = [
   ("7. PUSH AS A VERB  'push it to paid social' is not the Push channel",
    "Expect: no Push. A fabricated channel gets approved, briefed and built.",
    PUSH_AS_VERB),
+
+  ("8. CHANGED OFFER  the offer moves, like the date did",
+   "Expect: both offers seen, flagged. The date change was caught and this one was not.",
+   "Upgrade push for Xfinity Internet in Ohio. Channel: email. Launch 3 May. "
+   "Offer is $10/mo off for 12 months. Campaign name: OH Upgrade.\n\n"
+   "Actually the offer moves to $15/mo off instead."),
+
+  ("9. AGENCY         named in every real brief, and read in none",
+   "Expect: Agency captured, and it stops at the sentence, not 'Bluestem Creative. Campaign'.",
+   "Winback for lapsed Xfinity Internet in Ohio. Channel: email. Launch 3 May. "
+   "Agency is Bluestem Creative. Campaign name: OH Winback."),
 ]
 
 PASS = FAIL = 0
@@ -130,6 +141,10 @@ for title, expect, brief in CASES:
         ok = ok and cap.get("Launch date", ("", ""))[0] == "20 November"
     if title.startswith("7."):
         ok = ok and "Push" not in str(cap.get("Channels", ("", ""))[0])
+    if title.startswith("8."):
+        ok = ok and "offer" in conflict_keys
+    if title.startswith("9."):
+        ok = ok and cap.get("Agency", ("", ""))[0] == "Bluestem Creative"
 
     print("  => %s%s" % ("PASS" if ok else "FAIL",
           "" if form_readable else "   (form checks skipped: Workfront unreachable)"))
