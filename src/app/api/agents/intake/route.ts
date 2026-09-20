@@ -192,12 +192,14 @@ export async function POST(req: NextRequest) {
      * admin must enable per tenant. A visible dry run beats a run that reads as a
      * success and wrote nothing.
      */
-    const outcome = await createIntakeRequest({ intake: parsed.fields, brief });
+    const outcome = await createIntakeRequest({ runId: body.runId, intake: parsed.fields, brief });
     const stated = parsed.extracted.filter((f) => f.from === "stated").length;
     const message =
       `Extracted ${stated} stated and ${parsed.inferred.length} inferred field(s) from the brief. ` +
       (outcome.created
-        ? `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
+        ? outcome.reused
+          ? `Reusing the Workfront intake request already created for this run (${outcome.objCode} ${outcome.objId}) - not creating a second one.`
+          : `Created the Workfront intake request (${outcome.objCode} ${outcome.objId}).`
         : `Dry run — did not create the Workfront request: ${outcome.reason}`);
 
     return {
@@ -221,6 +223,11 @@ export async function POST(req: NextRequest) {
         // looking at, and that is the only reason 2.5 stays a human step.
         needsConfirmation: parsed.inferred.length > 0,
         workfrontCreated: outcome.created,
+        // True only when this run's Workfront issue was found already
+        // created (a retry after the original create succeeded but its own
+        // result never got recorded) rather than written fresh this time -
+        // see workfront.ts's findPriorSuccess.
+        workfrontReused: outcome.created ? !!outcome.reused : false,
       },
     };
   });

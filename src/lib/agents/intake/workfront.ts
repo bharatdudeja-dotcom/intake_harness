@@ -22,6 +22,7 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
+import { query } from "@/lib/db";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
 
@@ -103,6 +104,14 @@ type FieldNames = { verified: boolean; source: string; dropped: string[] };
 export type CreateOutcome =
   | {
       created: true;
+      /**
+       * True when this is a PRIOR successful create for this exact run,
+       * found and reused rather than written again - see
+       * createIntakeRequest's idempotency check. Never true and false at
+       * once with `created` in a reader's mind: a run either made a fresh
+       * write or found one already there, and this says which.
+       */
+      reused?: boolean;
       objCode: string;
       objId: string;
       customFieldsSet: boolean;
@@ -119,6 +128,42 @@ export type CreateOutcome =
       wouldHaveCreated: { objCode: string; formId: string; fields: Record<string, unknown>; customFields: Record<string, unknown> };
       fieldNames: FieldNames;
     };
+
+/**
+ * Has THIS RUN already created a real Workfront issue?
+ *
+ * THE RACE THIS CLOSES: advanceOneStep's own comment (orchestrator.ts)
+ * already documents it - if recording a step's result fails AFTER the
+ * step's own work (here, a real Workfront create) already succeeded, the
+ * run is left at "running" with no memory that the create happened, and
+ * retryRun re-invokes this exact step from scratch. Without this check,
+ * that retry creates a SECOND Workfront issue for the same run - silently,
+ * since nothing compares the new create against anything. A completed
+ * intake task_run only ever exists after createIntakeRequest already ran
+ * to completion once (every needs_input round along the way is its own,
+ * non-'completed' status), so finding one here is unambiguous: a prior
+ * attempt at THIS create already finished, not just an earlier question round.
+ *
+ * FAILS OPEN, ON PURPOSE: a broken check must never BLOCK a legitimate
+ * create - it can only skip a redundant one. If the query itself fails,
+ * this returns null and createIntakeRequest proceeds exactly as if no
+ * prior attempt existed, same as today.
+ */
+async function findPriorSuccess(runId: string): Promise<Extract<CreateOutcome, { created: true }> | null> {
+  try {
+    const rows = await query<{ output: unknown }>(
+      `SELECT output FROM task_runs WHERE run_id = $1 AND task_id = 'intake' AND status = 'completed'
+       ORDER BY task_run_id DESC LIMIT 1`,
+      [runId],
+    );
+    const output = rows[0]?.output as { workfront?: CreateOutcome } | undefined;
+    const wf = output?.workfront;
+    if (wf && wf.created === true && wf.objId) return wf;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Split an intake into the native Workfront fields and the custom-form values.
@@ -255,9 +300,13 @@ async function writeCustomFields(
  * deployment that is out of our hands.
  */
 export async function createIntakeRequest(args: {
+  runId: string;
   intake: Record<string, unknown>;
   brief: string;
 }): Promise<CreateOutcome> {
+  const prior = await findPriorSuccess(args.runId);
+  if (prior) return { ...prior, reused: true };
+
   /*
    * Resolve the form's real field names BEFORE building the payload.
    *

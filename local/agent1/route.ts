@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     // Complete enough to submit. Create the Workfront request — pluggable, so
     // an unreachable Workfront records what it would have created rather than
     // failing the run.
-    const wf = await createIntakeRequest({ intake: parsed.fields, brief });
+    const wf = await createIntakeRequest({ runId: body.runId, intake: parsed.fields, brief });
 
     return NextResponse.json({
       status: "completed",
