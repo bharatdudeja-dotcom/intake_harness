@@ -255,6 +255,25 @@ export function questionsFromPlan(plan: FieldPlan): string[] {
   for (const m of plan.mismatched) {
     // A missing field is not a question. See FieldPlan.mismatched.
     if (m.kind === "no-field") continue;
+
+    /*
+     * A REASON THAT IS ALREADY A SENTENCE IS NOT AN ENUM LIST.
+     *
+     * The template below assumes `why` reads "X is not one of the values this
+     * field accepts (a, b, c)" and splices the tail into "...only accepts
+     * ___". A date failure does not fit that shape, so the question came out
+     * as
+     *
+     *   "...this Workfront form only accepts Planned Start Date needs a date
+     *    and 'October' could not be read as one."
+     *
+     * which would have been on screen during the demo.
+     */
+    if (!/is not one of the values this field accepts/i.test(m.why)) {
+      out.push(`${m.label}: ${m.why}. What should it be?`);
+      continue;
+    }
+
     out.push(
       `${m.label}: the brief says "${m.given}", and this Workfront form only accepts ${m.why.replace(/^"[^"]*" is not one of the values this field accepts \(/, "").replace(/\)$/, "")}. Which should it be - or should the request record the detail somewhere else?`,
     );

@@ -267,8 +267,26 @@ function findLaunchDates(brief: string): ExtractedField[] {
      * Clauses are what separate the two facts in that sentence, so the search
      * stops at the punctuation that ends the previous one.
      */
+    /*
+     * A clause ends at a conjunction as well as at punctuation.
+     *
+     * Splitting only on commas meant "sign-off due 6 October and in market 20
+     * October" - no comma anywhere - was one clause containing "due", so BOTH
+     * dates were discarded and the launch date vanished along with the
+     * deadline. The qualifier belongs to its own clause, and "and" starts a
+     * new one just as firmly as a comma does.
+     */
     const before = text.slice(0, h.at);
-    const clause = before.slice(Math.max(0, before.lastIndexOf(",") + 1, before.lastIndexOf(";") + 1));
+    const boundary = Math.max(
+      before.lastIndexOf(","),
+      before.lastIndexOf(";"),
+      before.lastIndexOf(":"),
+      (() => {
+        const m = before.match(/\b(?:and|then|with|plus)\b(?!.*\b(?:and|then|with|plus)\b)/i);
+        return m && m.index != null ? m.index + m[0].length : -1;
+      })(),
+    );
+    const clause = before.slice(boundary + 1);
     if (OTHER_KIND_OF_DATE.test(clause)) continue;
     add(h.day, h.month, h.evidence);
   }
@@ -603,7 +621,33 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
      * and the offers.
      */
     const states = findStates(brief);
-    if (states.length) {
+    if (states.length > 1 && /\b(?:both|and|&|plus|as well as)\b/i.test(brief)) {
+      /*
+       * "BOTH NEW YORK AND NEW JERSEY" IS ONE ANSWER, NOT TWO RIVALS.
+       *
+       * Recording every state as a separate candidate fixed the silent
+       * halving and immediately created a worse bug: the conflict check saw
+       * two values for one field and asked
+       *
+       *   "The brief gives region / market twice: 'New York' and 'New
+       *    Jersey'. Which one is right?"
+       *
+       * on a brief that says, in as many words, that it wants both. That is
+       * confidently wrong in a polite voice, which is harder to catch than a
+       * gap - the marketer has to argue with it.
+       *
+       * Conjoined states are one multi-state market. The field still receives
+       * a single value, the widening maps it to the country the form can
+       * hold, and both states stay visible in the value itself.
+       */
+      push({
+        key: "region",
+        label: spec?.label ?? "Region / market",
+        value: states.map((s) => s.name).join(", "),
+        from: "stated",
+        evidence: states.map((s) => s.name).join(" and "),
+      });
+    } else if (states.length) {
       for (const s of states) {
         push({
           key: "region",
@@ -841,7 +885,20 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
      * complement of the requested audience, with a plausible count attached.
      */
     if (x) {
-      const what = (x[1] || "").trim()
+      /*
+       * Cut at a WORD, not at a character count.
+       *
+       * The 70-character limit landed mid-word and the fragment was written
+       * to Workfront: "...no point defending someone we". A truncation that
+       * reads as a sentence is worse than an obvious one - nobody queries it.
+       */
+      const cutAtWord = (t: string, max: number) => {
+        if (t.length <= max) return t;
+        const cut = t.slice(0, max);
+        const lastSpace = cut.lastIndexOf(" ");
+        return (lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut).replace(/[\s,;-]+$/, "") + "...";
+      };
+      const what = cutAtWord((x[1] || "").trim(), 70)
         .replace(/\s+with us\s*(yet)?$/i, "")
         .replace(/^(?:anyone|anybody|any|all|those|people|customers)\s+(?:who\s+)?/i, "");
       if (what) {
