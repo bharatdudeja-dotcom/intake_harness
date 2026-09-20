@@ -246,11 +246,24 @@ function findLaunchDates(brief: string): ExtractedField[] {
    * further away is usually about something else.
    */
   const OTHER_KIND_OF_DATE =
-    /\b(?:legal|compliance|sign[- ]?off|approval|due|deadline|cut[- ]?off|copy|creative|asset|artwork|brief(?:ing)?|kick[- ]?off|review|qa|proof|deliver(?:y|ed|able)?|submit(?:ted|ssion)?|by)\b[^.]{0,24}$/i;
+    /\b(?:legal|compliance|sign[- ]?off|approval|due|deadline|cut[- ]?off|copy|creative|asset|artwork|brief(?:ing)?|kick[- ]?off|review|qa|proof|deliver(?:y|ed|able)?|submit(?:ted|ssion)?)\b/i;
 
   for (const h of hits) {
-    const before = text.slice(Math.max(0, h.at - 40), h.at);
-    if (OTHER_KIND_OF_DATE.test(before)) continue;
+    /*
+     * The qualifier has to belong to THIS date's clause.
+     *
+     * A fixed lookback window read across the comma: in "Legal sign-off by
+     * 1 October, in market 20 November" the window for 20 November reached
+     * back far enough to find "sign-off", so BOTH dates were discarded and a
+     * bare-month fallback produced "October" - the sign-off month, presented
+     * as the launch date. Worse than the bug it replaced.
+     *
+     * Clauses are what separate the two facts in that sentence, so the search
+     * stops at the punctuation that ends the previous one.
+     */
+    const before = text.slice(0, h.at);
+    const clause = before.slice(Math.max(0, before.lastIndexOf(",") + 1, before.lastIndexOf(";") + 1));
+    if (OTHER_KIND_OF_DATE.test(clause)) continue;
     add(h.day, h.month, h.evidence);
   }
 
