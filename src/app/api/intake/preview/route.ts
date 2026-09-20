@@ -126,11 +126,30 @@ export async function POST(req: NextRequest) {
     missing,
     questions: missing,
     formFieldsSeen: "formFieldCount" in plan ? plan.formFieldCount : 0,
+    /**
+     * WHY THERE IS NOTHING TO WRITE, WHEN THERE IS NOTHING TO WRITE.
+     *
+     * The form is read live, and that read can fail - the Workfront connection
+     * being signed out is the common case. The failure was caught and then
+     * dropped, so the preview answered `willWrite: {}` with no explanation,
+     * which reads as "this brief fills nothing" rather than "I could not see
+     * the form". A marketer would reasonably conclude their brief was useless.
+     *
+     * This is the same honesty rule the rest of the preview follows: an empty
+     * answer and an unavailable answer are different facts, and saying so is
+     * the difference between a preview and a guess.
+     */
+    formError: "error" in plan ? (plan as { error?: string }).error ?? null : null,
+    formReadable: ("formFieldCount" in plan ? plan.formFieldCount : 0) > 0,
     /*
      * Said plainly, because the next call is the irreversible one.
      */
     note:
-      "Nothing has been created. Creating the request notifies the queue by email, so show this to " +
-      "the marketer, take any corrections, and only then start the run.",
+      ("formFieldCount" in plan ? plan.formFieldCount : 0) > 0
+        ? "Nothing has been created. Creating the request notifies the queue by email, so show this to " +
+          "the marketer, take any corrections, and only then start the run."
+        : "Nothing has been created - AND the Workfront form could not be read, so this preview shows " +
+          "what was understood from the brief but NOT what would be written to the request. Do not " +
+          "file from this preview: sign the Workfront connection in and preview again first.",
   });
 }
