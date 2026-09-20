@@ -9,6 +9,7 @@ import {
   type DataSourceResolution,
 } from "@/lib/agents/review/data-source";
 import { probeSchemas, neededAttributes } from "@/lib/agents/audience/aep";
+import { workfrontWritesDisabled } from "@/lib/agents/shared/workfront-writes";
 import { type CommentLike } from "@/lib/agents/review/rejection";
 import { gatherAepContext, formatAepContextNote } from "@/lib/agents/review/aep-context";
 import { requiredFields } from "@/lib/agents/shared/campaign-brief";
@@ -218,8 +219,10 @@ export async function POST(req: NextRequest) {
       // second comment here would only duplicate it. The custom-FIELD write
       // stays: it survives on the record itself, not in a comment thread that
       // scrolls away, and the central comment hook does not touch fields.
+      // Kill switch: skip the Workfront custom-field write while writes are
+      // disabled for testing (agents/shared/workfront-writes.ts).
       let workfrontDoc: { fieldUpdate: FieldUpdateOutcome } | null = null;
-      if (objId) {
+      if (objId && !workfrontWritesDisabled()) {
         const objCode = input.workfront?.objCode || "OPTASK";
         const fieldUpdate = await updateReviewNotesField(objId, objCode, aepNote);
         workfrontDoc = { fieldUpdate };

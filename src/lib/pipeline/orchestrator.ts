@@ -4,6 +4,7 @@ import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRo
 import * as liveProgress from "@/lib/live-progress";
 import { postAgentUpdate, type AgentUpdateResult } from "./workfront-updates";
 import { findPriorTaskRun } from "./idempotent-write";
+import { workfrontWritesDisabled } from "@/lib/agents/shared/workfront-writes";
 
 /**
  * Runs exactly the NEXT agent for a run over real HTTP to that agent's own
@@ -85,17 +86,25 @@ async function advanceOneStep(
   // own INSERT ever committed leaves nothing here to find, and only a live
   // check against Workfront's own comment stream could close that half; see
   // idempotent-write.ts's docstring for why that is not what this is.
-  const priorStep = await findPriorTaskRun<unknown>(
-    run.run_id,
-    agent.name,
-    [response.status],
-    stepIndex,
-  );
-  const priorUpdate = (priorStep?.metadata as { workfrontUpdate?: AgentUpdateResult } | null)?.workfrontUpdate;
-  const workfrontUpdate: AgentUpdateResult =
-    priorUpdate?.attempted && priorUpdate.posted
-      ? { ...priorUpdate, reused: true }
-      : await postAgentUpdate(agent.name, response.status, response.message, response.output, priorOutputs);
+  // Kill switch: skip the Workfront comment post AND the idempotency lookup
+  // that only guards it, so a run flows without the broken write tools. See
+  // agents/shared/workfront-writes.ts.
+  let workfrontUpdate: AgentUpdateResult;
+  if (workfrontWritesDisabled()) {
+    workfrontUpdate = { attempted: false, reason: "Workfront writes disabled (WORKFRONT_WRITES_DISABLED=true) - comment skipped." };
+  } else {
+    const priorStep = await findPriorTaskRun<unknown>(
+      run.run_id,
+      agent.name,
+      [response.status],
+      stepIndex,
+    );
+    const priorUpdate = (priorStep?.metadata as { workfrontUpdate?: AgentUpdateResult } | null)?.workfrontUpdate;
+    workfrontUpdate =
+      priorUpdate?.attempted && priorUpdate.posted
+        ? { ...priorUpdate, reused: true }
+        : await postAgentUpdate(agent.name, response.status, response.message, response.output, priorOutputs);
+  }
 
   try {
     await query<TaskRunRow>(
