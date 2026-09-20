@@ -176,32 +176,67 @@ function titleCase(m: string): string {
  * month is "derived", because a month is not a date and the day still has to
  * be confirmed.
  */
-function findLaunchDate(brief: string): ExtractedField | null {
+/**
+ * EVERY date the brief names, in the order it names them.
+ *
+ * This used to return only the first. That was invisible until someone amended
+ * a brief - "launch 20 October ... actually, pull the in-market date forward to
+ * 6 October" - and the second date was never even looked at, so the correction
+ * could not be noticed, let alone honoured. The preview then showed 20 October
+ * back to the marketer with no sign that anything had been dropped.
+ *
+ * The first is still the one that fills the field; the rest exist so a
+ * disagreement can be SEEN. Picking the last would just be a different guess,
+ * and prose does not reliably put the truest date last.
+ */
+function findLaunchDates(brief: string): ExtractedField[] {
   const text = String(brief || "");
+  const out: ExtractedField[] = [];
+  const seenValue = new Set<string>();
 
-  // "1 November", "1st Nov", "November 1", "Nov 1st" - a real date.
-  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_PATTERN})\\b`, "i");
-  const monthFirst = new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "i");
-
-  const dm = text.match(dayFirst);
-  const md = text.match(monthFirst);
-  const exact = dm
-    ? { day: dm[1], month: dm[2], evidence: dm[0] }
-    : md
-      ? { day: md[2], month: md[1], evidence: md[0] }
-      : null;
-
-  if (exact) {
-    const full = MONTHS.find((m) => m.startsWith(exact.month.slice(0, 3).toLowerCase())) || exact.month;
-    return {
+  const add = (day: string, month: string, evidence: string) => {
+    const full = MONTHS.find((m) => m.startsWith(month.slice(0, 3).toLowerCase())) || month;
+    const value = `${day} ${titleCase(full)}`;
+    if (seenValue.has(value)) return;
+    seenValue.add(value);
+    out.push({
       key: "launch_date",
       label: "Launch date",
-      value: `${exact.day} ${titleCase(full)}`,
+      value,
       // A day and a month is a date. The marketer said it; we did not infer it.
       from: "stated",
-      evidence: exact.evidence,
-    };
+      evidence,
+    });
+  };
+
+  // "1 November", "1st Nov" - and "November 1", "Nov 1st".
+  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_PATTERN})\\b`, "gi");
+  const monthFirst = new RegExp(`\\b(${MONTH_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, "gi");
+
+  /*
+   * Ordered by where each appears, not by which pattern matched, so "launch 20
+   * October ... forward to 6 October" reports 20 before 6 whichever shape each
+   * was written in. The order is what makes the question readable: "you said
+   * the 20th and then the 6th".
+   */
+  const hits: Array<{ at: number; day: string; month: string; evidence: string }> = [];
+  for (const m of text.matchAll(dayFirst)) {
+    hits.push({ at: m.index ?? 0, day: m[1], month: m[2], evidence: m[0] });
   }
+  for (const m of text.matchAll(monthFirst)) {
+    hits.push({ at: m.index ?? 0, day: m[2], month: m[1], evidence: m[0] });
+  }
+  hits.sort((a, b) => a.at - b.at);
+  for (const h of hits) add(h.day, h.month, h.evidence);
+
+  if (out.length) return out;
+
+  const single = findBareMonth(text);
+  return single ? [single] : [];
+}
+
+function findBareMonth(brief: string): ExtractedField | null {
+  const text = String(brief || "");
 
   // A bare month, on a word boundary. "end of October" / "by November".
   const bare = text.match(new RegExp(`\\b(?:(end|late|early|mid)\\s+(?:of\\s+)?)?(${MONTH_PATTERN})\\b`, "i"));
@@ -502,8 +537,12 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   // 4. A date written in prose.
   if (!seen.has("launch_date")) {
-    const d = findLaunchDate(brief);
-    if (d) push(d);
+    /*
+     * Every date, not the first. push() keeps the first for the field and
+     * records the rest as candidates, so an amendment becomes a question
+     * instead of vanishing.
+     */
+    for (const d of findLaunchDates(brief)) push(d);
   }
 
   // 5. The campaign name, from the opening line.
