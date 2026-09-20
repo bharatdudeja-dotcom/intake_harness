@@ -772,9 +772,51 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   const missing = requiredFields().filter((f: FieldSpec) => !fields[f.key]);
   const inferred = extracted.filter((f) => f.from !== "stated");
-  const conflicts = findConflicts(candidates, fields);
+  const conflicts = findConflicts(candidates, fields, brief);
 
   return { fields, extracted, missing, inferred, conflicts };
+}
+
+/*
+ * Months are proper nouns and are not places. Without this, "in January" reads
+ * as a named market and every dated brief grows a spurious geography question.
+ */
+const NOT_A_PLACE =
+  /^(January|February|March|April|May|June|July|August|September|October|November|December|Q[1-4]|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Xfinity|Comcast|Workfront|Email|SMS)$/i;
+
+/**
+ * The brief named a specific market AND a broad one.
+ *
+ * A marketer asked for Boise and the Treasure Valley with a national digital
+ * layer over the top, and the request was filed as "National" - her actual
+ * primary ask silently gone, with nothing asked and nothing flagged. The broad
+ * option wins because the option list is matched before any place is looked
+ * for, and "National" is one of the options.
+ *
+ * We cannot map a city to this tenant's region field, and should not pretend
+ * to. But losing the marketer's own words without a word is the failure; being
+ * unable to file them is not. So it asks.
+ */
+function findBroadAndSpecificPlace(brief: string, region: string): Conflict | null {
+  const BROAD = /^(National|Northeast|Southeast|Midwest|Southwest|West)$/i;
+  if (!region || !BROAD.test(region.trim())) return null;
+
+  const locative = /\b(?:in|around|across|within|near|throughout|serving|covering)\s+(?:the\s+)?([A-Z][a-zA-Z]+(?:\s+(?:Valley|Metro|County|Area|Region|Market))?)/g;
+  for (const m of brief.matchAll(locative)) {
+    const name = (m[1] || "").trim();
+    if (!name || NOT_A_PLACE.test(name)) continue;
+    if (name.toLowerCase() === region.toLowerCase()) continue;
+    return {
+      key: "region",
+      label: "Region / market",
+      values: [name, region],
+      ask:
+        `The brief names "${name}" and also reads as ${region.toLowerCase()}. ` +
+        `Which is the primary market? I have used "${region}", and this form has no field for a ` +
+        `market as specific as "${name}", so if that is the real target it needs saying explicitly.`,
+    };
+  }
+  return null;
 }
 
 /**
@@ -805,6 +847,7 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 function findConflicts(
   candidates: Map<string, ExtractedField[]>,
   fields: Record<string, string>,
+  brief: string,
 ): Conflict[] {
   const out: Conflict[] = [];
   const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -852,6 +895,9 @@ function findConflicts(
         "Which is it? Prospects and existing customers are built from different places, so it changes the whole build.",
     });
   }
+
+  const place = findBroadAndSpecificPlace(brief, fields.region || "");
+  if (place) out.push(place);
 
   return out;
 }
