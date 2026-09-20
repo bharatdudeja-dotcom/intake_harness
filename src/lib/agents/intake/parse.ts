@@ -625,6 +625,36 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
   }
 
   /*
+   * 5b. THE AGENCY, WHICH WAS NAMED IN EVERY BRIEF AND READ IN NONE.
+   *
+   * A marketer reviewing six of her own briefs found she had named the agency
+   * in all six - Argon Digital, Bluestem Creative, Meridian Point - and it
+   * appeared nowhere: not in what was captured, not in the questions, not in
+   * what the form could not hold. It was simply not looked for.
+   *
+   * That is the quietest way to lose something. A field we ask about is
+   * visible; a field we never mention leaves the marketer assuming it was
+   * understood, because they said it plainly and nothing objected.
+   *
+   * Who produces the work is not decoration on a creative request - it decides
+   * who gets briefed and which review path the job takes.
+   */
+  if (!seen.has("agency")) {
+    const a = brief.match(
+      /\b(?:agency|agency\s+partner|creative\s+agency|produced\s+by|handled\s+by)\b\s*(?:is|will be|:|=)?\s*([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3})/,
+    );
+    if (a && a[1]) {
+      push({
+        key: "agency",
+        label: "Agency",
+        value: a[1].trim(),
+        from: "stated",
+        evidence: a[0].trim(),
+      });
+    }
+  }
+
+  /*
    * 6. The offer - "$350 prepaid card", "600 dollar prepaid card".
    *
    * A MONEY AMOUNT IS NOT AUTOMATICALLY AN OFFER.
@@ -644,9 +674,21 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
    * customer is being given.
    */
   if (!seen.has("offer")) {
+    /*
+     * THE WHOLE OFFER, NOT THE FIRST NUMBER IN IT.
+     *
+     * The old pattern stopped after the sum and an optional word or two, so
+     * "$39.99/mo plus a $100 gift card" was captured as "$39.99" - the price,
+     * without the incentive that is the actual offer. A marketer reading that
+     * back sees a number she recognises and no reason to look closer, which is
+     * precisely when a truncation survives review.
+     *
+     * An offer runs to the end of its clause. That is where the marketer
+     * stopped describing it.
+     */
     const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?\s*[mk]?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)/i;
     const o = brief.match(
-      new RegExp(MONEY.source + /\s*([a-z][a-z \-]{2,30}?)?(?=[.,]|\s+(?:on it|incentive|offer)|$)/.source, "i"),
+      new RegExp(MONEY.source + /(?:[^.,;\n]{0,70}?)?(?=[.,;\n]|$)/.source, "i"),
     );
     if (o) {
       const at = o.index ?? 0;
