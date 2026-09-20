@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { PIPELINE } from "./registry";
-import type { AgentName, AgentRequest, AgentResponse, AgentStatus, RunRow, TaskRow, TaskRunRow } from "./types";
+import type { AgentName, AgentRequest, AgentResponse, RunRow, TaskRow, TaskRunRow } from "./types";
 import * as liveProgress from "@/lib/live-progress";
 import { postAgentUpdate, type AgentUpdateResult } from "./workfront-updates";
 import { findPriorTaskRun } from "./idempotent-write";
@@ -30,14 +30,6 @@ import { findPriorTaskRun } from "./idempotent-write";
  * Escalation any more (removed on explicit product direction; see
  * registry.ts's note where it used to be defined). "needs_input" was
  * already never a failure — an expected, resumable pause — and remains one.
- *
- * An "in_progress" step is the fire-and-poll case: the agent accepted
- * long-running work and returned immediately, so this records the step and
- * leaves the run at "in_progress" without blocking. The work finishes
- * out-of-band via completeInProgressStep (a PATCH to the step's task_run),
- * NOT by this request awaiting it — which is what keeps a quarter-long
- * B4/B5 sub-workflow from stranding the run at "running" past
- * AGENT_CALL_TIMEOUT_MS.
  */
 async function advanceOneStep(
   run: RunRow,
@@ -129,15 +121,9 @@ async function advanceOneStep(
     );
 
     if (response.status !== "completed") {
-      // Covers "needs_input", "failed", AND "in_progress" identically here:
-      // record the step's outcome and set the run to that status at THIS
-      // step, then return without chaining. For "in_progress" that is the
-      // whole fire-and-poll mechanism — the run now sits at "in_progress" on
-      // this step (a durable, pollable state, not the transient "running"),
-      // and the agent's later PATCH to this task_run is what advances it (see
-      // completeInProgressStep). The task_run's finished_at/duration_ms are
-      // the ACCEPT time for an in_progress row; the PATCH overwrites them
-      // with the real completion time.
+      // Covers "needs_input" and "failed" identically here: record the step's
+      // outcome and set the run to that status at THIS step, then return
+      // without chaining.
       const [updated] = await query<RunRow>(
         `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
          WHERE run_id = $1 RETURNING *`,
@@ -292,134 +278,6 @@ export async function continueRun(runId: string, baseUrl: string): Promise<RunRo
   }
 }
 
-/**
- * Finalize an "in_progress" step from OUT OF BAND — the fire-and-poll
- * completion path. A long-running agent (Audience Creation's GTO/FAC
- * sub-workflow, B4/B5) returned "in_progress" earlier; the orchestrator
- * recorded that step and left the run sitting at "in_progress" instead of
- * blocking on a multi-hour await. Now the agent (or a webhook it triggered)
- * calls PATCH /api/runs/[runId]/task-runs/[taskRunId] with the real outcome,
- * which lands here.
- *
- * This does NOT call the agent's HTTP route again — the agent has already
- * done the work and is REPORTING it. It overwrites the in_progress task_run
- * with the terminal outcome (real finished_at/duration_ms), then:
- *   - "completed" → advance exactly as a normal completed step does,
- *     including the approval gate and any requiresApproval chaining.
- *   - "needs_input" / "failed" → set the run to that status at this step.
- *
- * Idempotency/guarding: only a task_run currently in 'in_progress' for a run
- * currently at 'in_progress' can be finalized, so a duplicate/late PATCH
- * (e.g. a retried webhook) is rejected rather than double-advancing.
- *
- * ITS OWN postAgentUpdate call below is NOT guarded the way advanceOneStep's
- * is (see that function's comment and idempotent-write.ts): the status flip
- * away from 'in_progress' and the recorded workfrontUpdate both land in the
- * SAME UPDATE statement here, so a crash between posting the comment and
- * that UPDATE committing leaves no row anywhere showing the post happened -
- * there is nothing a task_runs check could find. Closing that would need a
- * live check against Workfront's own comment stream, which this repo cannot
- * verify right now (the tenant's OAuth session is expired) - left as a known
- * gap rather than a guess at an unverified tool schema.
- */
-export async function completeInProgressStep(
-  runId: string,
-  taskRunId: number,
-  outcome: { status: AgentStatus; output?: unknown; message?: string; metadata?: Record<string, unknown> },
-  baseUrl: string,
-): Promise<RunRow> {
-  if (outcome.status === "in_progress") {
-    throw new Error(`Cannot finalize task_run ${taskRunId} to "in_progress" — supply a terminal status.`);
-  }
-
-  const [run] = await query<RunRow>(`SELECT * FROM runs WHERE run_id = $1`, [runId]);
-  if (!run) throw new Error(`No run found for run_id ${runId}.`);
-  if (run.status !== "in_progress") {
-    throw new Error(`Run ${runId} is "${run.status}", not "in_progress" — nothing to finalize.`);
-  }
-
-  const [step] = await query<TaskRunRow>(
-    `SELECT * FROM task_runs WHERE task_run_id = $1 AND run_id = $2`,
-    [taskRunId, runId],
-  );
-  if (!step) throw new Error(`No task_run ${taskRunId} on run ${runId}.`);
-  if (step.status !== "in_progress") {
-    throw new Error(`task_run ${taskRunId} is "${step.status}", not "in_progress" — already finalized.`);
-  }
-
-  const finishedAt = new Date();
-  const startedAt = new Date(step.started_at);
-  const durationMs = finishedAt.getTime() - startedAt.getTime();
-
-  // Same centralized "what this agent did" comment as advanceOneStep, for the
-  // out-of-band completion path. priorOutputs comes from the already-completed
-  // steps (Intake/Review carry the Workfront identity); the finishing step's
-  // own output is checked first. Best-effort — folded into this step's
-  // metadata, never fatal.
-  const { priorOutputs: priorForComment } = await completedTaskRunsFor(runId);
-  const workfrontUpdate = await postAgentUpdate(
-    step.task_id,
-    outcome.status,
-    outcome.message,
-    outcome.output,
-    priorForComment,
-  );
-
-  await query(
-    `UPDATE task_runs
-       SET status = $2, output = $3::jsonb, message = $4, metadata = $5::jsonb,
-           finished_at = $6, duration_ms = $7
-     WHERE task_run_id = $1`,
-    [
-      taskRunId,
-      outcome.status,
-      JSON.stringify(outcome.output ?? null),
-      outcome.message ?? null,
-      JSON.stringify({ ...(outcome.metadata ?? {}), workfrontUpdate }),
-      finishedAt.toISOString(),
-      durationMs,
-    ],
-  );
-
-  if (outcome.status !== "completed") {
-    const [updated] = await query<RunRow>(
-      `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
-       WHERE run_id = $1 RETURNING *`,
-      [runId, outcome.status, step.step_index],
-    );
-    return updated;
-  }
-
-  // Completed out-of-band: advance the pipeline as if this step had just
-  // returned "completed" synchronously. Rebuild priorOutputs from every
-  // completed step (now including this one), and either chain into the next
-  // agent (requiresApproval: false) or stop at awaiting_approval / completed.
-  const nextStepIndex = step.step_index + 1;
-  const isLastStep = nextStepIndex >= PIPELINE.length;
-
-  if (!isLastStep && PIPELINE[nextStepIndex].requiresApproval === false) {
-    const { priorOutputs } = await completedTaskRunsFor(runId);
-    const [running] = await query<RunRow>(
-      `UPDATE runs SET status = 'running', current_step = $2, updated_at = NOW()
-       WHERE run_id = $1 RETURNING *`,
-      [runId, nextStepIndex],
-    );
-    liveProgress.resetRun(runId);
-    try {
-      return await advanceOneStep(running, nextStepIndex, outcome.output, priorOutputs, baseUrl);
-    } finally {
-      liveProgress.clearRun(runId);
-    }
-  }
-
-  const [updated] = await query<RunRow>(
-    `UPDATE runs SET status = $2, current_step = $3, updated_at = NOW()
-     WHERE run_id = $1 RETURNING *`,
-    [runId, isLastStep ? "completed" : "awaiting_approval", nextStepIndex],
-  );
-  return updated;
-}
-
 /** Every completed task_run for a run, as the `priorOutputs` map plus the most recent one — shared by resumeRun/continueRun. */
 async function completedTaskRunsFor(
   runId: string,
@@ -522,7 +380,6 @@ export interface RunStats {
   total: number;
   running: number;
   needsInput: number;
-  inProgress: number;
   awaitingApproval: number;
   completed: number;
   failed: number;
@@ -533,14 +390,13 @@ export interface RunStats {
 /** Dashboard tile counts. Cast to ::int so the pg driver returns numbers, not bigint strings. */
 export async function getRunStats(): Promise<RunStats> {
   const [row] = await query<{
-    total: number; running: number; needs_input: number; in_progress: number; awaiting_approval: number;
+    total: number; running: number; needs_input: number; awaiting_approval: number;
     completed: number; failed: number; approved: number; promoted: number;
   }>(`
     SELECT
       COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE status = 'running')::int AS running,
       COUNT(*) FILTER (WHERE status = 'needs_input')::int AS needs_input,
-      COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
       COUNT(*) FILTER (WHERE status = 'awaiting_approval')::int AS awaiting_approval,
       COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
       COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
@@ -552,7 +408,6 @@ export async function getRunStats(): Promise<RunStats> {
     total: row.total,
     running: row.running,
     needsInput: row.needs_input,
-    inProgress: row.in_progress,
     awaitingApproval: row.awaiting_approval,
     completed: row.completed,
     failed: row.failed,

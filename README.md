@@ -123,14 +123,10 @@ and must return:
 - `completed` → `output` becomes the next agent's `input`.
 - `needs_input` → the run pauses (e.g. the marketer needs to confirm
   something); `message` should say what's needed.
-- `in_progress` → the agent accepted long-running work and will finish it
-  out-of-band via `PATCH /api/runs/[runId]/task-runs/[taskRunId]` (see
-  "Long-running work: fire-and-poll" below); the run sits pollable at
-  `in_progress` meanwhile rather than blocking the request.
 - `failed` → the run stops; `message` should say why.
 - `metadata` is recorded on the step but never forwarded downstream — use it
-  for the health signals the doc calls out (loop counts, request age,
-  predicted counts) without polluting the next agent's input.
+  for the health signals the doc calls out (loop counts, request age)
+  without polluting the next agent's input.
 
 To add another **sequential** agent: add one entry to `PIPELINE` in
 `src/lib/pipeline/registry.ts` and create its route under
@@ -179,7 +175,7 @@ this team uses before treating these as final:
 |---|---|---|
 | `intake` | `search_knowledge_base`; `wf_core_project_{list,get,create}`; `wf_core_issue_{list,get,create}` | *(none)* |
 | `review` | `search_knowledge_base`; `wf_core_project_{get,update}`; `wf_core_issue_{get,update}`; `wf_comments_{list,create}` | *(none)* |
-| `audience_creation` | `search_knowledge_base`, segment estimate/CRUD, schema read | *(none)* |
+| `audience_creation` | `search_knowledge_base`, segment read, schema read | *(none)* |
 | `escalation` | `search_knowledge_base` | `intake`, `review`, `audience_creation` |
 
 `escalation`'s broad `contextAccess` is deliberate, not a scoping gap — its
@@ -232,7 +228,7 @@ DROP TABLE IF EXISTS pipeline_runs;
   rejection-parsing/triage is Dev 2's — see B2 in the requirements doc.
 - **Audience Creation** (`/api/agents/audience-creation`): returns a
   structurally complete `AudienceCreationOutput` (build path, attribute
-  availability, open-request tracking, predicted count, identity gap) with
+  availability, open-request tracking, identity gap) with
   placeholder values — the fields are derived directly from B4/B5/B6/B8 in
   the requirements doc so the next session can implement field by field
   instead of re-deriving the shape.
@@ -244,32 +240,3 @@ DROP TABLE IF EXISTS pipeline_runs;
   doc's own blockers. No persistent cross-run store yet — see the TODO in
   the route for the "crawl, walk, run loop" B9 describes.
 
-## Long-running work: fire-and-poll
-
-`runPipeline` awaits each agent call and, for fast agents, returns the
-final state in one request/response cycle — bounded by
-`AGENT_CALL_TIMEOUT_MS` (60s). That is fine while an agent is quick, but the
-GTO/FAC sub-workflow in B4/B5 can run for a quarter, and blocking a single
-request on it would blow that timeout and strand the run at `running`.
-
-So an agent that has accepted long-running work returns
-`status: "in_progress"` instead of awaiting it. The orchestrator records the
-step, sets the run to `in_progress` (a durable, pollable state — distinct
-from the transient `running`), and returns immediately. When the real work
-finishes, the agent (or a webhook it triggered) calls:
-
-```
-PATCH /api/runs/[runId]/task-runs/[taskRunId]
-  { "status": "completed" | "needs_input" | "failed", output?, message?, metadata? }
-```
-
-which finalizes that task_run with its real timing and advances the pipeline
-exactly as a synchronously-completed step would (approval gate and
-`requiresApproval` chaining included — see `completeInProgressStep` in
-`orchestrator.ts`). A duplicate/late PATCH is rejected with 409 rather than
-double-advancing. The marketer-facing UI polls `GET /api/runs/[runId]`
-throughout; `in_progress` is what it sits on until the callback lands.
-
-Agents that finish quickly keep returning `completed`/`needs_input`/`failed`
-synchronously — nothing about the existing contract changed, `in_progress`
-is purely additive.

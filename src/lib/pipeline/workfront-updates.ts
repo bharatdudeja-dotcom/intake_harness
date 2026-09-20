@@ -1,8 +1,7 @@
 /**
  * Posting an "update on what the agent did" back onto the Workfront issue,
  * CENTRALLY, for every agent. This is the one place the orchestrator calls
- * after it records a step (advanceOneStep) and after it finalizes an
- * out-of-band step (completeInProgressStep). Individual agent routes do NOT
+ * after it records a step (advanceOneStep). Individual agent routes do NOT
  * each post their own status comment any more — this is the single commenting
  * authority, so a new agent added to the PIPELINE gets this behaviour for free
  * rather than having to remember to wire it up.
@@ -52,7 +51,6 @@ function agentLabel(agent: AgentName): string {
 const STATUS_PHRASE: Record<AgentStatus, string> = {
   completed: "completed",
   needs_input: "needs input",
-  in_progress: "in progress",
   failed: "failed",
 };
 
