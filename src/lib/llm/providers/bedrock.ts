@@ -39,6 +39,30 @@ export interface BedrockConfig {
 const sha256Hex = (data: string) => createHash("sha256").update(data, "utf8").digest("hex");
 const hmac = (key: Buffer | string, data: string) => createHmac("sha256", key).update(data, "utf8").digest();
 
+/**
+ * AWS SigV4 URI encoding for a single path segment.
+ *
+ * THIS IS THE BUG THAT PRODUCED THE 403 "signature does not match": the model
+ * id contains a colon (…-v1:0). encodeURIComponent leaves some characters AWS
+ * expects encoded and, more importantly, the encoded string used to build the
+ * canonical request for signing MUST be byte-identical to the path actually
+ * sent on the wire. SigV4's rule: encode every byte EXCEPT the unreserved set
+ * A-Z a-z 0-9 - _ . ~, uppercase-hex the rest. So ':' -> %3A, and (for a path
+ * segment) '/' is also encoded. encodeURIComponent gets the unreserved set
+ * right but we then have to sign and send the SAME value; centralizing it here
+ * guarantees they can't drift.
+ */
+export function awsUriEncodeSegment(segment: string): string {
+  return Array.from(segment)
+    .map((ch) => {
+      if (/[A-Za-z0-9\-_.~]/.test(ch)) return ch;
+      return Array.from(new TextEncoder().encode(ch))
+        .map((b) => `%${b.toString(16).toUpperCase().padStart(2, "0")}`)
+        .join("");
+    })
+    .join("");
+}
+
 /** The AWS Signature V4 signing-key derivation. */
 function signingKey(secret: string, dateStamp: string, region: string, service: string): Buffer {
   const kDate = hmac(`AWS4${secret}`, dateStamp);
@@ -62,7 +86,10 @@ export function createBedrockClient(cfg: BedrockConfig): LlmClient {
   return {
     id: `bedrock:${modelId}`,
     async complete(req: LlmCompletionRequest): Promise<LlmCompletionResult> {
-      const path = `/model/${encodeURIComponent(modelId)}/invoke`;
+      // The SAME encoded path is used to sign (canonical request below) and to
+      // send (fetch URL). Only the modelId segment needs encoding; "/model" and
+      // "/invoke" are literal. Byte-identical here is the whole fix.
+      const path = `/model/${awsUriEncodeSegment(modelId)}/invoke`;
       const body = JSON.stringify({
         anthropic_version: "bedrock-2023-05-31",
         max_tokens: req.maxTokens ?? 2048,
