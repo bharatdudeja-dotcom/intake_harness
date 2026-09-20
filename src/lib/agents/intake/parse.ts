@@ -700,11 +700,22 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
      * An offer runs to the end of its clause. That is where the marketer
      * stopped describing it.
      */
-    const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?\s*[mk]?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)/i;
-    const o = brief.match(
-      new RegExp(MONEY.source + /(?:[^.,;\n]{0,70}?)?(?=[.,;\n]|$)/.source, "i"),
-    );
-    if (o) {
+    /*
+     * EVERY SUM, FOR THE SAME REASON AS EVERY DATE.
+     *
+     * Only the first money match was examined, so when a marketer wrote
+     * "the offer moves to $20/mo" after naming a different one, the change
+     * disappeared entirely - no new value, and no question either, because
+     * there was nothing for the conflict check to compare. The date amendment
+     * was caught and the offer amendment silently was not, in the same brief.
+     *
+     * push() keeps the first for the field and records the rest, so a changed
+     * offer now asks rather than vanishing.
+     */
+    const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?\s*[mk]?|\b\d[\d,]*\s*(?:dollar|usd|pound|gbp)s?)/gi;
+    const WHOLE = new RegExp(MONEY.source + /(?:[^.,;\n]{0,70}?)?(?=[.,;\n]|$)/.source, "gi");
+
+    for (const o of brief.matchAll(WHOLE)) {
       const at = o.index ?? 0;
       // The words immediately around the sum, which is where a brief says what
       // kind of money it is talking about.
@@ -712,23 +723,13 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
       const isSpend =
         /\b(budget|working media|media spend|spend|investment|funding|allocation|capex|opex)\b/i.test(around);
 
-      if (isSpend) {
-        push({
-          key: "budget",
-          label: "Budget",
-          value: o[0].trim().replace(/\s+/g, " "),
-          from: "stated",
-          evidence: o[0].trim(),
-        });
-      } else {
-        push({
-          key: "offer",
-          label: "Offer",
-          value: o[0].trim().replace(/\s+/g, " "),
-          from: "stated",
-          evidence: o[0].trim(),
-        });
-      }
+      push({
+        key: isSpend ? "budget" : "offer",
+        label: isSpend ? "Budget" : "Offer",
+        value: o[0].trim().replace(/\s+/g, " "),
+        from: "stated",
+        evidence: o[0].trim(),
+      });
     }
   }
 
