@@ -1,0 +1,91 @@
+/**
+ * Resolve the one configured LLM client from environment variables.
+ *
+ * This is the single place that knows which provider is in play. Everything
+ * else depends only on the LlmClient interface, so switching between Bedrock,
+ * Anthropic, and a self-hosted Ollama is purely a matter of env config - no
+ * code change, no rebuild logic branching through the app.
+ *
+ * OPT-IN BY DEFAULT: getLlmClient() returns null when LLM_PROVIDER is unset.
+ * Callers (see agents/intake/llm-extract.ts) treat null as "no LLM configured,
+ * use the deterministic path" - so the app runs exactly as before until someone
+ * deliberately turns an LLM on. A provider that IS named but is misconfigured
+ * (missing key/host) throws LlmConfigError rather than silently returning null,
+ * because "you asked for Bedrock but gave no credentials" is a mistake worth
+ * surfacing, not one to paper over by quietly falling back.
+ *
+ *   LLM_PROVIDER = bedrock | anthropic | ollama   (unset = LLM disabled)
+ *
+ * Per-provider vars - see each provider file for the full list:
+ *   bedrock:   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+ *              [AWS_SESSION_TOKEN], [BEDROCK_MODEL_ID]
+ *   anthropic: ANTHROPIC_API_KEY, [ANTHROPIC_MODEL], [ANTHROPIC_BASE_URL]
+ *   ollama:    OLLAMA_HOST (required, changes often), OLLAMA_MODEL (required)
+ */
+
+import { LlmConfigError, type LlmClient, type LlmProvider } from "./types";
+import { createBedrockClient } from "./providers/bedrock";
+import { createAnthropicClient } from "./providers/anthropic";
+import { createOllamaClient } from "./providers/ollama";
+
+export type { LlmClient, LlmCompletionRequest, LlmCompletionResult } from "./types";
+export { LlmConfigError } from "./types";
+
+function req(name: string): string {
+  const v = process.env[name];
+  if (!v || !v.trim()) {
+    throw new LlmConfigError(`${name} is required for the selected LLM_PROVIDER but is not set.`);
+  }
+  return v.trim();
+}
+
+function opt(name: string): string | undefined {
+  const v = process.env[name];
+  return v && v.trim() ? v.trim() : undefined;
+}
+
+/**
+ * The configured client, or null when no provider is selected.
+ *
+ * Not memoized: env can differ between requests in some deploys, and building
+ * a client is cheap (it just captures config; no connection is opened until
+ * `complete` is called). Callers that want to reuse one within a request can
+ * hold the returned value.
+ */
+export function getLlmClient(): LlmClient | null {
+  const provider = opt("LLM_PROVIDER")?.toLowerCase() as LlmProvider | undefined;
+  if (!provider) return null;
+
+  switch (provider) {
+    case "bedrock":
+      return createBedrockClient({
+        region: req("AWS_REGION"),
+        accessKeyId: req("AWS_ACCESS_KEY_ID"),
+        secretAccessKey: req("AWS_SECRET_ACCESS_KEY"),
+        sessionToken: opt("AWS_SESSION_TOKEN"),
+        modelId: opt("BEDROCK_MODEL_ID"),
+      });
+    case "anthropic":
+      return createAnthropicClient({
+        apiKey: req("ANTHROPIC_API_KEY"),
+        model: opt("ANTHROPIC_MODEL"),
+        baseUrl: opt("ANTHROPIC_BASE_URL"),
+      });
+    case "ollama":
+      return createOllamaClient({
+        // Host is required and intentionally has no default - it changes often,
+        // so the user supplies it every time (see ollama.ts).
+        host: req("OLLAMA_HOST"),
+        model: req("OLLAMA_MODEL"),
+      });
+    default:
+      throw new LlmConfigError(
+        `LLM_PROVIDER="${provider}" is not recognised. Use one of: bedrock, anthropic, ollama.`,
+      );
+  }
+}
+
+/** True when a provider is selected. Lets callers log/branch without building a client. */
+export function isLlmConfigured(): boolean {
+  return !!opt("LLM_PROVIDER");
+}
