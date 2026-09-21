@@ -64,8 +64,15 @@ ssh -L 8080:localhost:8080 ubuntu@34.203.238.63
 # verify-audience-rule.ts — what a stated audience definition becomes
 
 ```bash
+npm install                                  # once
 npx tsx scripts/verify-audience-rule.ts
 ```
+
+**Run this on a dev machine, not on the box.** Unlike `verify-intake.sh`, which
+talks to a deployed harness over HTTP, this one imports the module directly -
+and `attributes.ts` reaches `count.ts`, which needs `pg`. The box has no
+`node_modules` at all, because it builds inside Docker, so there it fails with
+`Cannot find module 'pg'` and tells you nothing about the code.
 
 Pure function, no network, nothing created. Six cases over
 `expressionFromBrief`, the path taken whenever a CDP-literate requester writes
