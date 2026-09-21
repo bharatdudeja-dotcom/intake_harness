@@ -241,6 +241,41 @@ export async function planFormWrites(
 }
 
 /**
+ * A QUESTION IS FOR A MARKETER, AND A CODE IS NOT A QUESTION.
+ *
+ * These fields hold codes - Region accepts `uk`, `de`, `us` - so the question
+ * came out as "Region: which of these - uk, de, us?". A marketer filing a
+ * Comcast campaign cannot answer that: `de` reads as Germany or as Delaware
+ * depending on who is looking, and nothing on screen says which.
+ *
+ * So each code is shown with what it means. Nothing is GUESSED from it - the
+ * marketer still chooses, because mapping "New York" onto `us` is a judgement
+ * about the client's data model and not ours to make (see
+ * tenant-vocabulary.ts). The code stays visible next to its meaning, because
+ * an administrator reading the same question needs the value the form takes.
+ *
+ * A code with no entry here is printed as it is. Better a bare code than a
+ * confident wrong expansion of one.
+ */
+const CODE_MEANING: Record<string, string> = {
+  uk: "United Kingdom",
+  de: "Germany",
+  us: "United States",
+  paid_media: "Paid media",
+  email: "Email",
+  web: "Web",
+  existing_customer: "Existing customers",
+  new_customer: "New customers",
+  high_value_customer: "High-value customers",
+};
+
+/** A form value as a person reads it, with the value the form takes beside it. */
+function readableValue(code: string): string {
+  const meaning = CODE_MEANING[String(code || "").trim().toLowerCase()];
+  return meaning ? `${meaning} (${code})` : code;
+}
+
+/**
  * The questions worth putting to a marketer, in their words rather than the
  * form's.
  *
@@ -280,7 +315,9 @@ export function questionsFromPlan(plan: FieldPlan): string[] {
   }
 
   for (const u of plan.unanswered) {
-    out.push(`${u.label}: which of these - ${u.allowed.join(", ")}?`);
+    out.push(
+      `${u.label}: this form accepts ${u.allowed.map(readableValue).join(", ")}. Which one?`,
+    );
   }
 
   return out;
