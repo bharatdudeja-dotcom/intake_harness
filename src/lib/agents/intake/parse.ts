@@ -736,7 +736,14 @@ export function parseBrief(brief: string, known: Record<string, unknown> = {}): 
 
   // 5. The campaign name, from the opening line.
   if (!seen.has("campaign_name")) {
-    const n = findCampaignName(brief);
+    /*
+     * The ANSWERS, not the labels. On a labelled brief with no campaign-name
+     * row, the opening line is the requestor - so the Workfront request was
+     * titled "Requestor / BU: Video & Entertainment Marketing", which is a
+     * team, not a campaign. Stripping labels first means the derivation sees
+     * what the marketer wrote rather than the form's own headings.
+     */
+    const n = findCampaignName(answers);
     if (n) push(n);
   }
 

@@ -52,11 +52,33 @@ export interface AgentDefinition {
  * "Approved?", 2.7 "Attributes available?") rather than properties of an agent.
  * An agent whose gate is shut is not called and writes no task_runs row.
  */
+/*
+ * THE NAMES ON THE DECK.
+ *
+ * Morpheus, The Architect, Tank, The Keymaker and The Oracle are how this
+ * pipeline is presented to the client, so the labels the product emits match
+ * the slide rather than contradicting it. A reviewer reading the Event Log and
+ * a reviewer reading the deck should be looking at the same five things.
+ *
+ * Two mismatches are worth knowing rather than papering over:
+ *
+ *   THE DECK GIVES COUNTS TO THE ARCHITECT. In this pipeline the count is
+ *   Tank's, because the count comes out of building the segment. The label
+ *   moved; the behaviour did not, and pretending otherwise would put a number
+ *   on the wrong card during the demo.
+ *
+ *   THE ORACLE IS NOT IN THIS LIST. It is the Codex - the record itself, which
+ *   is Agent Manager, not a step in the harness. It has no entry here because
+ *   it does not run.
+ *
+ * `name` is untouched. Those are API identifiers that runs, gates and stored
+ * records are keyed on; renaming a label must never rename a contract.
+ */
 export const PIPELINE: AgentDefinition[] = [
   {
     name: "intake",
     path: "/api/agents/intake",
-    label: "Agent 1 — Intake",
+    label: "Morpheus — Brief Agent",
     owner: "Dev 1",
     // Workfront only (workfront-core), per the stated split: create the
     // work request from the marketer's brief (B1), and list/get to check
@@ -71,7 +93,7 @@ export const PIPELINE: AgentDefinition[] = [
   {
     name: "review",
     path: "/api/agents/review",
-    label: "Agent 2 — Review / Triage",
+    label: "The Architect — Validation Agent",
     owner: "Dev 2",
     /*
      * Phase 2 plus the 1.5a rework path, so the scope spans both.
@@ -106,7 +128,7 @@ export const PIPELINE: AgentDefinition[] = [
   {
     name: "audience_creation",
     path: "/api/agents/audience-creation",
-    label: "Agent 3 — Audience Creation",
+    label: "Tank — Segmentation Agent",
     owner: "Dev 3 (you)",
     allowedTools: [
       "search_adobe_knowledge",
@@ -184,7 +206,7 @@ export const PIPELINE: AgentDefinition[] = [
 export const ESCALATION: AgentDefinition = {
   name: "escalation",
   path: "/api/agents/escalation",
-  label: "Agent 4 — Escalation",
+  label: "The Keymaker — Reconciliation Agent",
   owner: "Unassigned",
   // NOTE: the knowledge tool is `search_adobe_knowledge`. `search_knowledge_base`
   // does NOT exist on any server in the estate - it was asked for here and in
