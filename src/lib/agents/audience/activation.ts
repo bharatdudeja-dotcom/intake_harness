@@ -10,24 +10,27 @@
  *
  * WHAT THIS ACTUALLY DOES, AND WHAT IT DELIBERATELY STILL DOES NOT DO
  *
- * Grounded against a live sandbox, 19-20 Sep 2026 - not guessed. Destinations
+ * Grounded against a live sandbox, 19-21 Sep 2026 - not guessed. Destinations
  * here are DATAFLOWS (destination_list_dataflows / destination_get_dataflow),
  * each carrying its own `segment_selectors`: the actual list of segments
- * activated to it. Re-verified 20 Sep 2026, schemas unchanged:
+ * activated to it. Re-verified 21 Sep 2026, schemas unchanged:
  *
  * 1. There is STILL no tool that ADDS a segment to an EXISTING dataflow's
  *    selectors. destination_update_dataflow only supports renaming and
- *    rescheduling - its schema has no segment_selectors field at all. So if
- *    the named destination already has a dataflow with other segments wired
- *    to it, there is no safe way to add ours without either duplicating the
- *    dataflow or silently dropping everything it already activates - this
- *    still reports "needs_manual_wiring" for that case, never guesses a write.
+ *    rescheduling - its schema has no segment_selectors field at all. So
+ *    this never attempts to MERGE a segment into a dataflow that already has
+ *    other segments wired to it - doing so would mean either duplicating the
+ *    dataflow's config or silently dropping everything it already activates.
  *
- * 2. What's NEW: destination_create_dataflow DOES safely cover the case
- *    where the named destination has NO dataflow yet at all - explicit
- *    product direction, since that's a pure addition (nothing existing to
- *    clobber). Getting there needs a real chain, verified live against
- *    "chaunceys custom dest" (a real, working dataflow on this tenant):
+ * 2. What that means in practice, as of 21 Sep 2026 (explicit product
+ *    direction): whenever this segment isn't already active at the named
+ *    destination - whether that destination has NO dataflow yet, or has one
+ *    that simply doesn't carry this segment - this creates an ADDITIONAL,
+ *    NEW dataflow for it, rather than reporting the case for a human to wire
+ *    up manually. Both starting points are the same safe shape (a pure
+ *    addition, nothing existing to clobber), so they share one code path.
+ *    Getting there needs a real chain, verified live against "chaunceys
+ *    custom dest" (a real, working dataflow on this tenant):
  *      target connection (by name) --connection_spec_id-->
  *      flow spec (flow_list_flow_specs, matched by targetConnectionSpecIds)
  *      --flow_spec_id + sourceConnectionSpecIds-->
@@ -357,7 +360,6 @@ export type ActivationOutcome =
   | { status: "already_active"; destinationName: string; dataflowId: string }
   | { status: "no_destination_named"; reason: string }
   | { status: "destination_not_found"; requestedName: string; reason: string | null; considered: number }
-  | { status: "needs_manual_wiring"; destinationName: string; dataflowId: string; reason: string }
   | { status: "no_segment_to_activate"; reason: string }
   | { status: "created"; destinationName: string; dataflowId: string }
   | { status: "create_failed"; destinationName: string; reason: string }
@@ -410,26 +412,16 @@ export async function activateAudience(
       reason: `could not check whether "${args.destinationName}" already has a dataflow: ${match.error}`,
     };
   }
-  if (match.dataflow) {
-    if (selectorsIncludeSegment(match.dataflow.segmentSelectors, args.segmentId)) {
-      return { status: "already_active", destinationName: match.dataflow.name, dataflowId: match.dataflow.id };
-    }
-    return {
-      status: "needs_manual_wiring",
-      destinationName: match.dataflow.name,
-      dataflowId: match.dataflow.id,
-      reason:
-        `"${args.segmentName ?? args.segmentId}" is not yet on this destination's dataflow (${match.dataflow.id}), ` +
-        "and there is no tool that safely adds a segment to an EXISTING dataflow's selectors - " +
-        "destination_update_dataflow only supports renaming/rescheduling, and destination_create_dataflow would " +
-        "replace the whole selector list on a NEW dataflow rather than merge into this one. Wire this up in the " +
-        "Segment Builder/Destinations UI rather than risk dropping this destination's other activations.",
-    };
+  if (match.dataflow && selectorsIncludeSegment(match.dataflow.segmentSelectors, args.segmentId)) {
+    return { status: "already_active", destinationName: match.dataflow.name, dataflowId: match.dataflow.id };
   }
-
-  // No dataflow matched by name - but the destination might still exist as
-  // a target connection with no dataflow on it yet, which IS safe to
-  // create a new dataflow onto (nothing existing to clobber).
+  // Either no dataflow matched this destination by name, or one did but
+  // doesn't carry this segment (match.dataflow set, selectors checked above
+  // and didn't include it) - both are the same safe shape from here: a pure
+  // addition, nothing existing to clobber. The destination might still exist
+  // as a target connection, which is what makes creating a (new, additional)
+  // dataflow possible. See this file's docstring point 2 for why this never
+  // tries to merge into match.dataflow instead.
   const targetMatch = await findTargetConnection(taskId, args.destinationName);
   if (!targetMatch.match) {
     return {

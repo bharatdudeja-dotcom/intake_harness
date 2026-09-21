@@ -121,8 +121,6 @@ function formatActivationMessage(activation: ActivationOutcome): string {
         `(${activation.considered} dataflow(s) checked)` +
         (activation.reason ? ` - ${activation.reason}` : ".")
       );
-    case "needs_manual_wiring":
-      return `Activation needs manual wiring: ${activation.reason}`;
     case "no_segment_to_activate":
       return `Cannot activate yet: ${activation.reason}`;
     case "created":

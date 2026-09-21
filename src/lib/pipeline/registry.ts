@@ -1,5 +1,5 @@
 import type { AgentName } from "./types";
-import { allWorkfrontToolNames, commentToolNames } from "@/lib/workfront-tools";
+import { intakeWorkfrontToolNames, reviewWorkfrontToolNames, commentToolNames } from "@/lib/workfront-tools";
 
 /**
  * The pipeline order AND the least-privilege boundary for every agent.
@@ -26,12 +26,23 @@ export interface AgentDefinition {
    *
    * Workfront/Fusion tools now exist in chaunceyplum/mcp (14 servers under
    * mcp_server/workfront/servers/, each its own Lambda route — see the
-   * route table atop src/lib/mcp-client.ts). The lists below are a DRAFT
-   * first pass, not a confirmed final scope: they're least-privilege
-   * guesses at what Intake/Review need for B1/B2 in the requirements doc
-   * (create/read the work request; read/update it during triage), not a
-   * sign-off on the real Workfront object model this team uses. Confirm
-   * and adjust before treating these as final.
+   * route table atop src/lib/mcp-client.ts).
+   *
+   * CONFIRMED, 21 Sep 2026 — every grant below was checked against that
+   * agent's actual callMcpTool call sites (workfront.ts, workfront-fields.ts,
+   * workfront-notes.ts, aep.ts, activation.ts, pql-synth.ts,
+   * workfront-updates.ts), not guessed from the requirements doc. This used
+   * to grant Intake and Review the FULL Workfront toolset
+   * (allWorkfrontToolNames()) "per the stated split" — but neither agent
+   * actually calls `search`/`getOne`, Intake never calls `listComments`
+   * (duplicate detection is a Postgres idempotency lookup, never a live
+   * Workfront read), and Review never calls `create`/`resolveFields`/
+   * `insights_find_id_by_name` (it only ever touches the one issue already
+   * in its input). See intakeWorkfrontToolNames()/reviewWorkfrontToolNames()
+   * (workfront-tools.ts) for the exact, per-agent grant and why each tool
+   * is or isn't in it. `adobe_get_segment` was dropped from both Review and
+   * Audience Creation below for the same reason: grepping every AEP call
+   * site turned up zero callers — it was granted but never actually used.
    */
   allowedTools: string[];
   /**
@@ -60,13 +71,19 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/intake",
     label: "Agent 1 — Intake",
     owner: "Dev 1",
-    // Workfront only (workfront-core), per the stated split: create the
-    // work request from the marketer's brief (B1), and list/get to check
-    // for an existing duplicate before creating one. No update/delete —
-    // intake shouldn't be able to modify or remove existing records.
+    // Workfront only (workfront-core): resolve the intake queue by name,
+    // create the work request from the marketer's brief (B1), set its
+    // custom-form values (a real `update` call — Adobe's connector needs a
+    // create-then-set-custom-fields two-step, see workfront.ts's top
+    // docstring — but only against the object THIS task just created, never
+    // an existing one), and post its own "what I did" comment. No
+    // search/getOne/listComments — duplicate detection is a Postgres
+    // idempotency lookup (findPriorTaskRun), never a live Workfront read,
+    // and intake never reads a comment thread. See
+    // intakeWorkfrontToolNames() for the verified call-site mapping.
     allowedTools: [
       "search_adobe_knowledge",
-      ...allWorkfrontToolNames(),
+      ...intakeWorkfrontToolNames(),
     ],
     contextAccess: [], // first in the pipeline — nothing prior to see
   },
@@ -75,13 +92,17 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/review",
     label: "Agent 2 — Review / Triage",
     owner: "Dev 2",
-    // Workfront (workfront-core + workfront-comments) plus other stuff, per
-    // the stated split: read/update the work request while triaging a
-    // rejection (B2), and read/post comments — that's where a rejection
-    // reason and the redraft explanation most likely live.
+    // Workfront (workfront-core + workfront-comments): read the rejection
+    // comment thread and update the review-notes custom field on the SAME
+    // issue already in its input (B2) — that's where a rejection reason and
+    // the redraft explanation live — plus post its own "what I did" comment.
+    // No create/search/getOne/insights_find_id_by_name/resolveFields: review
+    // never opens a new Workfront object, never looks up a project/queue by
+    // name, and never reads an object other than the one it was handed. See
+    // reviewWorkfrontToolNames() for the verified call-site mapping.
     allowedTools: [
       "search_adobe_knowledge",
-      ...allWorkfrontToolNames(),
+      ...reviewWorkfrontToolNames(),
       // triage.ts's "wrong_data_source" finding (FAC vs. the AEP profile
       // store, the most expensive classification this agent makes) is a
       // guess without being able to check AEP itself: whether the attribute
@@ -114,8 +135,10 @@ export const PIPELINE: AgentDefinition[] = [
       // fieldGroupRefs/FIELD_GROUP_SAMPLE for exactly how this is used and
       // why it's bounded.
       "adobe_get_field_group",
+      // adobe_get_segment was here but is never called by anything review
+      // does (grep-verified, 21 Sep 2026) - findExistingSegment only ever
+      // calls adobe_list_segments. Dropped rather than kept "just in case".
       "adobe_list_segments",
-      "adobe_get_segment",
       // Catalog metadata is how you tell a profile-enabled dataset from any
       // other (its schema's union/profile behavior). No Query Service access —
       // that's a much bigger permission (arbitrary SQL) than this stub needs
@@ -151,8 +174,9 @@ export const PIPELINE: AgentDefinition[] = [
       // one of them (a gateway-side bug, not fixable from this app — see
       // lib/agents/audience/aep.ts's docstring). A tool this agent can no
       // longer usefully call has no reason to stay in its allowlist.
+      // adobe_get_segment was here but is never called (see the identical
+      // note on review's grant above) - dropped.
       "adobe_list_segments",
-      "adobe_get_segment",
       "adobe_create_segment",
       // B4: check whether the attributes an audience needs already exist
       // in AEP before opening a GTO/attribute request.
@@ -167,13 +191,14 @@ export const PIPELINE: AgentDefinition[] = [
       "adobe_get_field_group",
       // Explicit, on-command activation ONLY (see agents/audience/
       // activation.ts) - checking whether an audience is already wired to a
-      // named destination's dataflow, and, since 20 Sep 2026 on explicit
-      // product direction, creating a NEW dataflow when none exists yet for
-      // that destination. Still no destination_update_dataflow (it has no
-      // segment_selectors field at all - there genuinely is no safe way to
-      // add a segment to a dataflow that ALREADY has other segments wired
-      // to it) - see activation.ts's docstring for exactly why that half
-      // stays read-only-report-only while this half doesn't.
+      // named destination's dataflow, and creating a NEW dataflow whenever
+      // it isn't: whether no dataflow exists yet for that destination, or
+      // one does but doesn't carry this segment (21 Sep 2026, explicit
+      // product direction - see activation.ts's docstring). Still no
+      // destination_update_dataflow (it has no segment_selectors field at
+      // all - there genuinely is no safe way to ADD a segment to a dataflow
+      // that already has other segments wired to it), so this never merges
+      // into an existing dataflow - only ever creates an additional one.
       "destination_list_dataflows",
       "destination_get_dataflow",
       "destination_list_target_connections",
@@ -185,8 +210,9 @@ export const PIPELINE: AgentDefinition[] = [
       // lib/pipeline/workfront-updates.ts), and it posts AS the completing
       // agent — so this otherwise read-only agent needs the comment-create
       // tool, and ONLY that write. Intake and Review already have it via
-      // allWorkfrontToolNames above; this is the minimal grant that lets
-      // Agent 3's updates reach the issue without handing it create/update.
+      // intakeWorkfrontToolNames/reviewWorkfrontToolNames above; this is the
+      // minimal grant that lets Agent 3's updates reach the issue without
+      // handing it create/update.
       ...commentToolNames(),
     ],
     // Review already runs the SAME read-only AEP context probe one step

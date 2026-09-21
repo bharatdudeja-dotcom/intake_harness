@@ -41,7 +41,7 @@ describe("resolveActivationIntent", () => {
   });
 });
 
-describe("activateAudience - already active / needs manual wiring (unchanged read-only paths)", () => {
+describe("activateAudience - already active (unchanged read-only path)", () => {
   it("reports already_active when the segment is already on the matched dataflow", async () => {
     callMcpToolMock.mockImplementation((_taskId: string, tool: string) => {
       if (tool === "destination_list_dataflows") {
@@ -61,27 +61,6 @@ describe("activateAudience - already active / needs manual wiring (unchanged rea
       destinationName: "chaunceys custom dest",
     });
     expect(result).toEqual({ status: "already_active", destinationName: "chaunceys custom dest", dataflowId: "flow-1" });
-  });
-
-  it("reports needs_manual_wiring when a dataflow exists but lacks this segment - never attempts a write", async () => {
-    callMcpToolMock.mockImplementation((_taskId: string, tool: string) => {
-      if (tool === "destination_list_dataflows") {
-        return Promise.resolve({ dataflows: [{ id: "flow-1", name: "chaunceys custom dest" }] });
-      }
-      if (tool === "destination_get_dataflow") {
-        return Promise.resolve({ segment_selectors: [{ params: { segmentSelectors: { selectors: [{ value: { id: "some-other-segment" } }] } } }] });
-      }
-      throw new Error(`unexpected tool ${tool}`);
-    });
-
-    const result = await activateAudience("audience_creation", {
-      segmentId: "seg-123",
-      segmentName: "Has ECID",
-      destinationName: "chaunceys custom dest",
-    });
-    expect(result.status).toBe("needs_manual_wiring");
-    // The write tools must never be called on this path.
-    expect(callMcpToolMock).not.toHaveBeenCalledWith(expect.anything(), "destination_create_dataflow", expect.anything());
   });
 });
 
@@ -104,13 +83,59 @@ describe("activateAudience - a failed read is not a confirmed absence", () => {
   });
 });
 
-describe("activateAudience - creating a new dataflow (no existing dataflow for this destination)", () => {
+describe("activateAudience - creating a new dataflow (no existing dataflow for this destination, or one exists but lacks this segment)", () => {
   // Fixtures below mirror REAL shapes verified live against the gateway,
   // 20 Sep 2026 (destination_get_target_connection on a real target
   // connection, flow_list_flow_specs containing
   // "UPSToCustomPersonalizationDestinationWithAttributesBeta", and a real
   // segment-activation dataflow's own segment_selectors/source_connection_id)
   // - not invented shapes.
+
+  it("creates an ADDITIONAL dataflow when a dataflow already exists for this destination but doesn't carry this segment (21 Sep 2026: no more needs_manual_wiring)", async () => {
+    callMcpToolMock.mockImplementation((_taskId: string, tool: string, args: Record<string, unknown>) => {
+      if (tool === "destination_list_dataflows") {
+        // Same list serves both the initial name-match AND
+        // findProvenSourceConnection's later search - both are legitimate
+        // uses of "the dataflows that already exist for this destination".
+        return Promise.resolve({ dataflows: [{ id: "flow-1", name: "chaunceys custom dest" }] });
+      }
+      if (tool === "destination_get_dataflow") {
+        // Carries a DIFFERENT segment (not ours) - fails
+        // selectorsIncludeSegment - but is non-empty with a source
+        // connection, so it also satisfies findProvenSourceConnection's
+        // "proven to work" check.
+        return Promise.resolve({
+          segment_selectors: [{ params: { segmentSelectors: { selectors: [{ value: { id: "some-other-segment" } }] } } }],
+          source_connection_id: "139a4eb8-66d3-4504-9d83-b8d800646e29",
+        });
+      }
+      if (tool === "destination_list_target_connections") {
+        return Promise.resolve({ target_connections: [{ id: "6eb4cbe0-dc1b-4e13-921a-828004adef30", name: "chaunceys custom dest" }] });
+      }
+      if (tool === "destination_get_target_connection") {
+        return Promise.resolve({ connection_spec_id: "f272b69b-71eb-41ba-b801-09b40d1a94e9" });
+      }
+      if (tool === "flow_list_flow_specs") {
+        return Promise.resolve({
+          flow_specs: [{ id: "07a26f27-6ac3-4a5e-a150-b67ba2ebe490", targetConnectionSpecIds: ["f272b69b-71eb-41ba-b801-09b40d1a94e9"] }],
+        });
+      }
+      if (tool === "destination_create_dataflow") {
+        expect(args.source_connection_id).toBe("139a4eb8-66d3-4504-9d83-b8d800646e29");
+        expect(args.target_connection_id).toBe("6eb4cbe0-dc1b-4e13-921a-828004adef30");
+        expect(JSON.parse(String(args.segment_selectors))[0].params.segmentSelectors.selectors[0].value.id).toBe("seg-123");
+        return Promise.resolve({ id: "second-flow-id" });
+      }
+      throw new Error(`unexpected tool ${tool}`);
+    });
+
+    const result = await activateAudience("audience_creation", {
+      segmentId: "seg-123",
+      segmentName: "Has ECID",
+      destinationName: "chaunceys custom dest",
+    });
+    expect(result).toEqual({ status: "created", destinationName: "chaunceys custom dest", dataflowId: "second-flow-id" });
+  });
 
   it("declines (create_failed) rather than guess when no dataflow AND no target connection matches", async () => {
     callMcpToolMock.mockImplementation((_taskId: string, tool: string) => {

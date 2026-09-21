@@ -134,8 +134,9 @@ function formatUpdateHtml(agent: AgentName, status: AgentStatus, message: string
  * the step's metadata (`workfrontUpdate`), so what happened is visible in
  * observability without ever failing the run. Posting as `agent` means that
  * agent must have the comment tool in its registry allowlist (Intake and
- * Review already do via allWorkfrontToolNames; Audience Creation is granted it
- * explicitly via commentToolNames — see registry.ts).
+ * Review already do via intakeWorkfrontToolNames/reviewWorkfrontToolNames;
+ * Audience Creation is granted it explicitly via commentToolNames — see
+ * registry.ts).
  */
 export async function postAgentUpdate(
   agent: TaskId,

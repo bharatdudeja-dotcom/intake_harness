@@ -35,6 +35,38 @@ describe("Broken segment-estimate tools stay out of Agent 3's allowlist", () => 
   });
 });
 
+describe("least-privilege: Workfront grants match actual usage, not the full toolset", () => {
+  it("intake cannot search/read/list-comments an arbitrary Workfront object - only what workfront.ts actually calls", () => {
+    const agent = PIPELINE.find((a) => a.name === "intake");
+    for (const denied of [
+      "insights_find_workfront_data", "wf_core_issue_list", // search
+      "insights_summarize_object", "wf_core_issue_get", // getOne
+      "comment-stream_query_comments", "wf_comments_list", // listComments
+    ]) {
+      expect(agent?.allowedTools).not.toContain(denied);
+    }
+  });
+
+  it("review cannot create a Workfront object, look up by name, or resolve field names - it only ever touches the issue in its input", () => {
+    const agent = PIPELINE.find((a) => a.name === "review");
+    for (const denied of [
+      "workflow_create_any_object", "wf_core_issue_create", // create
+      "insights_find_workfront_data", "wf_core_issue_list", // search
+      "insights_summarize_object", "wf_core_issue_get", // getOne
+      "insights_search_fields", // resolveFields
+      "insights_find_id_by_name",
+    ]) {
+      expect(agent?.allowedTools).not.toContain(denied);
+    }
+  });
+
+  it("no agent is granted adobe_get_segment - grep-verified unused by any agent's code", () => {
+    for (const agent of PIPELINE) {
+      expect(agent.allowedTools).not.toContain("adobe_get_segment");
+    }
+  });
+});
+
 describe("least-privilege: destination writes stay narrow", () => {
   // destination_update_dataflow has NO segment_selectors field at all
   // (verified live, activation.ts's docstring) - there is still no safe

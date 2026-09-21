@@ -210,6 +210,73 @@ export function allWorkfrontToolNames(): string[] {
 }
 
 /**
+ * Intake's REAL Workfront usage, verified against its actual callMcpTool
+ * call sites (src/lib/agents/intake/workfront.ts, workfront-fields.ts) - not
+ * `allWorkfrontToolNames()`'s full set, which also carries `search`/`getOne`/
+ * `listComments` that intake never calls:
+ *
+ *   - insights_find_id_by_name  - resolve the intake queue project by name
+ *   - create                    - create the intake issue
+ *   - update                    - set the just-created issue's custom-form
+ *                                 values (a required second call, per
+ *                                 workfront.ts's own top docstring - NOT a
+ *                                 grant to modify a pre-existing record)
+ *   - resolveFields             - read the form's real field names before
+ *                                 building the custom-fields payload
+ *   - createComment             - post intake's own "what I did" update
+ *                                 (workfront-updates.ts's postAgentUpdate)
+ *
+ * Deliberately NOT granted: `search`/`getOne` (duplicate detection is a
+ * Postgres idempotency lookup - findPriorTaskRun - never a live Workfront
+ * read) and `listComments` (intake never reads a rejection's comment
+ * thread - that's review's job).
+ */
+export function intakeWorkfrontToolNames(): string[] {
+  return [
+    ...new Set(
+      [
+        "insights_find_id_by_name",
+        ADOBE_OFFICIAL.create,
+        INHOUSE.create,
+        ADOBE_OFFICIAL.update,
+        INHOUSE.update,
+        ADOBE_OFFICIAL.resolveFields,
+        ADOBE_OFFICIAL.createComment,
+        INHOUSE.createComment,
+      ].filter((name): name is string => !!name),
+    ),
+  ];
+}
+
+/**
+ * Review's REAL Workfront usage, verified against its actual callMcpTool
+ * call sites (src/app/api/agents/review/route.ts, workfront-notes.ts):
+ *
+ *   - listComments  - read the rejection comment thread it's triaging
+ *   - update        - set the review-notes custom field on the SAME issue
+ *                     it was handed as input (workfront-notes.ts)
+ *   - createComment - post review's own "what I did" update
+ *
+ * Deliberately NOT granted: `create` (review never opens a new Workfront
+ * object), `search`/`getOne`/`insights_find_id_by_name` (review never looks
+ * up or reads an object other than the one already in its input), and
+ * `resolveFields` (only intake resolves the intake form's field names -
+ * review's own custom field, REVIEW_NOTES_FIELD, is a fixed constant).
+ */
+export function reviewWorkfrontToolNames(): string[] {
+  return [
+    ...new Set([
+      ADOBE_OFFICIAL.update,
+      INHOUSE.update,
+      ADOBE_OFFICIAL.listComments,
+      INHOUSE.listComments,
+      ADOBE_OFFICIAL.createComment,
+      INHOUSE.createComment,
+    ]),
+  ];
+}
+
+/**
  * Just the "create a comment" tool, for BOTH flavours — the minimal grant an
  * agent needs to post an update comment back onto its issue and nothing more.
  * Both names are returned so the allowlist stays correct whichever
