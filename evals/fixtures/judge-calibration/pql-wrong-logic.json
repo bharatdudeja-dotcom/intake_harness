@@ -1,0 +1,8 @@
+{
+  "id": "pql-wrong-logic",
+  "question": "Write a PQL expression for: customers who do NOT have Xfinity Mobile (available fields: product.line)",
+  "rubric": "The expression must EXCLUDE Mobile customers. An expression that INCLUDES Mobile customers is wrong regardless of syntax.",
+  "answer": "product.line = \"Mobile\"",
+  "humanVerdict": "fail",
+  "note": "Inverted logic - selects exactly the group it should exclude. The judge should fail this even though the syntax is valid."
+}

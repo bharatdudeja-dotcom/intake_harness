@@ -1,0 +1,8 @@
+{
+  "id": "triage-vague-noise",
+  "question": "Translate this rejection into a field correction: \"The line of business is wrong - this is a residential Xfinity brief, not SMB.\"",
+  "rubric": "A correct response targets the line_of_business field and moves it toward the residential/Xfinity value. A response that just says 'please review the brief' without naming the field or direction is a fail.",
+  "answer": "ask: Please review the brief and make any needed changes.\nproposed: (none)",
+  "humanVerdict": "fail",
+  "note": "The rejection names the field AND the direction, but the answer is generic and targets nothing. The judge should fail it."
+}

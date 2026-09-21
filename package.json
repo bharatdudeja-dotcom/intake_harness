@@ -11,7 +11,12 @@
     "eval:intake": "vitest run --config evals/vitest.evals.config.mts evals/intake.eval.ts",
     "eval:review": "vitest run --config evals/vitest.evals.config.mts evals/review.eval.ts",
     "eval:audience": "vitest run --config evals/vitest.evals.config.mts evals/audience-creation.eval.ts",
-    "eval:all": "vitest run --config evals/vitest.evals.config.mts"
+    "eval:safety": "vitest run --config evals/vitest.evals.config.mts evals/safety.eval.ts",
+    "eval:calibration": "vitest run --config evals/vitest.evals.config.mts evals/calibration.eval.ts",
+    "eval:trajectory": "vitest run --config evals/vitest.evals.config.mts evals/trajectory.eval.ts",
+    "eval:all": "vitest run --config evals/vitest.evals.config.mts",
+    "eval:scaffold": "node scripts/scaffold-fixture.mjs",
+    "eval:online": "node scripts/online-eval.mjs"
   },
   "dependencies": {
     "next": "16.3.5",

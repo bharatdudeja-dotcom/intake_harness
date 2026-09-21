@@ -10,10 +10,16 @@ import { query } from "@/lib/db";
 
 export interface EvalRunRow {
   eval_run_id: string;
-  suite: "intake" | "review" | "audience_creation";
+  suite: "intake" | "review" | "audience_creation" | "safety" | "trajectory";
   provider: string | null;
   passed_count: number;
   total_count: number;
+  /** How many times each fixture ran this invocation (EVAL_REPEAT, default 1). */
+  repeat_count: number;
+  /** Fixtures that passed on EVERY attempt (pass^k). Equals passed_count when repeat_count = 1. */
+  passk_count: number | null;
+  /** 'offline' = graded against a curated fixture; 'online' = sampled from real task_runs. */
+  source: "offline" | "online";
   started_at: string;
   finished_at: string;
   created_at: string;
@@ -25,6 +31,9 @@ export interface EvalResultRow {
   fixture_id: string;
   passed: boolean;
   notes: string;
+  /** Per-fixture pass^k detail — how many attempts ran and how many passed. */
+  attempts: number;
+  passed_attempts: number | null;
   created_at: string;
 }
 

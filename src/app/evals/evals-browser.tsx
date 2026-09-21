@@ -19,6 +19,27 @@ function PassFailBadge({ passed }: { passed: boolean }) {
 }
 
 /**
+ * offline (curated fixtures) vs online (sampled real task_runs). The
+ * distinction matters: an online run's "pass" is "ran on the LLM path", a
+ * health signal, not a correctness claim against a golden answer - see
+ * scripts/online-eval.mjs.
+ */
+function SourceBadge({ source }: { source: string }) {
+  if (source === "online") {
+    return (
+      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-800 dark:bg-sky-950 dark:text-sky-400">
+        online
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+      offline
+    </span>
+  );
+}
+
+/**
  * The "see eval results from the database" page. Lists every row in
  * `eval_runs` (GET /api/evals) and, on selection, every eval_results row
  * for it (GET /api/evals/[evalRunId]) - the history evals/lib/report.ts
@@ -143,7 +164,10 @@ export function EvalsBrowser({ initialEvalRunId }: { initialEvalRunId?: string }
                       : "border-zinc-200 dark:border-zinc-800"
                   } bg-white dark:bg-zinc-950`}
                 >
-                  <span className="font-medium text-black dark:text-zinc-50">{suiteLabel(run.suite)}</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-black dark:text-zinc-50">{suiteLabel(run.suite)}</span>
+                    <SourceBadge source={run.source} />
+                  </div>
                   <div className="flex items-center gap-2">
                     <span
                       className={
@@ -154,6 +178,7 @@ export function EvalsBrowser({ initialEvalRunId }: { initialEvalRunId?: string }
                     >
                       {run.passed_count}/{run.total_count}
                     </span>
+                    {run.repeat_count > 1 && <span className="text-zinc-400">pass^{run.repeat_count}</span>}
                     {run.provider && <span className="text-zinc-400">{run.provider}</span>}
                   </div>
                   <span className="text-zinc-400">{new Date(run.started_at).toLocaleString()}</span>
@@ -175,20 +200,35 @@ export function EvalsBrowser({ initialEvalRunId }: { initialEvalRunId?: string }
                 <span className="text-base font-semibold text-black dark:text-zinc-50">
                   {suiteLabel(detail.run.suite)}
                 </span>
+                <SourceBadge source={detail.run.source} />
                 <span className="font-mono text-xs text-zinc-500">eval_run_id: {detail.run.eval_run_id}</span>
               </div>
               <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                 <span>
-                  {detail.run.passed_count}/{detail.run.total_count} passed (
+                  {detail.run.passed_count}/{detail.run.total_count}{" "}
+                  {detail.run.source === "online" ? "on the LLM path" : "passed"} (
                   {detail.run.total_count
                     ? Math.round((detail.run.passed_count / detail.run.total_count) * 100)
                     : 0}
                   %)
                 </span>
+                {detail.run.repeat_count > 1 && (
+                  <span>
+                    pass^{detail.run.repeat_count} ({detail.run.passk_count ?? detail.run.passed_count}/
+                    {detail.run.total_count} passed every attempt)
+                  </span>
+                )}
                 {detail.run.provider && <span>provider: {detail.run.provider}</span>}
                 <span>started: {new Date(detail.run.started_at).toLocaleString()}</span>
                 <span>finished: {new Date(detail.run.finished_at).toLocaleString()}</span>
               </div>
+              {detail.run.source === "online" && (
+                <p className="text-xs text-sky-700 dark:text-sky-400">
+                  Sampled from real <code className="text-[11px]">task_runs</code> — &quot;passed&quot; here means the
+                  run completed on the real LLM path (did not fall back to the deterministic parser), a health signal,
+                  not a correctness grade. See <code className="text-[11px]">scripts/online-eval.mjs</code>.
+                </p>
+              )}
 
               <table className="w-full text-left text-xs">
                 <thead>

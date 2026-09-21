@@ -17,11 +17,106 @@ eval file with no provider configured skips itself with a clear message
 rather than failing.
 
 ```bash
-npm run eval:intake     # extractIntake / extractFromAnswer
-npm run eval:review     # detectRejectionLlm / triageRejectionLlm
-npm run eval:audience   # synthesizePql
-npm run eval:all        # all three
+npm run eval:intake       # extractIntake / extractFromAnswer
+npm run eval:review       # detectRejectionLlm / triageRejectionLlm
+npm run eval:audience     # synthesizePql
+npm run eval:safety       # adversarial input vs. the deterministic guardrails
+npm run eval:trajectory   # rules over the tool-call trace (path, not answer)
+npm run eval:calibration  # judge-vs-human agreement (calibrate before trusting the judge)
+npm run eval:all          # all of the above
 ```
+
+`eval:trajectory` needs a live MCP endpoint (`MCP_ENDPOINT_URL` or
+`MCP_GATEWAY_URL`), not an LLM - it grades deterministic probe reads. It skips
+cleanly when neither is set.
+
+### Online evals (sampled from real traffic)
+
+```bash
+npm run eval:online intake --limit 100     # or review / audience_creation
+```
+
+`eval:online` (scripts/online-eval.mjs) samples the most recent real
+`task_runs` for one agent and records a summary into the same
+`eval_runs`/`eval_results` tables, tagged `source='online'`. It reports the
+**LLM-path rate** (how many recent runs used the real model vs. silently fell
+back to the deterministic parser - the earliest drift signal for this app) and
+the **model distribution** (flagging model drift when more than one model
+answered in the window).
+
+A crucial honesty point: online data has no hand-labeled expected answer, so
+"passed" here means "completed on the real LLM path", a HEALTH signal, not a
+correctness grade against a golden answer. To turn a real run INTO a correctness
+fixture, use `eval:scaffold` (a human then labels it). The `/evals` UI marks
+online runs with a badge and this caveat so the two are never confused.
+
+### pass^k (reliability)
+
+A single run of a non-deterministic model tells you little. Set `EVAL_REPEAT`
+to run each fixture k times; a fixture only counts as passed when it passes on
+**every** attempt (pass^k), and the k-of-n tally shows in its notes. Persisted
+per run (`eval_runs.repeat_count`/`passk_count`) and per fixture
+(`eval_results.attempts`/`passed_attempts`).
+
+```bash
+EVAL_REPEAT=5 npm run eval:audience   # each fixture 5x; reports pass^5
+```
+
+### Growing the set from real runs
+
+`npm run eval:scaffold <task_run_id>` pulls a real `task_runs` row's
+input/output into a fixture skeleton in the right `fixtures/<dir>`, with every
+`expected`/`rubric` field marked `TODO`. A fixture records what SHOULD happen,
+not what did — so correct the TODOs by hand before checking it in. (See "Where
+fixtures come from" below.)
+
+### Calibrating the judge
+
+`npm run eval:calibration` grades the `fixtures/judge-calibration` set — each a
+(question, rubric, answer, `humanVerdict`) — with the real judge and reports how
+often it agrees with the human label. Run it (and grow the set toward the 50–100
+the guide recommends) before trusting the judge, and re-run it whenever the
+judge prompt or model changes.
+
+## Eval levels
+
+Following the eval guide's stack (unit / trajectory / outcome / safety /
+online):
+
+- **Outcome** (`eval:intake`, `eval:review`, `eval:audience`) - does the
+  model's output actually satisfy the task, graded structurally with a judge
+  only where quality can't reduce to a comparison. This is the bulk of what's
+  here today.
+- **Safety** (`eval:safety`) - adversarial input (prompt injection in the
+  brief, in a rejection comment, in a rejection reason, and at the PQL write
+  boundary). A pass means this app's OWN deterministic guardrail caught it -
+  provenance stayed honest, only real field keys/values survived validation,
+  no unverified field reached a synthesized expression - NOT that the model
+  was polite. Grading is entirely structural; there is deliberately no judge,
+  because a guardrail either held or it didn't. These are the fixtures under
+  `fixtures/safety-*`.
+
+- **Trajectory** (`eval:trajectory`) - grades the PATH, not the answer: did the
+  agent probe the union schema view, stay inside its read-only tool set (no
+  `_create`/`_update`/`_delete`), and stay under a call budget. Graded with
+  RULES over the trace (`evals/lib/trajectory.ts`: `mustCall`, `mustNotCall`,
+  `mustNotCallMatching`, `mustPrecede`, `maxCalls`), not an exact reference
+  sequence - because the probes are response-dependent (aep.ts asks the union
+  view first and only falls through to list+sample when it's empty), so a
+  fixed sequence would be brittle against a live sandbox. The trace itself is
+  the SAME `withToolCallLog` output production records to
+  `task_runs.metadata.toolCalls` - no new instrumentation. Fixtures under
+  `fixtures/trajectory-*`.
+
+- **Online** (`eval:online`) - production behavior over time: samples recent
+  real `task_runs`, records the LLM-path rate and model distribution as an
+  `eval_runs` row tagged `source='online'`, and surfaces both in `/evals`. Its
+  "pass" is a health signal ("ran on the LLM path"), not a correctness grade -
+  see `scripts/online-eval.mjs`.
+
+All five levels from the guide (unit → trajectory → outcome → safety → online)
+now exist. `npm test` remains the unit level; the rest are the manual
+`npm run eval:*` steps above.
 
 Each run prints a per-fixture pass/fail table with why, plus an overall
 score, in addition to vitest's own summary.

@@ -1,0 +1,8 @@
+{
+  "id": "triage-clear-correction",
+  "question": "Translate this rejection into a field correction: \"The launch date is missing.\"",
+  "rubric": "A correct response identifies the launch date as the missing field and asks the marketer for it clearly and specifically. A vague 'please review' is not sufficient.",
+  "answer": "ask: What is the campaign launch date? (the request was rejected because no launch date was provided)\nproposed: (none)",
+  "humanVerdict": "pass",
+  "note": "Clear, correctly-targeted ask - the judge should pass it."
+}

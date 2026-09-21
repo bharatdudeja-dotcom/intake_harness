@@ -328,3 +328,52 @@ CREATE TABLE IF NOT EXISTS eval_results (
 
 CREATE INDEX IF NOT EXISTS idx_eval_runs_started ON eval_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);
+
+-- Widen eval_runs.suite for the trajectory/safety eval levels (evals/
+-- safety.eval.ts, evals/trajectory.eval.ts) on top of the original three
+-- outcome suites. Same idempotent DROP+ADD the rest of this file uses to
+-- change a CHECK in place, so this stays safe to re-run. 'trajectory' is
+-- included now even though its eval lands after safety, so this migration
+-- doesn't have to run twice.
+ALTER TABLE eval_runs DROP CONSTRAINT IF EXISTS eval_runs_suite_check;
+ALTER TABLE eval_runs ADD CONSTRAINT eval_runs_suite_check
+    CHECK (suite IN ('intake', 'review', 'audience_creation', 'safety', 'trajectory'));
+
+-- ── Eval levels: reliability (pass^k) and provenance (offline vs online) ────
+--
+-- Added for the trajectory/outcome-round-out/online eval work on top of the
+-- original three outcome suites. All additive and idempotent (ADD COLUMN IF
+-- NOT EXISTS), so this stays safe to re-run against a populated eval_runs.
+--
+--   repeat_count  - how many times EACH fixture was run this invocation
+--                   (EVAL_REPEAT, default 1). A single pass tells you little
+--                   about a non-deterministic model; running each fixture k
+--                   times and reporting how many passed ALL k is pass^k, the
+--                   production-reliability number the eval guide (§5.4) calls
+--                   for.
+--   passk_count   - number of fixtures that passed on EVERY one of their
+--                   repeat_count attempts (pass^k). Equals passed_count when
+--                   repeat_count = 1, so existing single-run rows read the
+--                   same. NULL is never written - defaults to passed_count's
+--                   meaning at k=1.
+--   source        - 'offline' (graded against a curated fixture, the default
+--                   for every npm run eval:*) or 'online' (sampled from real
+--                   task_runs by the online-eval script, Phase 4). Lets the
+--                   /evals UI separate "graded against golden fixtures" from
+--                   "sampled from real traffic" without a second table.
+ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS repeat_count INTEGER NOT NULL DEFAULT 1 CHECK (repeat_count > 0);
+ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS passk_count INTEGER;
+ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'offline'
+    CHECK (source IN ('offline', 'online'));
+
+-- Per-fixture reliability detail, mirroring the run-level pass^k above.
+--   attempts        - how many times this fixture ran (== eval_runs.repeat_count).
+--   passed_attempts - how many of those attempts passed. `passed` (the
+--                     existing column) stays the headline "did it pass" and
+--                     is defined as passed_attempts == attempts (pass^k per
+--                     fixture), so a flaky fixture that passed 2/3 reads as a
+--                     fail with the 2/3 visible, not a silent green.
+ALTER TABLE eval_results ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts > 0);
+ALTER TABLE eval_results ADD COLUMN IF NOT EXISTS passed_attempts INTEGER;
+
+CREATE INDEX IF NOT EXISTS idx_eval_runs_source ON eval_runs(source);

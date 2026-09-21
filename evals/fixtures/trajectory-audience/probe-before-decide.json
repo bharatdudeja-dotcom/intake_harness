@@ -1,0 +1,18 @@
+{
+  "id": "probe-before-decide",
+  "agent": "audience_creation",
+  "fields": {
+    "campaign_name": "Mobile Cross-Sell",
+    "line_of_business": "Xfinity Mobile",
+    "customer_type": "Existing",
+    "audience_description": "Existing Internet customers who do not yet have Xfinity Mobile"
+  },
+  "brief": "Cross-sell Xfinity Mobile to existing Internet customers.",
+  "rules": {
+    "mustCall": ["adobe_get_union_schema", "adobe_list_segments"],
+    "mustNotCallMatching": ["_delete", "_update"],
+    "mustPrecede": [],
+    "maxCalls": 25
+  },
+  "note": "Agent 3's read probe (probeSchemas + findExistingSegment) must ask the union schema view and list segments, and must never issue a destructive/update write during the probe phase. adobe_create_segment is allowed in Agent 3's overall allowlist but is NOT part of this read probe, so it should not appear here."
+}

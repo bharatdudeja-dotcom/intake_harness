@@ -21,6 +21,7 @@ import { fakeSchemaProbe, fakePqlGuidance } from "./lib/fake-aep";
 import { loadFixtures } from "./lib/fixtures";
 import { report, type EvalOutcome } from "./lib/report";
 import { judge } from "./lib/judge";
+import { runRepeated } from "./lib/repeat";
 
 type PqlFixture = {
   id: string;
@@ -41,8 +42,6 @@ describe.skipIf(!isLlmConfigured())("PQL synthesis eval", () => {
   const guidance = fakePqlGuidance();
 
   it.each(fixtures)("$id", async (fixture) => {
-    const notes: string[] = [];
-    let ok = true;
     const expectSynth = fixture.shouldSynthesize ?? true;
 
     let probe = probeCache.get(fixture.id);
@@ -51,36 +50,43 @@ describe.skipIf(!isLlmConfigured())("PQL synthesis eval", () => {
       probeCache.set(fixture.id, probe);
     }
 
-    const synthesis = await synthesizePql(fixture.criteria, probe, guidance);
+    const outcome = await runRepeated(async () => {
+      const notes: string[] = [];
+      let ok = true;
 
-    if (!expectSynth) {
-      if (synthesis.synthesized) {
-        ok = false;
-        notes.push(`expected a decline, but synthesized: "${synthesis.pql}"`);
-      }
-    } else if (!synthesis.synthesized) {
-      ok = false;
-      notes.push(`expected a verified expression, got none - reason: ${synthesis.reason ?? "(none given)"}`);
-    } else if (synthesis.unverifiedFields.length > 0) {
-      ok = false;
-      notes.push(`expression referenced unverified field(s): ${synthesis.unverifiedFields.join(", ")}`);
-    } else {
-      const client = getLlmClient();
-      if (client) {
-        const verdict = await judge(
-          client,
-          `Write a PQL expression for: ${fixture.criteria} (available fields: ${fixture.availableFields.join(", ")})`,
-          fixture.rubric,
-          synthesis.pql ?? "",
-        );
-        if (!verdict.pass) {
+      const synthesis = await synthesizePql(fixture.criteria, probe!, guidance);
+
+      if (!expectSynth) {
+        if (synthesis.synthesized) {
           ok = false;
-          notes.push(`judge: ${verdict.reasoning} (pql: ${synthesis.pql})`);
+          notes.push(`expected a decline, but synthesized: "${synthesis.pql}"`);
+        }
+      } else if (!synthesis.synthesized) {
+        ok = false;
+        notes.push(`expected a verified expression, got none - reason: ${synthesis.reason ?? "(none given)"}`);
+      } else if (synthesis.unverifiedFields.length > 0) {
+        ok = false;
+        notes.push(`expression referenced unverified field(s): ${synthesis.unverifiedFields.join(", ")}`);
+      } else {
+        const client = getLlmClient();
+        if (client) {
+          const verdict = await judge(
+            client,
+            `Write a PQL expression for: ${fixture.criteria} (available fields: ${fixture.availableFields.join(", ")})`,
+            fixture.rubric,
+            synthesis.pql ?? "",
+          );
+          if (!verdict.pass) {
+            ok = false;
+            notes.push(`judge: ${verdict.reasoning} (pql: ${synthesis.pql})`);
+          }
         }
       }
-    }
 
-    results.push({ id: fixture.id, passed: ok, notes: notes.join("; ") });
-    expect.soft(ok, notes.join("; ")).toBe(true);
+      return { ok, notes: notes.join("; ") };
+    });
+
+    results.push({ id: fixture.id, passed: outcome.passed, notes: outcome.notes, attempts: outcome.attempts, passedAttempts: outcome.passedAttempts });
+    expect.soft(outcome.passed, outcome.notes).toBe(true);
   });
 });

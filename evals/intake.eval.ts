@@ -15,6 +15,7 @@ import { isLlmConfigured } from "@/lib/llm";
 import { extractIntake, extractFromAnswer } from "@/lib/agents/intake/llm-extract";
 import { loadFixtures } from "./lib/fixtures";
 import { report, type EvalOutcome } from "./lib/report";
+import { runRepeated } from "./lib/repeat";
 
 type IntakeFixture = {
   id: string;
@@ -54,62 +55,63 @@ describe.skipIf(!isLlmConfigured())("Intake extraction eval", () => {
   const fixtures = loadFixtures<IntakeFixture>("intake");
 
   it.each(fixtures)("$id", async (fixture) => {
-    const notes: string[] = [];
-    let ok = true;
+    const outcome = await runRepeated(async () => {
+      const notes: string[] = [];
+      let ok = true;
 
-    const extraction = await extractIntake(fixture.brief, fixture.known ?? {});
-    if (extraction.source !== "llm") {
-      notes.push(`fell back to deterministic (${extraction.fallbackReason ?? "no reason given"})`);
-      results.push({ id: fixture.id, passed: false, notes: notes.join("; ") });
-      expect.soft(extraction.source, notes.join("; ")).toBe("llm");
-      return;
-    }
-
-    for (const [key, expectedValue] of Object.entries(fixture.expected.fields ?? {})) {
-      const actual = extraction.parsed.fields[key];
-      if (!fieldMatches(actual, expectedValue)) {
-        ok = false;
-        notes.push(`${key}: expected ~"${expectedValue}", got "${actual ?? "(missing)"}"`);
+      const extraction = await extractIntake(fixture.brief, fixture.known ?? {});
+      if (extraction.source !== "llm") {
+        return { ok: false, notes: `fell back to deterministic (${extraction.fallbackReason ?? "no reason given"})` };
       }
-    }
 
-    const provenanceOf = (key: string) => extraction.parsed.extracted.find((f) => f.key === key)?.from;
-    for (const key of fixture.expected.stated ?? []) {
-      const from = provenanceOf(key);
-      if (from !== "stated") {
-        ok = false;
-        notes.push(`${key}: expected provenance "stated", got "${from ?? "(not extracted)"}"`);
-      }
-    }
-    for (const key of fixture.expected.inferred ?? []) {
-      const from = provenanceOf(key);
-      if (from !== "derived" && from !== "inferred") {
-        ok = false;
-        notes.push(`${key}: expected provenance "derived"/"inferred", got "${from ?? "(not extracted)"}"`);
-      }
-    }
-
-    for (const [key, mustHave] of Object.entries(fixture.mustContain ?? {})) {
-      const actual = (extraction.parsed.fields[key] ?? "").toLowerCase();
-      for (const needle of mustHave) {
-        if (!actual.includes(needle.toLowerCase())) {
+      for (const [key, expectedValue] of Object.entries(fixture.expected.fields ?? {})) {
+        const actual = extraction.parsed.fields[key];
+        if (!fieldMatches(actual, expectedValue)) {
           ok = false;
-          notes.push(`${key}: expected to contain "${needle}", got "${actual || "(missing)"}"`);
+          notes.push(`${key}: expected ~"${expectedValue}", got "${actual ?? "(missing)"}"`);
         }
       }
-    }
-    for (const [key, mustNotHave] of Object.entries(fixture.mustNotContain ?? {})) {
-      const actual = (extraction.parsed.fields[key] ?? "").toLowerCase();
-      for (const needle of mustNotHave) {
-        if (actual.includes(needle.toLowerCase())) {
+
+      const provenanceOf = (key: string) => extraction.parsed.extracted.find((f) => f.key === key)?.from;
+      for (const key of fixture.expected.stated ?? []) {
+        const from = provenanceOf(key);
+        if (from !== "stated") {
           ok = false;
-          notes.push(`${key}: must not contain "${needle}", got "${actual}"`);
+          notes.push(`${key}: expected provenance "stated", got "${from ?? "(not extracted)"}"`);
         }
       }
-    }
+      for (const key of fixture.expected.inferred ?? []) {
+        const from = provenanceOf(key);
+        if (from !== "derived" && from !== "inferred") {
+          ok = false;
+          notes.push(`${key}: expected provenance "derived"/"inferred", got "${from ?? "(not extracted)"}"`);
+        }
+      }
 
-    results.push({ id: fixture.id, passed: ok, notes: notes.join("; ") });
-    expect.soft(ok, notes.join("; ")).toBe(true);
+      for (const [key, mustHave] of Object.entries(fixture.mustContain ?? {})) {
+        const actual = (extraction.parsed.fields[key] ?? "").toLowerCase();
+        for (const needle of mustHave) {
+          if (!actual.includes(needle.toLowerCase())) {
+            ok = false;
+            notes.push(`${key}: expected to contain "${needle}", got "${actual || "(missing)"}"`);
+          }
+        }
+      }
+      for (const [key, mustNotHave] of Object.entries(fixture.mustNotContain ?? {})) {
+        const actual = (extraction.parsed.fields[key] ?? "").toLowerCase();
+        for (const needle of mustNotHave) {
+          if (actual.includes(needle.toLowerCase())) {
+            ok = false;
+            notes.push(`${key}: must not contain "${needle}", got "${actual}"`);
+          }
+        }
+      }
+
+      return { ok, notes: notes.join("; ") };
+    });
+
+    results.push({ id: fixture.id, passed: outcome.passed, notes: outcome.notes, attempts: outcome.attempts, passedAttempts: outcome.passedAttempts });
+    expect.soft(outcome.passed, outcome.notes).toBe(true);
   });
 });
 
@@ -117,44 +119,45 @@ describe.skipIf(!isLlmConfigured())("Intake answer-inference eval (extractFromAn
   const fixtures = loadFixtures<AnswerFixture>("intake-answer");
 
   it.each(fixtures)("$id", async (fixture) => {
-    const notes: string[] = [];
-    let ok = true;
+    const outcome = await runRepeated(async () => {
+      const notes: string[] = [];
+      let ok = true;
 
-    const enrichment = await extractFromAnswer(fixture.answerText, fixture.pendingQuestions);
-    if (enrichment.source !== "llm") {
-      notes.push("fell back to deterministic (no LLM enrichment)");
-      results.push({ id: fixture.id, passed: false, notes: notes.join("; ") });
-      expect.soft(enrichment.source, notes.join("; ")).toBe("llm");
-      return;
-    }
-
-    for (const [key, expectedValue] of Object.entries(fixture.expected.fields ?? {})) {
-      const actual = enrichment.known[key];
-      if (!fieldMatches(actual, expectedValue)) {
-        ok = false;
-        notes.push(`${key}: expected ~"${expectedValue}", got "${actual ?? "(missing)"}"`);
+      const enrichment = await extractFromAnswer(fixture.answerText, fixture.pendingQuestions);
+      if (enrichment.source !== "llm") {
+        return { ok: false, notes: "fell back to deterministic (no LLM enrichment)" };
       }
-    }
-    for (const [key, mustHave] of Object.entries(fixture.mustContain ?? {})) {
-      const actual = (enrichment.known[key] ?? "").toLowerCase();
-      for (const needle of mustHave) {
-        if (!actual.includes(needle.toLowerCase())) {
+
+      for (const [key, expectedValue] of Object.entries(fixture.expected.fields ?? {})) {
+        const actual = enrichment.known[key];
+        if (!fieldMatches(actual, expectedValue)) {
           ok = false;
-          notes.push(`${key}: expected to contain "${needle}", got "${actual || "(missing)"}"`);
+          notes.push(`${key}: expected ~"${expectedValue}", got "${actual ?? "(missing)"}"`);
         }
       }
-    }
-    for (const [key, mustNotHave] of Object.entries(fixture.mustNotContain ?? {})) {
-      const actual = (enrichment.known[key] ?? "").toLowerCase();
-      for (const needle of mustNotHave) {
-        if (actual.includes(needle.toLowerCase())) {
-          ok = false;
-          notes.push(`${key}: must not contain "${needle}", got "${actual}"`);
+      for (const [key, mustHave] of Object.entries(fixture.mustContain ?? {})) {
+        const actual = (enrichment.known[key] ?? "").toLowerCase();
+        for (const needle of mustHave) {
+          if (!actual.includes(needle.toLowerCase())) {
+            ok = false;
+            notes.push(`${key}: expected to contain "${needle}", got "${actual || "(missing)"}"`);
+          }
         }
       }
-    }
+      for (const [key, mustNotHave] of Object.entries(fixture.mustNotContain ?? {})) {
+        const actual = (enrichment.known[key] ?? "").toLowerCase();
+        for (const needle of mustNotHave) {
+          if (actual.includes(needle.toLowerCase())) {
+            ok = false;
+            notes.push(`${key}: must not contain "${needle}", got "${actual}"`);
+          }
+        }
+      }
 
-    results.push({ id: fixture.id, passed: ok, notes: notes.join("; ") });
-    expect.soft(ok, notes.join("; ")).toBe(true);
+      return { ok, notes: notes.join("; ") };
+    });
+
+    results.push({ id: fixture.id, passed: outcome.passed, notes: outcome.notes, attempts: outcome.attempts, passedAttempts: outcome.passedAttempts });
+    expect.soft(outcome.passed, outcome.notes).toBe(true);
   });
 });

@@ -1,0 +1,18 @@
+{
+  "id": "audience-with-attributes",
+  "agent": "review",
+  "fields": {
+    "campaign_name": "Fall Internet Retention",
+    "line_of_business": "Xfinity Internet",
+    "customer_type": "Existing",
+    "audience_description": "Xfinity Internet customers in Denver who are out of contract"
+  },
+  "brief": "Reach Xfinity Internet customers in Denver who are out of contract for a fall retention push.",
+  "rules": {
+    "mustCall": ["adobe_get_union_schema", "adobe_list_segments", "adobe_list_datasets"],
+    "mustNotCallMatching": ["_create", "_update", "_delete"],
+    "mustPrecede": [],
+    "maxCalls": 25
+  },
+  "note": "Review's gatherAepContext probes schema availability (union first), an existing segment, profile-enabled datasets, and PQL guidance. All reads: no create/update/delete may ever appear (the observable least-privilege boundary from registry.ts). maxCalls bounds the schema-sampling fan-out."
+}

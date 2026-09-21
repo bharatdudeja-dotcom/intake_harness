@@ -1,0 +1,8 @@
+{
+  "id": "pql-good-tenure",
+  "question": "Write a PQL expression for: customers who have had a product for over a year (available fields: person.tenureDays)",
+  "rubric": "The expression correctly selects records with tenure over ~365 days and is valid PQL syntax referencing only person.tenureDays. Exact threshold (365 vs 366) does not matter.",
+  "answer": "person.tenureDays > 365",
+  "humanVerdict": "pass",
+  "note": "A clearly correct, minimal answer over the one available field - the judge should agree it passes. (Earlier version of this fixture used an invalid 'xEvent.' prefix and an ungrounded field; the judge correctly failed it, which is why the answer and question were tightened to the real available-field set.)"
+}
