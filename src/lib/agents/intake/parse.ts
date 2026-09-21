@@ -23,6 +23,10 @@
 import { findNamedPlace } from "@/lib/agents/shared/places";
 import { findStates } from "@/lib/agents/shared/us-states";
 import { CAMPAIGN_BRIEF_FIELDS, requiredFields, type FieldSpec } from "@/lib/agents/shared/campaign-brief";
+// The same date reader that converts a date for the Workfront write, so a
+// comparison here cannot disagree with what actually gets filed. form-plan
+// does not import this module, so there is no cycle.
+import { toIsoDate } from "@/lib/agents/intake/form-plan";
 
 export type Provenance = "stated" | "derived" | "inferred";
 
@@ -442,8 +446,22 @@ function findBareMonth(brief: string): ExtractedField | null {
  * than asking, and honest about where the value came from. Anything that reads
  * like a sentence rather than a title is left alone.
  */
-function findCampaignName(brief: string): ExtractedField | null {
+function findCampaignName(brief: string, labelledSource?: string): ExtractedField | null {
   const text = String(brief || "");
+  /*
+   * THE EXPLICIT ROW IS READ FROM THE ORIGINAL BRIEF, NOT THE ANSWERS.
+   *
+   * The labelled branch below needs the words "Campaign name:", and
+   * withoutLabels deletes exactly those - so on a labelled brief it could
+   * never fire, because the caller passes the label-stripped text for a
+   * good reason of its own. A table with a "Campaign name: Fall Video
+   * Attach" row therefore fell all the way through to the last resort,
+   * which takes the opening line, which on this BU's form is the
+   * REQUESTOR. The Workfront request came out titled "Video &
+   * Entertainment Marketing" - a team - while the name the marketer had
+   * typed sat unread two rows below it.
+   */
+  const labelledIn = String(labelledSource || brief || "");
 
   /*
    * A named campaign, however the sentence is built around it.
@@ -470,7 +488,7 @@ function findCampaignName(brief: string): ExtractedField | null {
    * precisely because the extraction was struggling, and then the label itself
    * became the name. Reading it explicitly fixes both halves.
    */
-  const labelled = text.match(
+  const labelled = labelledIn.match(
     /\bcampaign\s*(?:name|title)\s*[:\-]\s*"?(.{3,60}?)"?\s*(?:[.;\n]|$)/i,
   );
   if (labelled) {
@@ -840,7 +858,8 @@ export function parseBrief(rawBrief: string, known: Record<string, unknown> = {}
      * team, not a campaign. Stripping labels first means the derivation sees
      * what the marketer wrote rather than the form's own headings.
      */
-    const n = findCampaignName(answers);
+    // The answers for the derivations, the original brief for the explicit row.
+    const n = findCampaignName(answers, brief);
     if (n) push(n);
   }
 
@@ -1177,11 +1196,36 @@ function findConflicts(
   const out: Conflict[] = [];
   const norm = (s: string) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 
+  /*
+   * THE SAME DAY, WRITTEN TWO WAYS, IS NOT THE BRIEF DISAGREEING WITH ITSELF.
+   *
+   * Duplicates were compared as strings, so "2026-10-19" and "19 October"
+   * were two rival answers and the marketer was asked which of them was
+   * right. They are the same Monday.
+   *
+   * That became a defect on EVERY run the moment the caller began sending
+   * what it had already read: an AI writes a date as ISO, the table it read
+   * it from says "19 October", and both arrive as candidates for the same
+   * field. A question the marketer cannot answer sensibly - the two values
+   * are identical - on a brief containing no contradiction at all.
+   *
+   * A value that is not a date resolves to null and nothing changes, which
+   * is why this applies to every field rather than to a list of date-shaped
+   * keys that would need maintaining.
+   */
+  const sameDay = (a: string, b: string) => {
+    const x = toIsoDate(a);
+    const y = toIsoDate(b);
+    return !!x && !!y && x.value === y.value;
+  };
+
   // 1. The same field, answered twice differently.
   for (const [key, list] of candidates) {
     const distinct: ExtractedField[] = [];
     for (const f of list) {
-      if (!distinct.some((d) => norm(d.value) === norm(f.value))) distinct.push(f);
+      if (!distinct.some((d) => norm(d.value) === norm(f.value) || sameDay(d.value, f.value))) {
+        distinct.push(f);
+      }
     }
     if (distinct.length < 2) continue;
     const label = distinct[0].label || key;
