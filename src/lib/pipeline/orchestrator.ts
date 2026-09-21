@@ -667,9 +667,29 @@ export async function listRuns(limit = 50): Promise<RunRow[]> {
   return query<RunRow>(`SELECT * FROM runs ORDER BY created_at DESC LIMIT $1`, [limit]);
 }
 
-/** The static task catalog (see db/schema.sql — kept in sync with registry.ts). */
+/**
+ * The task catalog: rows from Postgres, NAMED by the registry.
+ *
+ * `tasks` is seeded by db/schema.sql with `ON CONFLICT DO UPDATE`, and the
+ * same RDS database is shared with another deployment whose seed still
+ * carries the build-plan names — "Agent 1 — Intake" owned by "Dev 1", and
+ * "Agent 4 — Escalation (removed)" owned by "Unassigned". Whenever that
+ * deployment applies its schema, it overwrites this catalog, and a reviewer
+ * opening the Live Queue sees another team's sprint board plus an agent
+ * parenthetically announcing that it does not exist.
+ *
+ * Correcting the rows only holds until the next time someone else re-seeds.
+ * So the row is the RECORD and the registry is the NAME: for any agent this
+ * build knows, label and owner come from registry.ts, which ships inside the
+ * image and cannot be rewritten from outside it. A task that appears
+ * upstream and is not in the registry keeps whatever its row says — it
+ * should still be visible, and we have nothing better to call it.
+ */
 export async function listTasks(): Promise<TaskRow[]> {
-  const rows = await query<TaskRow>(`SELECT * FROM tasks`);
+  const rows = (await query<TaskRow>(`SELECT * FROM tasks`)).map((row) => {
+    const known = ALL_TASKS.find((t) => t.name === row.task_id);
+    return known ? { ...row, label: known.label, owner: known.owner ?? null } : row;
+  });
 
   /*
    * PIPELINE ORDER, not alphabetical.
