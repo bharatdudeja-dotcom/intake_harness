@@ -58,3 +58,28 @@ over http *and* https. So it cannot be done from the box's public URL.
 ssh -L 8080:localhost:8080 ubuntu@34.203.238.63
 # then sign in at http://127.0.0.1:8080
 ```
+
+---
+
+# verify-audience-rule.ts — what a stated audience definition becomes
+
+```bash
+npx tsx scripts/verify-audience-rule.ts
+```
+
+Pure function, no network, nothing created. Six cases over
+`expressionFromBrief`, the path taken whenever a CDP-literate requester writes
+the rule themselves.
+
+It exists because the rule reached AEP as **four** conditions —
+`Internet = true and TV = false and Internet = true and TV = false` — since the
+definition is scanned over every field value joined, and the sentence the
+requester wrote lives in two of them. It selected the right people, which is
+why it needed a test: nothing downstream would have complained, and the damage
+was on screen, where a marketer reviewing four conditions cannot tell a
+duplicate from a mistake.
+
+The last cases are the ones to keep. Two fields that **disagree** must build
+nothing rather than `TV = false and TV = true`, which matches nobody while
+wearing a count of zero, and a field the sandbox does not have must build
+nothing rather than a partial rule.

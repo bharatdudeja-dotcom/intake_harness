@@ -416,6 +416,30 @@ export function expressionFromBrief(
   const predicates: string[] = [];
   const explain: string[] = [];
 
+  /*
+   * THE SAME CONDITION TWICE IS ONE CONDITION - AND TWICE WITH DIFFERENT
+   * VALUES IS NOT A CONDITION AT ALL.
+   *
+   * `text` is every field value joined, and the rule a CDP-literate requester
+   * writes ends up in more than one of them: `audience_description` holds it,
+   * and the Workfront-facing "Audience to be Targeted" is mapped from the same
+   * sentence. So each clause matched twice and the rule reached AEP as
+   *
+   *     Internet = true and TV = false and Internet = true and TV = false
+   *
+   * It selects the right people, and it is indefensible on screen: a marketer
+   * reviewing four conditions cannot tell a duplicate from a mistake, and an
+   * approver has to read it as though the repetition might mean something.
+   *
+   * Collapsing by text alone would not be enough. If two fields DISAGREE -
+   * one says the TV flag is false, another says true - the deduped rule is
+   * `TV = false and TV = true`, which matches nobody while looking like a
+   * perfectly good segment, and a count of zero would be reported as an
+   * answer. That is the brief contradicting itself, so nothing is built here
+   * and the caller decides what to tell the marketer.
+   */
+  const byField = new Map<string, string>();
+
   for (const m of text.matchAll(clause)) {
     const [, rawName, op, rawValue] = m;
     // Match the brief's short name against the real field path, either way round.
@@ -425,6 +449,14 @@ export function expressionFromBrief(
     const value = rawValue.replace(/^['"]|['"]$/g, "");
     const operator = op === "==" ? "=" : op;
     const literal = /^(true|false|null)$/i.test(value) ? value.toLowerCase() : `"${value}"`;
+
+    const seenFor = byField.get(field);
+    if (seenFor !== undefined) {
+      // Same field again: identical is a restatement, different is a conflict.
+      if (seenFor === `${operator} ${literal}`) continue;
+      return null;
+    }
+    byField.set(field, `${operator} ${literal}`);
 
     predicates.push(`${field} ${operator} ${literal}`);
     explain.push(
