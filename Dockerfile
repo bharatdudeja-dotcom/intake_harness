@@ -1,71 +1,53 @@
-# The agentic harness as a container.
-#
-# There was no Dockerfile here: the harness has only ever run as `next dev` on a
-# developer's laptop, against a Postgres container on the same laptop. That is
-# why "everything just runs on my system" - not a configuration gap, a missing
-# artifact.
-#
-# Two things this image deliberately does NOT contain:
-#
-#   1. A database. The harness owns `runs`, `task_runs` and `run_gates`, and
-#      those belong in RDS. DATABASE_URL is supplied at run time.
-#   2. Any credential. The Adobe MCP tokens live in Agent Manager, which the
-#      harness reaches through MCP_GATEWAY_URL. The harness holds a service key
-#      for that gateway and nothing else, so a compromised harness cannot
-#      replay anyone's Workfront or AEP session.
+# Multi-stage build: full node_modules only exist in the deps/builder
+# stages, which are discarded — the runtime image gets just what
+# `output: "standalone"` (next.config.ts) traced in as actually used.
 
-# ---------------------------------------------------------------- dependencies
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-# `npm ci` when there is a lockfile, `npm install` when there is not. The
-# lockfile is the correct path and its absence should not fail the build.
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# ---------------------------------------------------------------------- build
-FROM node:22-alpine AS build
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# The build does not talk to Postgres or to any MCP server. If it ever starts
-# to, it will fail here rather than at deploy time, which is the right place.
-ENV NEXT_TELEMETRY_DISABLED=1
+# The stat tiles and every /api/* route read the database at request time,
+# not at build time (see src/app/page.tsx's `dynamic = "force-dynamic"`
+# comment), so DATABASE_URL/MCP_ENDPOINT_URL don't need to exist here.
 RUN npm run build
 
-# ----------------------------------------------------------------- run time
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
 
-# A non-root user. The app writes nothing to disk - every durable thing it owns
-# is in Postgres - so it has no business owning its own files either.
-RUN addgroup -g 1001 -S nodejs && adduser -S -u 1001 -G nodejs nextjs
+# Next's own convention for the standalone output: run as a dedicated
+# non-root user rather than root.
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 
-# `standalone` emits the server plus only the modules the app actually imports.
-COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=build --chown=nextjs:nodejs /app/public ./public
-
-# The schema travels with the image so the deployed version can always apply
-# its own migrations - db/schema.sql is idempotent and safe to re-run, which is
-# what makes that true rather than aspirational.
-COPY --from=build --chown=nextjs:nodejs /app/db ./db
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# docs/ is read from disk at runtime (src/lib/agents/review/pql-context.ts -
+# the local PQL reference both Agent 2 and Agent 3 ground against). Next's
+# own file-tracer happens to pick this up into .next/standalone/docs/
+# automatically today (confirmed by inspecting a real build), because the
+# path is a static string literal it can resolve - but that's the tracer's
+# static analysis working out in this one case, not a guarantee for every
+# future change to how that path gets built. Copied explicitly here too so
+# this doesn't silently start failing closed in a deployed container the
+# day that path stops being literal (e.g. built from an env var) - belt and
+# suspenders, and the second COPY of an already-present directory is a
+# no-op either way.
+COPY --from=builder --chown=nextjs:nodejs /app/docs ./docs
 
 USER nextjs
 
-# 3100 because that is what Agent Manager's registry expects for this system.
-# Overridable: the port is configuration, and PORT is what every host sets.
-ENV PORT=3100
+EXPOSE 3000
+ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-EXPOSE 3100
 
-# A health check that proves the app is SERVING, not merely that the process is
-# alive. /api/tasks reads the task catalog from Postgres, so a green check means
-# the app answered AND its database is reachable - which is the pair that
-# actually matters. A check on a static route would stay green through a total
-# loss of the database.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3100)+'/api/tasks').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
+# Required at runtime (not baked into the image — pass with `docker run -e`
+# or a compose/orchestrator env file): DATABASE_URL, MCP_ENDPOINT_URL,
+# ADMIN_NAMES, and whichever MCP_GATEWAY_*/WORKFRONT_*/MCP_API_KEY variables
+# this deployment needs — see .env.local.example.
 CMD ["node", "server.js"]

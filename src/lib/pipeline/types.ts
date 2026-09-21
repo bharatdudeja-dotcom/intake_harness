@@ -1,13 +1,18 @@
 /**
- * The contract every agent endpoint implements. Each agent — the three in
- * the sequential pipeline (Intake, Review/Triage, Audience Creation) plus
- * Escalation, invoked out-of-band when a run fails (see
- * src/lib/pipeline/orchestrator.ts) — is a standalone Next.js route
+ * The contract every agent endpoint implements. Each agent in the
+ * sequential pipeline (Intake, Review/Triage, Audience Creation — see
+ * src/lib/pipeline/registry.ts's PIPELINE) is a standalone Next.js route
  * handler. This is the ONLY shape the orchestrator, and every other agent,
  * needs to agree on. An agent can be rewritten entirely internally as long
  * as it keeps this request/response shape.
  */
 
+/**
+ * "escalation" is kept here even though Agent 4 — Escalation was removed
+ * (see registry.ts) purely so historical `task_runs`/`tasks` rows with
+ * that task_id still type-check honestly against real DB content — it is
+ * not, and will never again be, an agent this app invokes.
+ */
 export const AGENT_NAMES = ["intake", "review", "audience_creation", "escalation"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 /** A task_id in the `tasks` table is just an AgentName — same vocabulary, DB column name. */
@@ -40,15 +45,15 @@ export interface AgentResponse<TOutput = unknown> {
    * A plain-English explanation of what this step did, for a human reading
    * the run — not just for "failed"/"needs_input" anymore. Every current
    * agent already computes something like this internally (Audience
-   * Creation's statusMessage, Escalation's summary); the fix was surfacing
-   * it here on success too, not adding a new field.
+   * Creation's statusMessage); the fix was surfacing it here on success
+   * too, not adding a new field.
    */
   message?: string;
   /**
    * Free-form health/observability data, persisted alongside the task run
    * but NOT passed to the next agent. Use this for the metrics the
    * requirements doc calls out explicitly, e.g. { loopCount } for B1,
-   * { predictedCount, identityGap } for B3/B6, { requestAgeSeconds } for B7.
+   * { identityGap } for B3, { requestAgeSeconds } for B7.
    */
   metadata?: Record<string, unknown>;
   /**
@@ -73,31 +78,15 @@ export interface RunRow {
   status: "running" | "completed" | "failed" | "needs_input" | "awaiting_approval";
   current_step: number;
   input: unknown;
-  /**
-   * What the run is waiting FOR, when the wait is a gate rather than a pause.
-   *
-   * Two different reasons a run sits at "awaiting_approval":
-   *   - a step finished and the next one wants a click (the per-agent loop);
-   *   - a PROCESS gate is shut, e.g. the request has not been approved in
-   *     Workfront, so the next agent must not run at all.
-   *
-   * Only the second sets this. It carries the explanation the marketer sees
-   * and the record they have to go and act on - being told to approve
-   * something without being told where is what stops approvals happening.
-   */
-  blocked_on: {
-    gate_id: string;
-    map_step: string;
-    label: string;
-    step_index: number;
-    agent: AgentName;
-    awaiting: string;
-    needs: "approval" | "upstream" | "decision";
-    ref?: { objCode: string; objId: string };
-  } | null;
   created_at: string;
   updated_at: string;
-  /** Optional grouping — see src/lib/programmes.ts. Set via an optional `programme` name on the submission. */
+  /**
+   * Optional grouping, ported from db/schema.sql's `programmes` table.
+   * NOT YET WIRED UP: no route or UI sets this today (nothing creates a
+   * programme or assigns a run to one) - it is schema ahead of code, kept
+   * honest here rather than pointing at a `src/lib/programmes.ts` that
+   * doesn't exist. Build the programmes CRUD before relying on this field.
+   */
   programme_id: string | null;
   /** Two-tier human curation — see src/app/api/runs/[runId]/{approve,promote}/route.ts. */
   tags: string[];
@@ -105,7 +94,14 @@ export interface RunRow {
   approved_by: string | null;
   approved_at: string | null;
   approval_note: string | null;
-  /** Admitted into the cross-run Shared Graph (GET /api/graph). Requires `approved` first. */
+  /**
+   * Tier 2: an approved run an admin has additionally marked worth
+   * surfacing more broadly. Set by POST /api/runs/[runId]/promote, which
+   * requires `approved` first. NOT the same "graph" as CX Agent Manager's
+   * own cross-agent graph (services/agent-manager) - this harness has no
+   * `/api/graph` of its own; `promoted` is currently just a queryable flag
+   * on `runs`; see stats.promoted (page.tsx/settings) for where it's read.
+   */
   promoted: boolean;
   promoted_by: string | null;
   promoted_at: string | null;

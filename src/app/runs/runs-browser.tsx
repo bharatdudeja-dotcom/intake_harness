@@ -4,8 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { PIPELINE } from "@/lib/pipeline/registry";
 import { StatusBadge } from "../status-badge";
+import { ToolCallTrace, type ToolCallOutput } from "../tool-call-trace";
+import { ToolCallLog, type ToolCallLogEntry } from "../tool-call-log";
+import { LiveToolCallLog, type LiveToolCall } from "../live-tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
+
+/** Falls back to the raw task_id for a historical "escalation" row or the live poll's currentTaskId. */
+function agentLabel(taskId: string): string {
+  return PIPELINE.find((a) => a.name === taskId)?.label ?? taskId;
+}
 
 /** The shape intake's "needs_input" output puts under `questions` (see src/app/api/agents/intake/route.ts). */
 type PendingQuestion = {
@@ -34,8 +42,8 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   const [admins, setAdmins] = useState<string[]>([]);
   const [selectedAdmin, setSelectedAdmin] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
   const [curating, setCurating] = useState(false);
+  const [runningAgain, setRunningAgain] = useState(false);
 
   useEffect(() => {
     fetch("/api/admins")
@@ -54,7 +62,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     const data = (await res.json()) as RunDetail;
     setDetail(data);
     setAnswers({});
-    setTagsInput(data.run.tags.join(", "));
     setApprovalNote(data.run.approval_note ?? "");
   }, []);
 
@@ -80,16 +87,16 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     }
   }
 
+  /** Tier 2 of curation - see /api/runs/[runId]/promote/route.ts. Requires the run to already be approved. */
   async function promoteRun() {
     if (!selectedRunId || !selectedAdmin) return;
     setCurating(true);
     setError(null);
     try {
-      const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
       const res = await fetch(`/api/runs/${selectedRunId}/promote`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adminName: selectedAdmin, tags }),
+        body: JSON.stringify({ adminName: selectedAdmin }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -100,6 +107,33 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       await refresh();
     } finally {
       setCurating(false);
+    }
+  }
+
+  /**
+   * Starts a brand-new run from this run's original input — the exact
+   * submission, not a resume/retry of THIS run_id. Useful for checking
+   * whether agent behavior changed since, without retyping the brief.
+   */
+  async function runAgain() {
+    if (!detail) return;
+    setRunningAgain(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: detail.run.input }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error ?? `Failed to start a new run (HTTP ${res.status}).`);
+        return;
+      }
+      await loadDetail(data.run.run_id);
+      await refresh();
+    } finally {
+      setRunningAgain(false);
     }
   }
 
@@ -125,6 +159,48 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
 
   const [advancing, setAdvancing] = useState(false);
   const [retrying, setRetrying] = useState(false);
+
+  const [liveCalls, setLiveCalls] = useState<LiveToolCall[]>([]);
+  const [liveTaskId, setLiveTaskId] = useState<string | null>(null);
+  const anyActionInFlight = resuming || advancing || retrying;
+
+  /*
+   * Poll GET /api/runs/[runId]/live while resuming/approving/retrying THIS
+   * run is in flight - see pipeline-chat.tsx's identical effect and
+   * live-tool-call-log.tsx / live-progress.ts for why. `runningAgain`
+   * (Run again) is deliberately NOT included: it starts a brand-new run
+   * with its own run_id, which this page doesn't learn until that whole
+   * request returns - same limitation pipeline-chat.tsx's startRun has, for
+   * the same reason.
+   */
+  useEffect(() => {
+    // No synchronous setState on the "nothing in flight" branch, on
+    // purpose - see pipeline-chat.tsx's identical effect for why (rendering
+    // below is already gated on anyActionInFlight, and the first poll() of
+    // a new action resolves near-instantly against a store orchestrator.ts
+    // already reset fresh).
+    if (!anyActionInFlight || !selectedRunId) return;
+    const runId = selectedRunId;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/runs/${runId}/live`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { calls: LiveToolCall[]; currentTaskId: string | null };
+        if (cancelled) return;
+        setLiveCalls(data.calls ?? []);
+        setLiveTaskId(data.currentTaskId ?? null);
+      } catch {
+        // Best-effort - a failed poll just tries again next tick.
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [anyActionInFlight, selectedRunId]);
 
   async function retryStuck() {
     if (!selectedRunId) return;
@@ -174,7 +250,29 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(data?.error ?? `Failed to resume run (HTTP ${res.status}).`);
+        /*
+         * A VALIDATION_ERROR here ("Still blank: ..." or "has no paused
+         * step to answer") means the run moved on since THIS page loaded -
+         * another tab, another person, or an earlier answer already
+         * advanced it past whatever question is on screen, so the server
+         * validated the submitted answers against a DIFFERENT, later
+         * question than the one this form is showing. `readyToSubmitAnswers`
+         * already keeps the button disabled until every question CURRENTLY
+         * ON SCREEN is filled, so a VALIDATION_ERROR reaching here is
+         * overwhelmingly this staleness case, not a genuinely-blank field.
+         * Refetching shows what's actually current instead of leaving the
+         * form stuck on a question that no longer applies - the exact bug
+         * a real run hit (task_run 195's form, task_run 196 already the
+         * real pending step).
+         */
+        const staleRun = data?.code === "VALIDATION_ERROR";
+        if (staleRun) await loadDetail(selectedRunId);
+        setError(
+          (data?.error ?? `Failed to resume run (HTTP ${res.status}).`) +
+            (staleRun
+              ? " This run has moved on since you loaded it - refreshed to show the current step below."
+              : ""),
+        );
         return;
       }
       await loadDetail(selectedRunId);
@@ -198,7 +296,16 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
           return;
         }
         const data = await res.json();
-        if (!cancelled) setRuns(data.runs ?? []);
+        if (!cancelled) {
+          setRuns(data.runs ?? []);
+          // Nothing to show in the detail panel otherwise - on a page this
+          // wide, an empty "Select a run" message reads as broken rather
+          // than idle. Only when there's no deep-linked run already taking
+          // that slot.
+          if (!initialRunId && data.runs?.length) {
+            loadDetail(data.runs[0].run_id);
+          }
+        }
       })
       .catch((err) => {
         if (!cancelled) setError((err as Error).message);
@@ -209,6 +316,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadDetail is a stable useCallback; initialRunId doesn't change after mount.
   }, []);
 
   // Deep-link support for /runs/[runId]: load that run's detail on mount,
@@ -226,7 +334,6 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
         const data = (await res.json()) as RunDetail;
         if (!cancelled) {
           setDetail(data);
-          setTagsInput(data.run.tags.join(", "));
           setApprovalNote(data.run.approval_note ?? "");
         }
       })
@@ -250,7 +357,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
   }
 
   return (
-    <div className="flex max-w-4xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+    <div className="flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Runs</h1>
@@ -268,7 +375,11 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+      {/* A fixed-width run list plus a flexible detail panel, rather than a
+          proportional 1:2 split - on a wide screen a fr-based ratio would
+          stretch the run list (just short ids and badges) far wider than
+          its content needs, at the expense of the detail panel. */}
+      <div className="grid gap-6 sm:grid-cols-[280px_minmax(0,1fr)]">
         <div className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-black dark:text-zinc-50">
             {loadingList ? "Loading…" : `${runs.length} run${runs.length === 1 ? "" : "s"}`}
@@ -287,8 +398,7 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                   <span className="font-mono text-zinc-500">{run.run_id.slice(0, 8)}</span>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={run.status} />
-                    {run.promoted && <span title="Promoted to Shared Graph">🔗</span>}
-                    {run.approved && !run.promoted && <span title="Approved">✓</span>}
+                    {run.approved && <span title="Approved">✓</span>}
                     <span className="text-zinc-400">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
                 </button>
@@ -314,12 +424,20 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     Promoted by {detail.run.promoted_by}
                   </span>
                 )}
+                <button
+                  onClick={runAgain}
+                  disabled={runningAgain}
+                  title="Start a brand-new run with this run's original input"
+                  className="ml-auto rounded-full border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-600"
+                >
+                  {runningAgain ? "Starting…" : "Run again"}
+                </button>
               </div>
 
               {detail.run.status === "completed" && (
                 <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-3 text-xs dark:border-zinc-800">
                   <p className="font-medium text-zinc-600 dark:text-zinc-400">
-                    Curation — mark this run worth keeping, and optionally share it.
+                    Curation — mark this run worth keeping.
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <select
@@ -348,23 +466,13 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                     >
                       {detail.run.approved ? "Approved" : "Approve"}
                     </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="text"
-                      className="min-w-40 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
-                      placeholder="Tags, comma separated (e.g. winback, residential)"
-                      value={tagsInput}
-                      onChange={(e) => setTagsInput(e.target.value)}
-                      disabled={!detail.run.approved}
-                    />
                     <button
                       onClick={promoteRun}
                       disabled={curating || !selectedAdmin || !detail.run.approved || detail.run.promoted}
-                      className="rounded-full bg-purple-600 px-3 py-1 font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
                       title={!detail.run.approved ? "Approve this run first" : undefined}
+                      className="rounded-full border border-zinc-300 px-3 py-1 font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                     >
-                      {detail.run.promoted ? "Promoted to Shared Graph" : "Promote to Shared Graph"}
+                      {detail.run.promoted ? "Promoted" : "Promote"}
                     </button>
                   </div>
                 </div>
@@ -452,6 +560,10 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                 </div>
               )}
 
+              {anyActionInFlight && (
+                <LiveToolCallLog calls={liveCalls} currentTaskId={liveTaskId} agentLabel={agentLabel} />
+              )}
+
               <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                 {JSON.stringify(detail.run.input, null, 2)}
               </pre>
@@ -477,10 +589,14 @@ export function RunsBrowser({ initialRunId }: { initialRunId?: string }) {
                       </span>
                     </div>
                     {taskRun.message && (
-                      <p className={`text-xs ${taskRun.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                      <p className={`whitespace-pre-wrap text-xs ${taskRun.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
                         {taskRun.message}
                       </p>
                     )}
+                    <div className="flex flex-col gap-1.5">
+                      <ToolCallTrace output={(taskRun.output ?? {}) as ToolCallOutput} metadata={taskRun.metadata} />
+                    </div>
+                    <ToolCallLog calls={(taskRun.metadata?.toolCalls as ToolCallLogEntry[] | undefined) ?? []} />
                     <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
                       {JSON.stringify(taskRun.output, null, 2)}
                     </pre>

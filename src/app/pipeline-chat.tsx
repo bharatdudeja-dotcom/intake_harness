@@ -2,50 +2,105 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ESCALATION, PIPELINE } from "@/lib/pipeline/registry";
-import type { AgentName, RunRow, TaskRunRow } from "@/lib/pipeline/types";
+import { PIPELINE } from "@/lib/pipeline/registry";
+import type { RunRow, TaskRunRow } from "@/lib/pipeline/types";
 import { StatusBadge } from "./status-badge";
+import { ToolCallTrace, type ToolCallOutput } from "./tool-call-trace";
+import { ToolCallLog, type ToolCallLogEntry } from "./tool-call-log";
+import { LiveToolCallLog, type LiveToolCall } from "./live-tool-call-log";
 
 type RunDetail = { run: RunRow; taskRuns: TaskRunRow[] };
 type PendingQuestion = { key: string; label: string; ask: string | null; options: string[] | null };
 
-function agentLabel(taskId: AgentName): string {
-  return PIPELINE.find((a) => a.name === taskId)?.label ?? (taskId === "escalation" ? ESCALATION.label : taskId);
+// Falls back to the raw task_id for a historical "escalation" row — the
+// registry no longer has an entry for it (Agent 4 was removed), but old
+// task_runs with that task_id still need to render something. Also used as
+// LiveToolCallLog's agentLabel - accepts a plain string there since the
+// live poll's currentTaskId isn't narrowed to AgentName the way a real
+// task_runs row's task_id is.
+function agentLabel(taskId: string): string {
+  return PIPELINE.find((a) => a.name === taskId)?.label ?? taskId;
 }
 
 /** A step's output, loosely — every field here is optional because each agent's shape differs. */
-type StepOutput = {
+type StepOutput = ToolCallOutput & {
   message?: string;
   questions?: PendingQuestion[];
-  grounding?: { grounded: boolean; reason: string | null; hits?: unknown };
-  workfront?: { created?: boolean } & Record<string, unknown>;
-  [key: string]: unknown;
 };
 
 /**
  * A conversational front end for the whole pipeline, one agent per turn —
  * modeled on how Claude Code itself shows a run: the marketer's request,
  * each agent's tool calls surfaced inline rather than hidden, and an
- * explicit approval prompt before the next agent runs rather than the
- * whole pipeline firing off unattended. Backed entirely by
+ * explicit approval prompt before an agent that still gates runs rather
+ * than the whole pipeline firing off unattended. Backed by
  * src/lib/pipeline/orchestrator.ts's per-step gate (runPipeline only ever
- * runs the next agent; POST .../continue is what approves the next one).
+ * runs the next agent; POST .../continue is what approves the next one) —
+ * except Audience Creation, which registry.ts opts out of the gate for, so
+ * it runs immediately once Review completes rather than waiting for a
+ * click.
  */
-export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?: string }) {
+export function PipelineChat() {
   const [brief, setBrief] = useState("");
   const [workfrontProjectId, setWorkfrontProjectId] = useState("");
-  const [programme, setProgramme] = useState("");
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [liveCalls, setLiveCalls] = useState<LiveToolCall[]>([]);
+  const [liveTaskId, setLiveTaskId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [runDetail, busy]);
+
+  /*
+   * Poll GET /api/runs/[runId]/live while a request that runs agents is in
+   * flight, so the button lighting up isn't the only signal the user gets -
+   * see live-tool-call-log.tsx / live-progress.ts for why this exists.
+   *
+   * Only runs once a run_id exists, which means the very first call
+   * (startRun, before any run_id is known) still shows only the plain
+   * "Running…" spinner - runPipeline creates the run row and executes
+   * Intake in the same request, so there is no run_id to poll with until
+   * that whole response comes back. Every later action (submitAnswers,
+   * approveNext, retryStuck) already has runDetail's run_id, so THOSE get
+   * full live visibility - which is also where chained multi-agent steps
+   * (Review -> Audience Creation) make the silent wait longest.
+   */
+  useEffect(() => {
+    // No synchronous setState here on the "not busy" branch, on purpose -
+    // rendering below is already gated on `busy`, so stale liveCalls simply
+    // never gets shown, and every new busy cycle's first poll() resolves
+    // near-instantly (a local fetch against a server whose live-progress
+    // store orchestrator.ts already resets fresh per action) - so the only
+    // setState calls here are inside poll's async callback, which is
+    // exactly the pattern react-hooks/set-state-in-effect wants.
+    if (!busy || !runDetail) return;
+    const runId = runDetail.run.run_id;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/runs/${runId}/live`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { calls: LiveToolCall[]; currentTaskId: string | null };
+        if (cancelled) return;
+        setLiveCalls(data.calls ?? []);
+        setLiveTaskId(data.currentTaskId ?? null);
+      } catch {
+        // Best-effort - a failed poll just tries again next tick.
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [busy, runDetail]);
 
   async function loadDetail(runId: string) {
     const res = await fetch(`/api/runs/${runId}`);
@@ -69,7 +124,7 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
       const res = await fetch("/api/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: { brief: text, fields, programme: programme.trim() || undefined } }),
+        body: JSON.stringify({ input: { brief: text, fields } }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
@@ -94,7 +149,19 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
         body: JSON.stringify({ answers }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        // See runs-browser.tsx's submitAnswers for the full reasoning - a
+        // VALIDATION_ERROR here means the run moved on since this page
+        // loaded (another tab, another person, or an earlier answer), so
+        // refetch and show the real current question instead of leaving
+        // the form stuck on one that no longer applies.
+        const staleRun = data?.code === "VALIDATION_ERROR";
+        if (staleRun) await loadDetail(runDetail.run.run_id);
+        throw new Error(
+          (data?.error ?? `HTTP ${res.status}`) +
+            (staleRun ? " This run has moved on since you loaded it - refreshed to show the current step below." : ""),
+        );
+      }
       await loadDetail(runDetail.run.run_id);
     } catch (err) {
       setError((err as Error).message);
@@ -158,7 +225,9 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex max-h-[32rem] flex-col gap-3 overflow-y-auto p-4">
+      {/* Viewport-relative, not a fixed 32rem - on a tall monitor a fixed
+          cap left most of the screen empty below a small scrolling box. */}
+      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-4">
         {!run && (
           <p className="text-sm text-zinc-400">
             Describe the campaign or audience you need. Each agent runs one at a time — you&apos;ll see what it did
@@ -207,36 +276,22 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
               </div>
 
               {tr.message && (
-                <p className={`pl-7 text-xs ${tr.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+                <p className={`whitespace-pre-wrap pl-7 text-xs ${tr.status === "failed" ? "text-red-600" : "text-zinc-600 dark:text-zinc-400"}`}>
                   {tr.message}
                 </p>
               )}
 
-              {/* Tool calls this step made, surfaced the way Claude Code shows one — a
-                  named call with its outcome, not buried in a raw JSON blob. */}
-              {output.grounding && (
-                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  <span>🔍</span>
-                  <span className="font-mono">search_adobe_knowledge</span>
-                  <span className={output.grounding.grounded ? "text-green-600" : "text-amber-600"}>
-                    {output.grounding.grounded ? "grounded" : `ungrounded — ${output.grounding.reason}`}
-                  </span>
-                </div>
-              )}
-              {output.workfront && (
-                <div className="ml-7 flex items-center gap-2 rounded border border-zinc-100 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  <span>🛠️</span>
-                  <span className="font-mono">create_workfront_intake</span>
-                  <span className={output.workfront.created ? "text-green-600" : "text-amber-600"}>
-                    {output.workfront.created ? "created" : "dry run — not created"}
-                  </span>
-                </div>
-              )}
+              <div className="ml-7 flex flex-col gap-1.5">
+                <ToolCallTrace output={output} metadata={tr.metadata} />
+              </div>
 
               {isOpen && (
-                <pre className="ml-7 overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
-                  {JSON.stringify(tr.output, null, 2)}
-                </pre>
+                <div className="ml-7 flex flex-col gap-2">
+                  <ToolCallLog calls={((tr.metadata?.toolCalls as ToolCallLogEntry[] | undefined) ?? [])} />
+                  <pre className="overflow-x-auto rounded bg-zinc-50 p-2 text-xs dark:bg-zinc-900">
+                    {JSON.stringify(tr.output, null, 2)}
+                  </pre>
+                </div>
               )}
 
               {/* The needs_input turn's questions, live, only on the current pending step. */}
@@ -299,8 +354,10 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
           </div>
         )}
 
-        {/* The approval gate — the whole point of this view. Nothing after the
-            step above ran without this being clicked. */}
+        {/* The approval gate — only shows up before an agent whose registry
+            entry still requires it (see registry.ts's requiresApproval).
+            Audience Creation opted out, so this never appears between
+            Review finishing and Audience Creation running. */}
         {run?.status === "awaiting_approval" && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
             <p className="text-blue-900 dark:text-blue-300">
@@ -317,9 +374,12 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
         )}
 
         {busy && (
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
-            Running {busyLabel}…
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
+              Running {busyLabel}…
+            </div>
+            <LiveToolCallLog calls={liveCalls} currentTaskId={liveTaskId} agentLabel={agentLabel} />
           </div>
         )}
 
@@ -334,7 +394,7 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
         )}
         {run?.status === "failed" && (
           <p className="text-sm text-red-600">
-            This run failed and Escalation was invoked — see the{" "}
+            This run failed — see the{" "}
             <Link href={`/runs/${run.run_id}`} className="underline">
               full trace
             </Link>
@@ -366,26 +426,14 @@ export function PipelineChat({ programmeLabel = "Programme" }: { programmeLabel?
                 Send
               </button>
             </div>
-            {/* Stacked on mobile: side by side, each input's placeholder is
-                too long to be legible squeezed into half a phone screen. */}
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                type="text"
-                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
-                value={workfrontProjectId}
-                onChange={(e) => setWorkfrontProjectId(e.target.value)}
-                disabled={busy}
-              />
-              <input
-                type="text"
-                className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
-                placeholder={`${programmeLabel} (optional — groups this run for the ${programmeLabel}s page)`}
-                value={programme}
-                onChange={(e) => setProgramme(e.target.value)}
-                disabled={busy}
-              />
-            </div>
+            <input
+              type="text"
+              className="min-w-0 flex-1 rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-xs text-black outline-none focus:border-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-50"
+              placeholder="Workfront project ID (optional — defaults to the intake queue if left blank)"
+              value={workfrontProjectId}
+              onChange={(e) => setWorkfrontProjectId(e.target.value)}
+              disabled={busy}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-between">

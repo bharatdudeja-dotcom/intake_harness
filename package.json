@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "eval:intake": "vitest run --config evals/vitest.evals.config.mts evals/intake.eval.ts",
+    "eval:review": "vitest run --config evals/vitest.evals.config.mts evals/review.eval.ts",
+    "eval:audience": "vitest run --config evals/vitest.evals.config.mts evals/audience-creation.eval.ts",
+    "eval:all": "vitest run --config evals/vitest.evals.config.mts"
   },
   "dependencies": {
     "next": "16.3.5",
@@ -23,6 +28,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

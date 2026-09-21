@@ -40,9 +40,3 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-# Our throwaway Agent 1, for local testing only. Agent 1 is Uday's.
-local/
-
-# scratch output from probing merges - never a deliverable
-mt.txt

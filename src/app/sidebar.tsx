@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * The grouped-sidebar layout is the one piece of Bharat's Agent Manager
@@ -15,15 +15,7 @@ const GROUPS: { heading: string; links: { href: string; label: string }[] }[] = 
     links: [
       { href: "/", label: "Home" },
       { href: "/runs", label: "Runs" },
-      { href: "/queue", label: "Live Queue" },
-      { href: "/programmes", label: "Programmes" },
-    ],
-  },
-  {
-    heading: "Knowledge",
-    links: [
-      { href: "/resources", label: "Resources" },
-      { href: "/graph", label: "Shared Graph" },
+      { href: "/evals", label: "Evals" },
     ],
   },
   {
@@ -42,9 +34,38 @@ const GROUPS: { heading: string; links: { href: string; label: string }[] }[] = 
  * button instead, and the nav itself becomes a slide-in drawer over the
  * page rather than a permanent column.
  */
+/**
+ * Agent Manager's own web UI - a different application (see this file's
+ * own docstring: this sidebar layout was carried over FROM it), reachable
+ * at the same host this app is being viewed at, port 8080 instead of
+ * whatever this app is on. Computed from window.location rather than a
+ * hardcoded host so it's correct in dev, in this Docker deployment, and
+ * anywhere else this app ends up running, without an env var — set in a
+ * useEffect (not read at render time) so the server-rendered HTML and
+ * React's first client render match before window exists; the link
+ * appears a tick after mount rather than causing a hydration mismatch.
+ *
+ * react-hooks/set-state-in-effect flags this, but its usual fix (derive
+ * the value during render instead) doesn't apply here: window.location
+ * only exists client-side, so computing it directly in the render body
+ * would make the SERVER's render (no window, renders nothing) and the
+ * CLIENT's first render (window exists, renders the link) disagree - the
+ * exact hydration mismatch this effect exists to avoid. The effect IS the
+ * fix, not the thing being warned about.
+ */
+function useAgentManagerUrl(): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see docstring above: this IS the hydration-safe pattern, not a bypassable derivation.
+    setUrl(`${window.location.protocol}//${window.location.hostname}:8080`);
+  }, []);
+  return url;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const agentManagerUrl = useAgentManagerUrl();
 
   // Closing on navigation is what makes the drawer feel like a menu rather
   // than a panel you have to remember to dismiss yourself. Reset during
@@ -81,6 +102,37 @@ export function Sidebar() {
           })}
         </div>
       ))}
+
+      {agentManagerUrl && (
+        <div className="flex flex-col gap-0.5">
+          <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-600">
+            External
+          </p>
+          <a
+            href={agentManagerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900/60"
+          >
+            Agent Manager
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0 text-zinc-400 dark:text-zinc-600"
+            >
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <path d="M15 3h6v6" />
+              <path d="M10 14 21 3" />
+            </svg>
+          </a>
+        </div>
+      )}
     </nav>
   );
 

@@ -56,8 +56,110 @@
  * route directly.
  */
 
-import { ALL_TASKS } from "./pipeline/registry";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { PIPELINE } from "./pipeline/registry";
 import type { TaskId } from "./pipeline/types";
+import * as liveProgress from "./live-progress";
+
+/**
+ * One MCP call, request and response together — the raw ground truth
+ * behind whatever an agent's `message`/`output` says it concluded.
+ *
+ * Captured transparently: nothing that calls callMcpTool (aep.ts,
+ * workfront.ts, workfront-notes.ts, ...) had to change to produce this — see
+ * withToolCallLog below.
+ */
+export type ToolCallRecord = {
+  name: string;
+  args: Record<string, unknown>;
+  startedAt: string;
+  durationMs: number;
+  /** Present on success. Truncated (see TRUNCATE_AT) so one huge list_schemas can't bloat a task_run row. */
+  result?: unknown;
+  resultTruncated?: boolean;
+  /** Present on failure, instead of `result`. */
+  error?: string;
+};
+
+const TRUNCATE_AT = 20_000;
+
+/** JSON-serialize `value`, truncating the STRING (not the structure) past TRUNCATE_AT chars. */
+function truncatedJson(value: unknown): { json: unknown; truncated: boolean } {
+  let text: string;
+  try {
+    text = JSON.stringify(value);
+  } catch {
+    return { json: String(value), truncated: false };
+  }
+  if (text.length <= TRUNCATE_AT) return { json: value, truncated: false };
+  return { json: `${text.slice(0, TRUNCATE_AT)}… (truncated, ${text.length} chars total)`, truncated: true };
+}
+
+type ToolCallContext = { log: ToolCallRecord[]; runId: string; taskId: TaskId };
+const toolCallLogStorage = new AsyncLocalStorage<ToolCallContext>();
+
+/**
+ * Run `fn`, collecting every callMcpTool call made anywhere inside it —
+ * including calls several functions deep, in a different module entirely —
+ * into the returned `toolCalls` list, in call order.
+ *
+ * An agent route wraps its whole handler body in this and puts the result
+ * in `AgentResponse.metadata.toolCalls`, which the orchestrator already
+ * persists verbatim to task_runs.metadata (see orchestrator.ts) - no schema
+ * change, no per-call-site plumbing.
+ *
+ * `runId`/`taskId` are new alongside `fn` (every call site updated) - not
+ * for this function's own return value, but so callMcpTool below can also
+ * publish each call to live-progress.ts AS IT HAPPENS, not just collect it
+ * for the final return. Same AsyncLocalStorage context serves both jobs;
+ * see live-progress.ts for why a live, mid-request view needed adding at
+ * all.
+ */
+export async function withToolCallLog<T>(
+  runId: string,
+  taskId: TaskId,
+  fn: () => Promise<T>,
+): Promise<{ result: T; toolCalls: ToolCallRecord[] }> {
+  const log: ToolCallRecord[] = [];
+  liveProgress.setCurrentAgent(runId, taskId);
+  const result = await toolCallLogStorage.run({ log, runId, taskId }, fn);
+  return { result, toolCalls: log };
+}
+
+/**
+ * Trace a NON-MCP external call (today: an LLM completion) into the exact same
+ * tool-call log and live view MCP calls use, so the UI renders it with zero new
+ * plumbing. Records `name` (e.g. "llm:anthropic:claude-…"), the args summary,
+ * duration, and result/error - and publishes start/finish to live-progress so a
+ * mid-request poller sees "calling the model right now" the same way it sees an
+ * MCP call in flight.
+ *
+ * A no-op passthrough when no withToolCallLog wrapper is active (e.g. the
+ * preview endpoint calls the LLM outside a run) - it simply runs `fn`. This is
+ * the one place external-call tracing lives, so LLM providers don't each
+ * reimplement it and can't drift from how MCP calls are recorded.
+ */
+export async function traceExternalCall<T>(
+  name: string,
+  args: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const ctx = toolCallLogStorage.getStore();
+  if (!ctx) return fn(); // untraced context (e.g. preview) - just run it
+  const startedAt = new Date();
+  const liveId = liveProgress.startCall(ctx.runId, ctx.taskId, name, args);
+  try {
+    const value = await fn();
+    const { json, truncated } = truncatedJson(value);
+    ctx.log.push({ name, args, startedAt: startedAt.toISOString(), durationMs: Date.now() - startedAt.getTime(), result: json, resultTruncated: truncated });
+    liveProgress.finishCall(ctx.runId, liveId, { status: "success", durationMs: Date.now() - startedAt.getTime(), result: json, resultTruncated: truncated });
+    return value;
+  } catch (err) {
+    ctx.log.push({ name, args, startedAt: startedAt.toISOString(), durationMs: Date.now() - startedAt.getTime(), error: (err as Error).message });
+    liveProgress.finishCall(ctx.runId, liveId, { status: "error", durationMs: Date.now() - startedAt.getTime(), error: (err as Error).message });
+    throw err;
+  }
+}
 
 const MCP_SERVER_ROUTES: Array<{ prefix: string; path: string }> = [
   { prefix: "wf_core_", path: "/mcp/workfront/core" },
@@ -146,7 +248,18 @@ function getGatewayUrl(): string | null {
  *
  * MCP_GATEWAY_ROUTES maps server id to the tool-name prefixes it serves:
  *
- *   adobe-aec:adobe_,search_;workfront-adobe:workflow_,comment-stream_,approvals_
+ *   adobe-aec:adobe_,search_,cja_,dataprep_,destination_,flow_,msb_,query_,reactor_,source_,execute_sql,knowledge_base_health;workfront-adobe:workflow_,comment-stream_,approvals_,insights_,planning_
+ *
+ * This list is a statement about what THIS APP actually calls, not the
+ * gateway's full catalog - it has grown twice already for exactly this
+ * reason. First `insights_` was missing, so every insights_* call
+ * (including resolveIntakeQueue's insights_find_id_by_name) went out
+ * unprefixed and failed with "Tool ... not found". Then `destination_` was
+ * missing the same way when activation.ts started calling
+ * destination_list_dataflows. Same class of silent-prefix bug the paragraph
+ * above already describes, just for a prefix nobody had added yet rather
+ * than one applied globally and wrong - and the fix is the same each time:
+ * add the missing prefix, don't rename the tool.
  *
  * MCP_GATEWAY_PREFIX remains the fallback for anything unmatched. Both unset,
  * names go through untouched - which is right for a gateway that resolves bare
@@ -233,10 +346,23 @@ function mcpHeaders(): Record<string, string> {
   return headers;
 }
 
+/**
+ * A bare "HTTP 403" with nothing else is nearly useless for debugging a
+ * gateway/API Gateway misconfiguration — the body usually says exactly why
+ * (missing API key, an authorizer's rejection reason, a proxy's own error
+ * page). Truncated to 300 chars so a stray HTML error page doesn't flood
+ * the thrown error.
+ */
+async function describeError(res: Response): Promise<string> {
+  const bodyText = await res.text().catch(() => "");
+  const preview = bodyText ? ` — ${bodyText.slice(0, 300)}` : "";
+  return `HTTP ${res.status} (${res.statusText})${preview}`;
+}
+
 let requestCounter = 0;
 
 function assertToolAllowed(taskId: TaskId, name: string): void {
-  const agent = ALL_TASKS.find((a) => a.name === taskId);
+  const agent = PIPELINE.find((a) => a.name === taskId);
   if (!agent) {
     throw new McpError(`callMcpTool: unknown taskId "${taskId}" — not in the pipeline registry.`);
   }
@@ -256,60 +382,7 @@ function assertToolAllowed(taskId: TaskId, name: string): void {
  * Throws McpError on a scoping violation, transport failure, JSON-RPC
  * error, or a tool-level error (isError: true in the MCP content envelope).
  */
-/**
- * The same arguments, with numbers as strings.
- *
- * Several tools on both connectors declare numeric arguments as strings -
- * `limit`, `max_rows`, `sample_records` - and refuse a number outright:
- *
- *     "code": "invalid_type", "expected": "string", "received": "number"
- *
- * That is not a fault we can fix upstream, and it has cost us a comment-stream
- * read inside a stage that then reported success. Retrying with strings is
- * cheap and only happens on the calls that need it.
- */
-function stringifyNumbers(args: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) {
-    out[k] = typeof v === "number" ? String(v) : v;
-  }
-  return out;
-}
-
-/** Was this refused for sending a number where a string was declared? */
-function wantsStringArgs(message: string): boolean {
-  return /invalid_type/i.test(message) &&
-    /expected"?\s*:?\s*"?string/i.test(message) &&
-    /received"?\s*:?\s*"?number/i.test(message);
-}
-
-/**
- * Call a tool, and retry once with string arguments if that is what it wanted.
- *
- * Several tools on both connectors declare numeric arguments as strings and
- * refuse a number outright. A stage that hits one reports "a tooling error"
- * that nobody can act on - it cost us the comment-stream read on the NY run,
- * inside a stage that then reported success.
- */
 export async function callMcpTool<T = unknown>(
-  taskId: TaskId,
-  name: string,
-  args: Record<string, unknown> = {},
-  opts: { timeoutMs?: number } = {},
-): Promise<T> {
-  try {
-    return await callMcpToolOnce<T>(taskId, name, args, opts);
-  } catch (err) {
-    const message = (err as Error).message || "";
-    const hasNumbers = Object.values(args).some((v) => typeof v === "number");
-    if (!hasNumbers || !wantsStringArgs(message)) throw err;
-    // The contract is ambiguous, not broken. One retry, and if it fails again
-    // the original error stands.
-    return await callMcpToolOnce<T>(taskId, name, stringifyNumbers(args), opts);
-  }
-}
-
-async function callMcpToolOnce<T = unknown>(
   taskId: TaskId,
   name: string,
   args: Record<string, unknown> = {},
@@ -317,6 +390,52 @@ async function callMcpToolOnce<T = unknown>(
 ): Promise<T> {
   assertToolAllowed(taskId, name);
 
+  const startedAt = new Date();
+  const ctx = toolCallLogStorage.getStore();
+  const record = (partial: Pick<ToolCallRecord, "result" | "resultTruncated"> | Pick<ToolCallRecord, "error">) => {
+    if (!ctx) return; // no withToolCallLog wrapper active - fine, this call just isn't traced
+    ctx.log.push({
+      name,
+      args,
+      startedAt: startedAt.toISOString(),
+      durationMs: Date.now() - startedAt.getTime(),
+      ...partial,
+    });
+  };
+  // Published the moment the call STARTS, not just when it finishes - this
+  // is the whole point (see live-progress.ts's docstring): a poller mid-
+  // request needs to see "calling X right now", not just the finished list
+  // withToolCallLog returns once the whole step is done.
+  const liveId = ctx ? liveProgress.startCall(ctx.runId, taskId, name, args) : -1;
+
+  try {
+    const value = await callMcpToolInner<T>(name, args, timeoutMs);
+    const { json, truncated } = truncatedJson(value);
+    record({ result: json, resultTruncated: truncated });
+    if (ctx) {
+      liveProgress.finishCall(ctx.runId, liveId, {
+        status: "success",
+        durationMs: Date.now() - startedAt.getTime(),
+        result: json,
+        resultTruncated: truncated,
+      });
+    }
+    return value;
+  } catch (err) {
+    record({ error: (err as Error).message });
+    if (ctx) {
+      liveProgress.finishCall(ctx.runId, liveId, {
+        status: "error",
+        durationMs: Date.now() - startedAt.getTime(),
+        error: (err as Error).message,
+      });
+    }
+    throw err;
+  }
+}
+
+/** The actual wire call - separated from callMcpTool so the try/record/throw above stays a single, simple wrapper around every return/throw path below. */
+async function callMcpToolInner<T>(name: string, args: Record<string, unknown>, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -347,7 +466,7 @@ async function callMcpToolOnce<T = unknown>(
 
   if (!res.ok) {
     throw new McpError(
-      `MCP endpoint returned HTTP ${res.status} for tool "${name}"`,
+      `MCP endpoint returned an error for tool "${name}": ${await describeError(res)}`,
       res.status,
     );
   }

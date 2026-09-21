@@ -1,5 +1,5 @@
 import type { AgentName } from "./types";
-import { allWorkfrontToolNames } from "@/lib/workfront-tools";
+import { allWorkfrontToolNames, commentToolNames } from "@/lib/workfront-tools";
 
 /**
  * The pipeline order AND the least-privilege boundary for every agent.
@@ -42,16 +42,18 @@ export interface AgentDefinition {
    * key it isn't scoped to see, not just one it's expected to ignore.
    */
   contextAccess: AgentName[];
+  /**
+   * Does a human have to click "Approve" before THIS agent runs, once the
+   * prior one has completed? Defaults to true (undefined === required) —
+   * the per-agent equivalent of a tool-use permission prompt, so opting
+   * OUT of it is the thing that has to be explicit and visible here, not
+   * the other way round. See orchestrator.ts's advanceOneStep for exactly
+   * how a `false` here chains straight into this agent instead of stopping
+   * the run at "awaiting_approval".
+   */
+  requiresApproval?: boolean;
 }
 
-/*
- * GATES ARE NOT IN THIS FILE - see lib/pipeline/gates.ts.
- *
- * PIPELINE is the ORDER. What has to be true before a step may run is a
- * separate question, and the answers are process decisions from the map (1.5
- * "Approved?", 2.7 "Attributes available?") rather than properties of an agent.
- * An agent whose gate is shut is not called and writes no task_runs row.
- */
 export const PIPELINE: AgentDefinition[] = [
   {
     name: "intake",
@@ -73,66 +75,82 @@ export const PIPELINE: AgentDefinition[] = [
     path: "/api/agents/review",
     label: "Agent 2 — Review / Triage",
     owner: "Dev 2",
-    /*
-     * Phase 2 plus the 1.5a rework path, so the scope spans both.
-     *
-     *   Workfront  2.1 creates the project and links it to the issue; triage
-     *              reads and updates the request; comments carry the rejection
-     *              reason and the conversion note.
-     *   AEP        2.3 asks whether the audience already exists. It is a READ
-     *              of the catalog and nothing more - adobe_list_segments only.
-     *              Agent 3 keeps the estimate and schema tools; phase 2 has no
-     *              business estimating or creating anything.
-     *
-     * This is the narrowest set that covers 2.1 to 2.7. Note what is NOT here:
-     * adobe_create_segment, adobe_create_segment_estimate, adobe_get_schema.
-     * 2.3 needs to know IF an audience exists, not to build or size one.
-     */
+    // Workfront (workfront-core + workfront-comments) plus other stuff, per
+    // the stated split: read/update the work request while triaging a
+    // rejection (B2), and read/post comments — that's where a rejection
+    // reason and the redraft explanation most likely live.
     allowedTools: [
       "search_adobe_knowledge",
       ...allWorkfrontToolNames(),
+      // triage.ts's "wrong_data_source" finding (FAC vs. the AEP profile
+      // store, the most expensive classification this agent makes) is a
+      // guess without being able to check AEP itself: whether the attribute
+      // actually lives in a profile-enabled schema, whether an audience
+      // already exists for this ask, and roughly how big the candidate
+      // profile dataset is. All read-only — Review triages and asks; it
+      // does not create/update anything in AEP (that's Agent 3's job).
+      //
+      // WHEN THIS IS WIRED UP: whatever calls adobe_get_schema must only
+      // ever treat a field as present when it is literally named in that
+      // response's field list — never inferred from the schema's title, a
+      // field's plausible existence, or the marketer's own wording. Agent
+      // 3's src/lib/agents/audience/aep.ts hit this exact failure mode
+      // (word-boundary matching against real field names, because an
+      // unanchored match on "lob" once matched "glob" inside a URL and
+      // reported line-of-business as available on nothing) — reuse that
+      // discipline here rather than re-learning it. A hallucinated field
+      // answers "wrong data source" wrong, silently, which is worse than
+      // not answering it at all.
+      "adobe_list_schemas",
+      "adobe_get_schema",
+      // The merged profile view for the whole sandbox - the FIRST thing
+      // aep.ts's probeSchemas asks, because it answers "does field X exist"
+      // in one call that can't miss by sampling the wrong schema. Read-only.
+      "adobe_get_union_schema",
+      // A class-based schema (Profile, ExperienceEvent) rarely carries its
+      // fields inline - it composes them from field groups via allOf/$ref,
+      // so reading the class schema alone and finding nothing is "asked the
+      // wrong document," not "no fields exist." See aep.ts's
+      // fieldGroupRefs/FIELD_GROUP_SAMPLE for exactly how this is used and
+      // why it's bounded.
+      "adobe_get_field_group",
       "adobe_list_segments",
+      "adobe_get_segment",
+      // Catalog metadata is how you tell a profile-enabled dataset from any
+      // other (its schema's union/profile behavior). No Query Service access —
+      // that's a much bigger permission (arbitrary SQL) than this stub needs
+      // just to triage a rejection.
+      "adobe_list_datasets",
     ],
-    /*
-     * 2.1 needs the ORIGINAL brief and the issue Agent 1 created.
-     *
-     * Its `input` is intake's output and carries both today, so this is belt
-     * and braces rather than a new capability - but phase 2 writing the brief
-     * to the project is the step that makes the brief survive, and it should
-     * not depend on the brief happening to still be in the last hop's payload.
-     */
-    contextAccess: ["intake"],
+    // Empty today: this stub doesn't read priorOutputs at all, and its
+    // `input` already IS intake's output. Widen this only when a real
+    // implementation needs to look back further than its immediate input.
+    contextAccess: [],
   },
   {
     name: "audience_creation",
     path: "/api/agents/audience-creation",
     label: "Agent 3 — Audience Creation",
     owner: "Dev 3 (you)",
+    // Runs straight after Review with no approval click in between — on
+    // explicit product direction, to keep the happy path moving rather
+    // than stopping to ask "run Audience Creation?" every single time.
+    // Everything Agent 3 itself does is still a read (see
+    // lib/agents/audience/aep.ts) and it can still pause the RUN on its
+    // own via "needs_input" (an open GTO attribute request) - this only
+    // removes the separate human click that used to sit between it and
+    // Review finishing.
+    requiresApproval: false,
     allowedTools: [
       "search_adobe_knowledge",
-      // B5 (3.1): decide FAC vs. AEP rule builder, and predict membership
-      // count before the nightly cutoff (B6) — segment estimation, not the
-      // full segmentation-job tools.
-      "adobe_create_segment_estimate",
-      "adobe_get_segment_estimate",
-      /*
-       * QUERY SERVICE, because the estimate endpoint does not exist.
-       *
-       * adobe_create_segment_estimate posts to
-       * /ups/segment/definitions/{id}/estimate and gets a 404 from nginx, so
-       * the count has to come from somewhere real. Adobe serves query results
-       * over its PSQL interface and hands out the connection parameters
-       * through this tool; the harness already speaks Postgres.
-       *
-       * Without it the count path was refused by our own allow-list -
-       * "Task audience_creation is not allowed to call MCP tool
-       * query_get_connection_parameters" - which is the allow-list doing its
-       * job on a capability I added and forgot to declare.
-       */
-      "query_get_connection_parameters",
-      "query_run",
-      "query_get",
-      "query_get_results",
+      // B5 (3.1): decide FAC vs. AEP rule builder.
+      //
+      // adobe_create_segment_estimate/adobe_get_segment_estimate (B6 count
+      // prediction) are deliberately NOT granted here any more — verified
+      // live against 4 real segment IDs that the estimate tool 404s on every
+      // one of them (a gateway-side bug, not fixable from this app — see
+      // lib/agents/audience/aep.ts's docstring). A tool this agent can no
+      // longer usefully call has no reason to stay in its allowlist.
       "adobe_list_segments",
       "adobe_get_segment",
       "adobe_create_segment",
@@ -140,60 +158,61 @@ export const PIPELINE: AgentDefinition[] = [
       // in AEP before opening a GTO/attribute request.
       "adobe_list_schemas",
       "adobe_get_schema",
-      /*
-       * The fields, which are NOT in the schema document.
-       *
-       * A schema is allOf + $refs to field groups and the connector does not
-       * expand them, so adobe_get_schema returns no field definitions and 2.7
-       * was permanently "undetermined". These two return the real fields.
-       */
-      "adobe_list_field_groups",
+      // The merged profile view - probeSchemas' first, cheapest probe. See
+      // review's identical grant above.
+      "adobe_get_union_schema",
+      // See registry.ts's note on review's identical grant, and aep.ts's
+      // fieldGroupRefs: a class schema's fields usually live in a
+      // referenced field group, not inline on the class schema itself.
       "adobe_get_field_group",
+      // Explicit, on-command activation ONLY (see agents/audience/
+      // activation.ts) - checking whether an audience is already wired to a
+      // named destination's dataflow, and, since 20 Sep 2026 on explicit
+      // product direction, creating a NEW dataflow when none exists yet for
+      // that destination. Still no destination_update_dataflow (it has no
+      // segment_selectors field at all - there genuinely is no safe way to
+      // add a segment to a dataflow that ALREADY has other segments wired
+      // to it) - see activation.ts's docstring for exactly why that half
+      // stays read-only-report-only while this half doesn't.
+      "destination_list_dataflows",
+      "destination_get_dataflow",
+      "destination_list_target_connections",
+      "destination_get_target_connection",
+      "flow_list_flow_specs",
+      "destination_create_dataflow",
+      // The orchestrator posts a "what this agent did" comment back onto the
+      // Workfront issue after EVERY step completes (see
+      // lib/pipeline/workfront-updates.ts), and it posts AS the completing
+      // agent — so this otherwise read-only agent needs the comment-create
+      // tool, and ONLY that write. Intake and Review already have it via
+      // allWorkfrontToolNames above; this is the minimal grant that lets
+      // Agent 3's updates reach the issue without handing it create/update.
+      ...commentToolNames(),
     ],
-    /*
-     * The original brief, and what phase 2 concluded.
-     *
-     * 3.1's FAC-versus-rule-builder decision and the identity gap at 3.4 both
-     * read the brief's own fields, and by the time Agent 3 runs its `input` is
-     * phase 2's output - which carries the project, not necessarily the brief
-     * as the marketer wrote it. Naming both here is how it sees the request
-     * rather than only the last transformation of it.
-     */
-    contextAccess: ["intake", "review"],
+    // Review already runs the SAME read-only AEP context probe one step
+    // earlier (agents/review/aep-context.ts) - schema availability, existing
+    // segment, profile-enabled datasets, PQL grounding. Granting Agent 3
+    // sight of review's output lets it REUSE a conclusive probe instead of
+    // repeating every one of those MCP reads from scratch (see
+    // audience-creation/route.ts, which falls back to its own probe only
+    // when review's is absent or inconclusive). This is the scoped-context
+    // mechanism finally being used, not ceremony.
+    contextAccess: ["review"],
   },
 ];
 
 /**
- * Agent 4 — Escalation. NOT part of PIPELINE: it isn't step 4 of the happy
- * path, it's the handler for when the happy path doesn't happen.
+ * Agent 4 — Escalation was removed on explicit product direction: the
+ * out-of-band handler the orchestrator used to call when a run's status
+ * became "failed" (B9 / step 4.6 in the requirements doc - "log the
+ * failure and classify it"). It never actually fired in practice (see
+ * db/schema.sql's tasks-catalog comment / the historical `escalation` rows
+ * that predate this removal) and product direction was to drop it rather
+ * than keep carrying a handler for a case nothing exercised. A failed run
+ * now just ends at status "failed" - see orchestrator.ts's advanceOneStep,
+ * which no longer calls anything after recording that.
  *
- * From the requirements doc (B9 / step 4.6): "Full escalation. The process
- * terminates without an audience, and nothing is captured... Log the
- * failure and classify it. This is the input to the crawl, walk, run loop
- * in section 10 — without it, the same class of failure recurs
- * indefinitely and the agents never improve."
- *
- * The orchestrator (runPipeline in orchestrator.ts) calls this agent
- * exactly when a run's status becomes "failed" — never on "needs_input",
- * which is an expected, resumable pause (B1's marketer round-trip, B3's
- * validation step), not a terminated-without-an-audience escalation. It
- * needs visibility into every prior agent's output to classify what
- * actually went wrong, which is why contextAccess is broad here — this is
- * the one agent where that's the job, not a scoping gap.
+ * "escalation" stays in AgentName/TaskId (types.ts) purely so historical
+ * task_runs rows with that task_id still type-check honestly - it is not
+ * an agent this app will ever invoke again.
  */
-export const ESCALATION: AgentDefinition = {
-  name: "escalation",
-  path: "/api/agents/escalation",
-  label: "Agent 4 — Escalation",
-  owner: "Unassigned",
-  // NOTE: the knowledge tool is `search_adobe_knowledge`. `search_knowledge_base`
-  // does NOT exist on any server in the estate - it was asked for here and in
-  // all three agents above, every call failed, the failure was written into the
-  // payload rather than raised, and the run still reported `completed`. That is
-  // why escalation has never fired. Verified against the live endpoint, 238 tools.
-  allowedTools: ["search_adobe_knowledge"], // TODO: look up prior similar failures once a real classification store exists
-  contextAccess: ["intake", "review", "audience_creation"],
-};
-
-/** Every task, sequential pipeline + escalation — used to seed db/schema.sql's `tasks` catalog and for tool-allowlist lookups in lib/mcp-client.ts. */
-export const ALL_TASKS: AgentDefinition[] = [...PIPELINE, ESCALATION];

@@ -66,65 +66,55 @@ function getPool(): Pool {
   return pool;
 }
 
-/**
- * Why this does not just await the pool.
- *
- * When Postgres is unreachable, `pg` rejects with an **AggregateError** - one
- * error per address it tried, IPv6 and IPv4. An AggregateError's own `.message`
- * is the empty string: the detail lives in `.errors[]`. So every route that
- * reported `(err as Error).message` returned:
- *
- *     {"error":""}
- *
- * A container whose database is switched off answering with a blank error is
- * the worst possible thing to hand an operator, and it cost real time here: the
- * app looked broken when the only fault was a stopped Postgres. It is also
- * precisely the failure mode this project exists to argue against - an error
- * that reports nothing is indistinguishable from one that was never raised.
- *
- * So the aggregate is flattened into something that names the cause and, where
- * it can, what to check. The host and port come from DATABASE_URL rather than
- * from the error, because the error does not carry them either.
- */
-function describeDbError(err: unknown): Error {
-  const e = err as { name?: string; message?: string; code?: string; errors?: unknown[] };
-  if (e?.name !== "AggregateError" || !Array.isArray(e.errors) || !e.errors.length) {
-    return err as Error;
-  }
-
-  const parts = e.errors.map((inner) => {
-    const i = inner as { code?: string; message?: string; address?: string; port?: number };
-    const where = i.address ? ` (${i.address}${i.port ? `:${i.port}` : ""})` : "";
-    return `${i.code || "error"}${where}${i.message ? `: ${i.message}` : ""}`;
-  });
-
-  let target = "";
-  try {
-    const u = new URL(String(process.env.DATABASE_URL || "").trim().replace(/^['"]|['"]$/g, ""));
-    target = ` Postgres at ${u.hostname}:${u.port || 5432}${u.pathname}`;
-  } catch {
-    target = " Postgres (DATABASE_URL is unset or unparseable)";
-  }
-
-  const refused = parts.some((p) => p.startsWith("ECONNREFUSED"));
-  return new Error(
-    `Could not reach${target} - ${parts.join("; ")}.` +
-      (refused
-        ? " Nothing is listening there. Check the database is running and that this host can " +
-          "reach it: from a container, the host's own ports are not `localhost` - " +
-          "use host.docker.internal locally, or the RDS endpoint when deployed."
-        : ""),
-  );
-}
-
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
+  const { rows } = await getPool().query<T>(text, params);
+  return rows;
+}
+
+/**
+ * Run `fn` while holding a Postgres session-level advisory lock keyed by
+ * `key` - the mutual-exclusion primitive orchestrator.ts's resumeRun/
+ * continueRun/retryRun use so two concurrent requests for the SAME run_id
+ * (a double-clicked Resume/Approve/Retry button, or a retried client call)
+ * can't both pass their own "is this run in the right status" check and
+ * both advance the pipeline in parallel - which would run one agent step
+ * twice and write two task_runs rows for it.
+ *
+ * WHY A DEDICATED CONNECTION, NOT THE SHARED `query()` HELPER: an advisory
+ * lock is tied to the Postgres BACKEND (session) that took it, and `query()`
+ * borrows a arbitrary connection from the pool per call - so a lock taken on
+ * one pooled connection could never be reliably released on another. This
+ * checks a client out of the pool for the lock's whole lifetime instead, and
+ * always releases (both the lock and the connection) in `finally`.
+ *
+ * `hashtext(key)` folds the key into a 32-bit int for pg_try_advisory_lock -
+ * a rare hash collision between two DIFFERENT run_ids only costs unnecessary
+ * serialization between them, never a false "already locked" for the wrong
+ * reason, so this is a safe tradeoff against plumbing a real bigint key.
+ *
+ * Throws immediately (does not queue/wait) when the lock is already held -
+ * a caller that loses the race should surface a clear "already in progress"
+ * error, not block and then run anyway.
+ */
+export async function withAdvisoryLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
   try {
-    const { rows } = await getPool().query<T>(text, params);
-    return rows;
-  } catch (err) {
-    throw describeDbError(err);
+    const { rows } = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+      [key],
+    );
+    if (!rows[0]?.locked) {
+      throw new Error(`"${key}" is already being processed by another request.`);
+    }
+    try {
+      return await fn();
+    } finally {
+      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [key]);
+    }
+  } finally {
+    client.release();
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRun } from "@/lib/pipeline/orchestrator";
+import { apiError } from "@/lib/api-error";
 
 /** A single run plus every task_runs row recorded for it — full traceability for one run_id. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ runId: string }> }) {
@@ -7,10 +8,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ run
   try {
     const result = await getRun(runId);
     if (!result) {
-      return NextResponse.json({ error: "Run not found" }, { status: 404 });
+      return apiError("Run not found", "NOT_FOUND", 404);
     }
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

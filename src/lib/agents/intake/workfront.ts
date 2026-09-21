@@ -22,11 +22,10 @@
  */
 
 import { callMcpTool } from "@/lib/mcp-client";
+import { findPriorTaskRun } from "@/lib/pipeline/idempotent-write";
+import { workfrontWritesDisabled } from "@/lib/agents/shared/workfront-writes";
 import { workfrontToolset } from "@/lib/workfront-tools";
 import { resolveFieldMap, applyFieldMap, type FieldMap } from "@/lib/agents/intake/workfront-fields";
-import { writeCustomFields } from "@/lib/agents/shared/workfront-write";
-import { planFormWrites, questionsFromPlan } from "@/lib/agents/intake/form-plan";
-import { fieldByKey } from "@/lib/agents/shared/campaign-brief";
 
 /**
  * What the intake creates in Workfront.
@@ -106,6 +105,14 @@ type FieldNames = { verified: boolean; source: string; dropped: string[] };
 export type CreateOutcome =
   | {
       created: true;
+      /**
+       * True when this is a PRIOR successful create for this exact run,
+       * found and reused rather than written again - see
+       * createIntakeRequest's idempotency check. Never true and false at
+       * once with `created` in a reader's mind: a run either made a fresh
+       * write or found one already there, and this says which.
+       */
+      reused?: boolean;
       objCode: string;
       objId: string;
       customFieldsSet: boolean;
@@ -114,17 +121,6 @@ export type CreateOutcome =
       customFieldsWritten: string[];
       /** And which did not, with the reason. */
       customFieldsRejected: Array<{ field: string; reason: string }>;
-      /**
-       * What the form could hold and the brief did not answer, in a marketer's
-       * words. Reported, never blocking: this tenant's Region field accepts
-       * uk, de and us, so any US state is a permanent mismatch and stopping
-       * every run to ask which country describes New York would be worse than
-       * the gap it reports.
-       */
-      formNotes: string[];
-      /** How many of the form's own fields were filled, and how many exist. */
-      formFilled: number;
-      formFieldsSeen: number;
       fieldNames: FieldNames;
     }
   | {
@@ -135,70 +131,43 @@ export type CreateOutcome =
     };
 
 /**
+ * Has THIS RUN already created a real Workfront issue?
+ *
+ * THE RACE THIS CLOSES: advanceOneStep's own comment (orchestrator.ts)
+ * already documents it - if recording a step's result fails AFTER the
+ * step's own work (here, a real Workfront create) already succeeded, the
+ * run is left at "running" with no memory that the create happened, and
+ * retryRun re-invokes this exact step from scratch. Without this check,
+ * that retry creates a SECOND Workfront issue for the same run - silently,
+ * since nothing compares the new create against anything. A completed
+ * intake task_run only ever exists after createIntakeRequest already ran
+ * to completion once (every needs_input round along the way is its own,
+ * non-'completed' status), so finding one here is unambiguous: a prior
+ * attempt at THIS create already finished, not just an earlier question round.
+ *
+ * FAILS OPEN, ON PURPOSE: a broken check must never BLOCK a legitimate
+ * create - it can only skip a redundant one. If the query itself fails,
+ * this returns null and createIntakeRequest proceeds exactly as if no
+ * prior attempt existed, same as today.
+ *
+ * Built on findPriorTaskRun (idempotent-write.ts) - the same "prior
+ * task_runs row for this run_id/task_id" check orchestrator.ts's
+ * advanceOneStep uses to guard against re-posting a Workfront comment on
+ * retry, generalized so both write paths share one query instead of two
+ * copies of it.
+ */
+async function findPriorSuccess(runId: string): Promise<Extract<CreateOutcome, { created: true }> | null> {
+  const prior = await findPriorTaskRun<{ workfront?: CreateOutcome }>(runId, "intake", ["completed"]);
+  const wf = prior?.output?.workfront;
+  if (wf && wf.created === true && wf.objId) return wf;
+  return null;
+}
+
+/**
  * Split an intake into the native Workfront fields and the custom-form values.
  * Only `name` and `description` are native on an issue; everything from the
  * Campaign Brief is a custom field.
  */
-/**
- * The brief, and what was understood from it, for the person who approves it.
- *
- * A reviewer is approving our READING of the request, not the paragraph - so
- * the reading has to be in front of them. On this tenant the form has four
- * fields and we extract up to fourteen, so without this the other ten exist
- * only inside our own run record, which nobody in Workfront can see.
- *
- * It also states which values reached the form and which had no field to go
- * into. "Recorded here, not on the form" is a fact a reviewer can act on;
- * silence about it is how a request gets approved on less than it appears.
- *
- * Plain text. A Workfront description is not an HTML field.
- */
-/**
- * Is this exclusion already covered by the clause we are about to print?
- *
- * Compared on the words that carry meaning, so "exclude anyone who already has
- * Xfinity Internet" is recognised inside "...but no Internet - exclude anyone
- * who already has Xfinity Internet" without needing the strings to match.
- */
-function alreadySaid(clause: string | undefined, exclusion: string): boolean {
-  if (!clause) return false;
-  const words = (t: string) =>
-    new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 3));
-  const a = words(clause);
-  const b = [...words(exclusion)];
-  if (!b.length) return false;
-  const shared = b.filter((x) => a.has(x)).length;
-  return shared / b.length >= 0.6;
-}
-
-function describeIntake(
-  brief: string,
-  values: Record<string, unknown>,
-  written: Record<string, unknown>,
-  dropped: string[],
-): string {
-  const lines: string[] = [String(brief || "").trim()];
-
-  const reading = Object.entries(values)
-    .filter(([, v]) => v != null && String(v).trim() !== "")
-    .map(([k, v]) => `- ${fieldByKey(k)?.label || k}: ${String(v).trim()}`);
-
-  if (reading.length) {
-    lines.push("", "What was captured from this brief:", ...reading);
-  }
-
-  /*
-   * NO BOOKKEEPING IN A FIELD THE CLIENT READS.
-   *
-   * This printed "2 of these are also set in the request's own fields" and "8
-   * have no matching field on this form and are recorded above only: ...".
-   * Which fields our mapper reached is our problem, not a reviewer's - they
-   * asked for their Workfront process automated, not annotated. Where each
-   * value ended up is in the run record, which is where an engineer looks.
-   */
-  return lines.join("\n");
-}
-
 export function toWorkfrontPayload(
   intake: Record<string, unknown>,
   brief: string,
@@ -239,60 +208,86 @@ export function toWorkfrontPayload(
    * values being dropped for having nowhere to go.
    */
   if (!values.audience_description) {
-    /*
-     * The audience sentence has to contain the AUDIENCE.
-     *
-     * This composed customer type, line of business, region and exclusion, and
-     * produced "Subscriber - Existing Customers in Residential (RES) in the
-     * Pennsylvania" - which reads badly and, worse, says nothing about what
-     * defines the audience. The brief's own clause does: "who have Xfinity TV
-     * but no Internet" is the targeting, and it is what a reviewer needs to see
-     * in the field labelled "Audience to be targeted".
-     *
-     * "in the Northeast" is right and "in the Pennsylvania" is not, so the
-     * article follows the shape of the value rather than being assumed.
-     */
-    const region = values.region ? String(values.region) : null;
-    const article = region && /^(north|south|east|west|mid|national)/i.test(region) ? "the " : "";
-    const holdings = String(brief || "").match(/\bwho\s+(?:have|has|hold|holds)\b[^.;]{0,120}/i)?.[0]?.trim();
-
     const parts = [
       values.customer_type,
       values.line_of_business ? `in ${values.line_of_business}` : null,
-      region ? `in ${article}${region}` : null,
-      holdings || null,
-      /*
-       * Do not say it twice. The brief's own clause usually contains the
-       * exclusion already - "who have Xfinity TV but no Internet - exclude
-       * anyone who already has Xfinity Internet" - and appending it again read
-       * as two contradictory rules to anyone skimming the field.
-       */
-      (values.exclusion && !alreadySaid(holdings, String(values.exclusion)))
-        ? `excluding ${values.exclusion}`
-        : null,
+      values.region ? `in the ${values.region}` : null,
+      values.exclusion ? `— ${values.exclusion}` : null,
     ].filter(Boolean).map(String);
-    if (parts.length) values.audience_description = parts.join(", ");
+    if (parts.length) values.audience_description = parts.join(" ");
   }
 
   if (fieldMap) {
     const applied = applyFieldMap(values, fieldMap);
-    fields.description = describeIntake(brief, values, applied.customFields, applied.dropped);
-    return {
-      fields,
-      customFields: applied.customFields,
-      dropped: applied.dropped,
-      // Carried so the artifact can say the launch date's year was inferred,
-      // rather than presenting an inferred date as one the marketer gave.
-      coerced: applied.coerced,
-      uncoercible: applied.uncoercible,
-      fieldMap,
-    };
+    return { fields, customFields: applied.customFields, dropped: applied.dropped, fieldMap };
   }
   for (const [k, v] of Object.entries(values)) {
     if (v == null || String(v).trim() === "") continue;
     customFields[k] = v;
   }
-  return { fields, customFields, dropped: [], coerced: [], uncoercible: [], fieldMap: null };
+  return { fields, customFields, dropped: [], fieldMap: null };
+}
+
+/**
+ * Write custom-form values, keeping whatever the form will accept.
+ *
+ * WHY NOT ONE UPDATE
+ *
+ * Workfront rejects the WHOLE update when any single field is not on a form
+ * attached to the object, and the error names only the first offender. Against
+ * the live tenant that meant: send four fields, get "Requested_Launch_Date is
+ * gated" and write nothing; drop it, get "Audience_to_be_Targeted is gated" and
+ * write nothing. All four values lost for the sake of two.
+ *
+ * And the fields are spread across DIFFERENT forms - "CSC Campaign - Project"
+ * carries some, another form carries the rest - so there is no single form we
+ * could attach that would accept them all.
+ *
+ * So: try the batch, and when a field is refused, drop THAT field and retry.
+ * The tenant tells us its own layout, which is more reliable than modelling it,
+ * and every value that can land does. What could not land is returned, named,
+ * rather than being silently absent from a record that looks complete.
+ */
+async function writeCustomFields(
+  objId: string,
+  values: Record<string, unknown>,
+  intent: string,
+): Promise<{ written: string[]; rejected: Array<{ field: string; reason: string }> }> {
+  const set = workfrontToolset();
+  const remaining = { ...values };
+  const rejected: Array<{ field: string; reason: string }> = [];
+
+  // At most one attempt per field, plus one. A field can only be dropped once,
+  // so this cannot loop.
+  const limit = Object.keys(values).length + 1;
+  for (let attempt = 0; attempt < limit; attempt++) {
+    const keys = Object.keys(remaining);
+    if (!keys.length) break;
+    try {
+      await callMcpTool("intake", set.update, set.customFieldArgs(INTAKE_OBJECT, objId, remaining, intent));
+      return { written: keys, rejected };
+    } catch (err) {
+      const message = (err as Error).message;
+      /*
+       * Find the field Workfront is objecting to. It reports the LABEL without
+       * the DE: prefix, so match on the suffix of our own key.
+       */
+      const named = message.match(/rejected field '([^']+)'/i)?.[1];
+      const key = named
+        ? keys.find((k) => k === named || k === `DE:${named}` || k.endsWith(named))
+        : undefined;
+      if (!key) {
+        // Not a per-field rejection - a real failure. Report it whole.
+        return { written: [], rejected: keys.map((f) => ({ field: f, reason: message })) };
+      }
+      delete remaining[key];
+      rejected.push({
+        field: key,
+        reason: "not on a custom form attached to this object, so Workfront refused it",
+      });
+    }
+  }
+  return { written: Object.keys(values).filter((k) => !rejected.some((r) => r.field === k)), rejected };
 }
 
 /**
@@ -303,9 +298,29 @@ export function toWorkfrontPayload(
  * deployment that is out of our hands.
  */
 export async function createIntakeRequest(args: {
+  runId: string;
   intake: Record<string, unknown>;
   brief: string;
 }): Promise<CreateOutcome> {
+  // Kill switch: don't attempt the Workfront create at all (and skip the
+  // idempotency lookup that only exists to guard it). Reports a clean, honest
+  // "skipped" dry-run so the pipeline flows for testing. See
+  // agents/shared/workfront-writes.ts.
+  if (workfrontWritesDisabled()) {
+    // No Workfront calls at all - not even the field-map read. Report the
+    // payload we WOULD have sent so the trace still shows the intake shape.
+    const { fields, customFields, dropped } = toWorkfrontPayload(args.intake, args.brief, null);
+    return {
+      created: false,
+      reason: "Workfront writes are disabled (WORKFRONT_WRITES_DISABLED=true) - skipped the create for testing.",
+      wouldHaveCreated: { objCode: INTAKE_OBJECT, formId: INTAKE_FORM_ID, fields, customFields },
+      fieldNames: { verified: false, source: "skipped", dropped },
+    };
+  }
+
+  const prior = await findPriorSuccess(args.runId);
+  if (prior) return { ...prior, reused: true };
+
   /*
    * Resolve the form's real field names BEFORE building the payload.
    *
@@ -315,34 +330,8 @@ export async function createIntakeRequest(args: {
    * that flag travels with the outcome - a payload nobody can tell apart from a
    * verified one is how the bug survived.
    */
-  const entity = INTAKE_OBJECT === "PROJ" ? "project" : "issue";
-  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, entity, "intake");
-  const { fields, customFields, dropped, coerced, uncoercible } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
-
-  /*
-   * EVERYTHING ELSE THE FORM CAN HOLD.
-   *
-   * The map above matches OUR field names to the form's. This asks the other
-   * question - what does this form have, and does the brief answer it - which
-   * is how a Workfront administrator fills an intake. On this tenant that is
-   * Audience, Primary Channel, Region, Type and Product Name, none of which we
-   * were offering.
-   *
-   * The planner wins where the two disagree, because it checked the value
-   * against the field's own list of allowed values rather than sending prose
-   * at an enumeration.
-   */
-  const plan = await planFormWrites("intake", entity, args.intake).catch(() => null);
-  const formQuestions: string[] = [];
-  if (plan) {
-    for (const [name, value] of Object.entries(plan.writes)) customFields[name] = value;
-    /*
-     * What the form asks and the brief does not answer, in the marketer's
-     * terms. Asked here it costs one exchange; found by a reviewer two days
-     * later it costs a cycle, which is B2 on the blockers map.
-     */
-    formQuestions.push(...questionsFromPlan(plan));
-  }
+  const fieldMap = await resolveFieldMap(INTAKE_FORM_ID, INTAKE_OBJECT === "PROJ" ? "project" : "issue");
+  const { fields, customFields, dropped } = toWorkfrontPayload(args.intake, args.brief, fieldMap);
 
   /*
    * An issue belongs to a project. `fields.projectID` is already set if the
@@ -423,7 +412,7 @@ export async function createIntakeRequest(args: {
   let customFieldsRejected: Array<{ field: string; reason: string }> = [];
   if (Object.keys(customFields).length) {
     // customFields is already keyed by DE:<parameter name>.
-    const outcome = await writeCustomFields("intake", INTAKE_OBJECT, objId, customFields, args.brief);
+    const outcome = await writeCustomFields(objId, customFields, args.brief);
     customFieldsWritten = outcome.written;
     customFieldsRejected = outcome.rejected;
     // "Set" means every value landed. Partial is its own state and says so.
@@ -445,20 +434,5 @@ export async function createIntakeRequest(args: {
     customFieldsWritten,
     customFieldsRejected,
     fieldNames: { verified: fieldMap.verified, source: fieldMap.source, dropped },
-    /*
-     * What the form could hold and the brief did not answer - reported, not
-     * asked.
-     *
-     * Blocking on these would stop every run on this tenant: its Region field
-     * accepts uk, de and us, so any US state is a permanent mismatch, and
-     * asking the marketer to choose a country to describe New York is not a
-     * question worth a round trip. It is worth SAYING, because a reviewer
-     * opening the request should know that the region they can see in the
-     * brief is not in the region field, and an administrator should know the
-     * form cannot express it.
-     */
-    formNotes: formQuestions,
-    formFilled: plan ? Object.keys(plan.writes).length : 0,
-    formFieldsSeen: plan ? plan.formFieldCount : 0,
   };
 }

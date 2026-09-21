@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { resumeRun } from "@/lib/pipeline/orchestrator";
 import { query } from "@/lib/db";
 import type { TaskRunRow } from "@/lib/pipeline/types";
+import { apiError } from "@/lib/api-error";
+import { extractFromAnswer } from "@/lib/agents/intake/llm-extract";
 
 /**
  * POST: answers a paused ("needs_input") run and re-runs the pipeline from
@@ -17,7 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
   const { runId } = await params;
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object" || typeof body.answers !== "object" || body.answers === null) {
-    return NextResponse.json({ error: 'Body must be { "answers": <object> }' }, { status: 400 });
+    return apiError('Body must be { "answers": <object> }', "VALIDATION_ERROR", 400);
   }
 
   const [pausedTaskRun] = await query<TaskRunRow>(
@@ -26,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     [runId],
   );
   if (!pausedTaskRun) {
-    return NextResponse.json({ error: `Run ${runId} has no paused step to answer.` }, { status: 400 });
+    return apiError(`Run ${runId} has no paused step to answer.`, "VALIDATION_ERROR", 400);
   }
 
   const pausedOutput = (pausedTaskRun.output ?? {}) as {
@@ -35,7 +37,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     fields?: Record<string, unknown>;
     questions?: { key: string; label: string }[];
   };
-  const mergedFields = { ...(pausedOutput.fields ?? {}), ...(body.answers as Record<string, unknown>) };
+  const typedAnswers = body.answers as Record<string, unknown>;
+
+  // LLM enrichment: read the marketer's free-text answer(s) for OTHER fields
+  // they happened to state in the same breath, so one reply can satisfy
+  // several pending questions instead of only the one asked (closing the B1
+  // loop - see llm-extract.ts's extractFromAnswer). This is best-effort and
+  // LAYERS UNDER the typed answers: the human's explicit answer always wins,
+  // the model only fills gaps. No LLM / any failure -> empty, so the merge
+  // below is exactly today's literal merge. Only the free-text answer values
+  // are mined, not the field keys.
+  const answerText = Object.values(typedAnswers)
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean)
+    .join(". ");
+  const enrichment = await extractFromAnswer(answerText, pausedOutput.questions ?? []);
+
+  // Precedence: existing confirmed fields < LLM enrichment < this round's typed
+  // answers. The typed answers are the human speaking directly and win outright.
+  const mergedFields = {
+    ...(pausedOutput.fields ?? {}),
+    ...enrichment.known,
+    ...typedAnswers,
+  };
 
   // An empty answer merges in as an empty string, which still counts as
   // missing next round — the round just gets spent for nothing, and enough
@@ -45,9 +69,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     (q) => String(mergedFields[q.key] ?? "").trim() === "",
   );
   if (stillBlank.length) {
-    return NextResponse.json(
-      { error: `Still blank: ${stillBlank.map((q) => q.label).join(", ")}. Answer every asked question before resuming.` },
-      { status: 400 },
+    return apiError(
+      `Still blank: ${stillBlank.map((q) => q.label).join(", ")}. Answer every asked question before resuming.`,
+      "VALIDATION_ERROR",
+      400,
     );
   }
 
@@ -62,6 +87,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     const run = await resumeRun(runId, resumedInput, baseUrl);
     return NextResponse.json({ run });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

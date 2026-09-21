@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { retryRun } from "@/lib/pipeline/orchestrator";
+import { apiError } from "@/lib/api-error";
 
 /**
  * POST: recovers a run stuck at "running" — the transitional status
@@ -15,6 +16,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ run
     const run = await retryRun(runId, baseUrl);
     return NextResponse.json({ run });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    return apiError((err as Error).message, "INTERNAL_ERROR", 500);
   }
 }

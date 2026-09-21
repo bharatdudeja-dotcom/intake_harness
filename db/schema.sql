@@ -8,10 +8,11 @@
 -- Three levels, matching how the pipeline actually runs:
 --   runs       — one row per pipeline invocation (a marketer's request).
 --   tasks      — a catalog of the task/agent *types* that can run (intake,
---                review, audience_creation, and escalation — the last one
---                invoked only when a run fails, not part of the sequential
---                pipeline). Static reference data, seeded below from the
---                pipeline registry.
+--                review, audience_creation). Static reference data, seeded
+--                below from the pipeline registry. Also still carries an
+--                'escalation' row for historical task_runs predating Agent
+--                4 — Escalation's removal; nothing seeds new rows with it.
+--                See src/lib/pipeline/registry.ts.
 --   task_runs  — one row per actual execution of a task within a run: which
 --                task, in which run, at which step, with what status, and
 --                exactly when it started/finished. This is the traceability
@@ -66,10 +67,12 @@ CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, started_at);
 -- (CREATE TABLE IF NOT EXISTS is a no-op on an existing table's columns).
 --
 -- Tier 1, "approved": a named admin marks a completed run worth keeping as
--- an example. Tier 2, "promoted": that same run is additionally admitted
--- into the cross-run Shared Graph (see GET /api/graph). Both always carry
--- who and when — an approval or promotion with no admin behind it isn't a
--- record of anything. Promotion requires prior approval, enforced in
+-- an example. Tier 2, "promoted": that same run is additionally marked
+-- worth surfacing more broadly - just a queryable flag today (this harness
+-- has no `/api/graph` of its own; that's a different product's feature, see
+-- services/agent-manager). Both always carry who and when — an approval or
+-- promotion with no admin behind it isn't a record of anything. Promotion
+-- requires prior approval, enforced in
 -- src/app/api/runs/[runId]/promote/route.ts rather than a CHECK constraint,
 -- to keep this file plain ALTERs.
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
@@ -94,6 +97,14 @@ ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
 ALTER TABLE runs ADD CONSTRAINT runs_status_check
     CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
 
+-- task_runs shipped with an inline CHECK allowing only completed/needs_input/
+-- failed. Re-assert it the same idempotent DROP+ADD way. The constraint name
+-- is Postgres's auto-generated default for the inline CHECK on the original
+-- CREATE TABLE.
+ALTER TABLE task_runs DROP CONSTRAINT IF EXISTS task_runs_status_check;
+ALTER TABLE task_runs ADD CONSTRAINT task_runs_status_check
+    CHECK (status IN ('completed', 'needs_input', 'failed'));
+
 -- Model usage, when an agent genuinely reports it. NULL on every agent
 -- today — none of the four call a model, they're deterministic parsers and
 -- MCP/tool calls — so this stays empty rather than holding a fabricated 0.
@@ -103,7 +114,9 @@ ALTER TABLE task_runs ADD COLUMN IF NOT EXISTS model TEXT;
 
 -- Programmes: a named grouping a run can belong to (ported from Agent
 -- Manager's Project, minus its lifecycle machinery — just enough to group
--- runs). upsert-by-name in src/lib/pipeline/programmes.ts, so submitting
+-- runs). NOT YET WIRED UP: no route or UI creates a programme or assigns
+-- programme_id today - this table and the column below are schema ahead of
+-- code. The intended shape (once built) is upsert-by-name, so submitting
 -- the same programme name twice reuses the row rather than duplicating it.
 CREATE TABLE IF NOT EXISTS programmes (
     programme_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -123,8 +136,10 @@ CREATE INDEX IF NOT EXISTS idx_runs_programme ON runs(programme_id);
 -- keeping that ISN'T a pipeline run. Single content blob per resource, not
 -- an ordered step log: Agent Manager needed steps because the same object
 -- doubled as both a run record and a doc; here `task_runs` already owns run
--- history, so a resource only needs to be a doc. Same two-tier curation as
--- `runs` (approved -> promoted into the Shared Graph), same admin model.
+-- history, so a resource only needs to be a doc. Same two-tier curation
+-- shape as `runs` (approved -> promoted), same admin model. NOT YET WIRED
+-- UP: no route or UI reads or writes this table today - schema ahead of
+-- code, same as `programmes` above.
 CREATE TABLE IF NOT EXISTS resources (
     resource_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type           TEXT NOT NULL CHECK (type IN (
@@ -170,81 +185,146 @@ INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 -- segmentation_labels/kind_labels rename what things are CALLED (internal
 -- keys — "programme", each resources.type value — never change, only their
 -- display label, so relabeling never breaks stored data or filters, same
--- principle as that D48 override). promote_admins is the "Hero Agents"
--- roster (D64): the subset of ADMIN_NAMES allowed to promote into the
--- Shared Graph. NULL/empty means "any admin may promote" — today's
--- behavior — so this is purely additive until an admin actually sets one.
+-- principle as that D48 override; NOT YET READ anywhere, since programmes/
+-- resources themselves aren't wired up yet either). promote_admins IS live:
+-- the "Hero Agents" roster (D64), a subset of ADMIN_NAMES allowed to
+-- promote a run (tier 2) — see src/lib/admins.ts's isPromoteAdmin, enforced
+-- in src/app/api/runs/[runId]/promote/route.ts. NULL/empty means "any admin
+-- may promote".
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS segmentation_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS kind_labels JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS promote_admins TEXT[];
 
--- Seed/refresh the task catalog from src/lib/pipeline/registry.ts (PIPELINE
--- + ESCALATION, i.e. ALL_TASKS). Keep this block in sync with that file —
--- it's the one place both agree on task_id.
+-- Open GTO / attribute requests (B4/B7), given a DURABLE, wall-clock home.
+--
+-- WHY THIS EXISTS: audience-creation/route.ts's attributeRequestState used
+-- to carry the open request on the RUN'S OWN output and increment an
+-- `ageSeconds` counter by 1 on each pass. That made "age" a count of how
+-- many times the run advanced, not elapsed time - so B7's whole point ("an
+-- open request with no visible age is how a quarter-long tail hides") went
+-- unmeasured, and the request vanished the moment the run ended rather than
+-- outliving it the way a real GTO request (which can run for a quarter)
+-- does.
+--
+-- Keyed by (run_id, attribute_signature): the same run asking for the same
+-- set of missing attributes is the SAME request, re-evaluated - not a new
+-- one - so the age keeps accruing across passes and across process
+-- restarts. opened_at is the real clock; age is always NOW() - opened_at,
+-- computed at read time, never stored and never incremented by hand.
+-- resolved_at is set when a later probe finds the attributes present, which
+-- is the automatic 2.7 re-evaluation B4 asks for.
+CREATE TABLE IF NOT EXISTS attribute_requests (
+    request_id          TEXT PRIMARY KEY,
+    run_id              UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    -- A stable fingerprint of the missing attribute set, so re-evaluating
+    -- the same ask finds the same row instead of opening a duplicate.
+    attribute_signature TEXT NOT NULL,
+    missing_attributes  TEXT[] NOT NULL DEFAULT '{}',
+    status              TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    opened_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at         TIMESTAMPTZ,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (run_id, attribute_signature)
+);
+CREATE INDEX IF NOT EXISTS idx_attribute_requests_run ON attribute_requests(run_id);
+CREATE INDEX IF NOT EXISTS idx_attribute_requests_open ON attribute_requests(status) WHERE status = 'open';
+
+-- The MCP gateway, ported from Agent Manager's lib/mcp-servers.js /
+-- lib/mcp-oauth.js / lib/mcp-gateway.js: a registry of upstream MCP
+-- servers this harness can call directly and, when `gateway` is on,
+-- re-expose (namespaced by id) through this app's own /api/mcp endpoint.
+--
+-- `auth` is a literal Authorization header value, a "${ENV_VAR}" reference
+-- resolved at call time, or NULL when the server uses OAuth instead — see
+-- src/lib/mcp-servers.ts's resolveSecret(). The oauth_* columns are the
+-- RFC 7591/8707 dance's result (dynamic client registration + PKCE
+-- authorization_code): never returned to the browser, only whether one is
+-- set (src/lib/mcp-servers-types.ts's McpServerSafe).
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id                  TEXT PRIMARY KEY,
+    label               TEXT NOT NULL,
+    practice            TEXT,
+    endpoint            TEXT NOT NULL DEFAULT '',
+    instance            TEXT,
+    auth                TEXT,
+    active              BOOLEAN NOT NULL DEFAULT false,
+    gateway             BOOLEAN NOT NULL DEFAULT false,
+    oauth_client_id     TEXT,
+    oauth_access_token  TEXT,
+    oauth_refresh_token TEXT,
+    oauth_expires_at    TIMESTAMPTZ,
+    oauth_connected_at  TIMESTAMPTZ,
+    oauth_resource      TEXT,
+    oauth_as_metadata   JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One in-flight OAuth authorization_code+PKCE attempt per row, keyed by the
+-- `state` the provider echoes back — single-use (deleted on the callback
+-- that consumes it) and short-lived (TXN_TTL_MS in the oauth start route
+-- prunes anything older on each new attempt), so a replayed callback finds
+-- nothing and the verifier never leaves the server.
+CREATE TABLE IF NOT EXISTS mcp_oauth_transactions (
+    state        TEXT PRIMARY KEY,
+    server_id    TEXT NOT NULL,
+    client_id    TEXT NOT NULL,
+    verifier     TEXT NOT NULL,
+    as_metadata  JSONB NOT NULL,
+    resource     TEXT,
+    redirect_uri TEXT NOT NULL,
+    expires_at   TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Seed/refresh the task catalog from src/lib/pipeline/registry.ts's
+-- PIPELINE. Keep this block in sync with that file — it's the one place
+-- both agree on task_id.
+--
+-- The 'escalation' row stays, relabeled rather than removed — it is NOT
+-- re-derived from the registry any more (Agent 4 was deleted, see
+-- registry.ts), but task_runs.task_id has a FK against tasks(task_id) and
+-- historical task_runs rows still reference 'escalation', so deleting it
+-- would fail that constraint anyway. This row simply stops being touched
+-- going forward.
 INSERT INTO tasks (task_id, label, owner) VALUES
     ('intake',            'Agent 1 — Intake',              'Dev 1'),
     ('review',            'Agent 2 — Review / Triage',     'Dev 2'),
     ('audience_creation', 'Agent 3 — Audience Creation',   'Dev 3 (you)'),
-    ('escalation',        'Agent 4 — Escalation',          'Unassigned')
+    ('escalation',        'Agent 4 — Escalation (removed)', 'Unassigned')
 ON CONFLICT (task_id) DO UPDATE SET label = EXCLUDED.label, owner = EXCLUDED.owner;
 
--- ---------------------------------------------------------------------------
--- GATES: the approval at 1.5, and every other point the process waits at.
+-- Eval results (evals/*.eval.ts), persisted so `npm run eval:*` is
+-- browsable in the UI (/evals) instead of living only in the terminal that
+-- ran it. See evals/README.md for what these suites check, and why they
+-- call the real configured LLM provider rather than a stub.
 --
--- WHY THIS TABLE EXISTS
---
--- The pipeline used to run intake -> review -> audience_creation in one pass,
--- which meant Agents 2 and 3 ran on a brief nobody had approved. Both reported
--- `completed`. Agent 2's "completed" covered a comment read that had errored;
--- Agent 3's covered building nothing at all. Three green stages, one real one.
---
--- The map does not work that way. 1.5 is a decision - "Approved?" - and phase 2
--- begins at connector A, on the Yes branch only. So the run now STOPS after
--- intake and waits. A gated agent is not called, and writes no task_runs row:
--- it does not appear as pending, or completed, or anything. Nothing can report
--- a status for work it was never handed.
---
--- WHY A TABLE AND NOT A COLUMN
---
--- "Who owns the review queue decision at 1.5, and is the rejection reason
--- captured anywhere structured today?" is an open question in the blockers doc,
--- and B2 depends entirely on the answer. A decision row per gate, with who
--- decided and their reason, is that structure. It also makes the rejection
--- reason a first-class input to Agent 2's triage instead of something the agent
--- has to go fishing for in a comment stream it may not be able to read.
-CREATE TABLE IF NOT EXISTS run_gates (
-    gate_run_id  BIGSERIAL PRIMARY KEY,
-    run_id       UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-    -- Which gate, e.g. 'approval_1_5'. Matches a gate id in pipeline/gates.ts.
-    gate_id      TEXT NOT NULL,
-    -- The pipeline step this gate stands in front of.
-    step_index   INTEGER NOT NULL,
-    decision     TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
-    -- A named human. B4/B7 are both about things sitting unowned; an approval
-    -- with nobody's name on it is the same failure in miniature.
-    decided_by   TEXT NOT NULL,
-    -- On a rejection this IS the rework reason, and it is what Agent 2 triages.
-    reason       TEXT,
-    -- Where the decision came from: the Workfront approval, the dashboard, MCP.
-    evidence     JSONB NOT NULL DEFAULT '{}'::jsonb,
-    decided_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- One eval_runs row per eval FILE invocation - intake.eval.ts,
+-- review.eval.ts, and audience-creation.eval.ts each call report() exactly
+-- once, in their own afterAll, so `npm run eval:all` (all three files, one
+-- process) produces three rows, matching the three separate summaries
+-- those files already print today.
+CREATE TABLE IF NOT EXISTS eval_runs (
+    eval_run_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite         TEXT NOT NULL CHECK (suite IN ('intake', 'review', 'audience_creation')),
+    provider      TEXT,  -- LLM_PROVIDER at run time (bedrock/anthropic/ollama); NULL if unset
+    passed_count  INTEGER NOT NULL,
+    total_count   INTEGER NOT NULL,
+    started_at    TIMESTAMPTZ NOT NULL,
+    finished_at   TIMESTAMPTZ NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_run_gates_run ON run_gates(run_id, decided_at);
+-- One row per fixture graded within an eval_runs row - the same
+-- id/passed/notes evals/lib/report.ts already prints to the console.
+CREATE TABLE IF NOT EXISTS eval_results (
+    eval_result_id  BIGSERIAL PRIMARY KEY,
+    eval_run_id     UUID NOT NULL REFERENCES eval_runs(eval_run_id) ON DELETE CASCADE,
+    fixture_id      TEXT NOT NULL,
+    passed          BOOLEAN NOT NULL,
+    notes           TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
--- A run waiting at a gate. Null when it is not waiting.
--- Carries { gate_id, label, step_index, agent, awaiting } so the dashboard can
--- say what is being waited FOR, which B4 insists on: "give the marketer a
--- visible status instead of silence."
-ALTER TABLE runs ADD COLUMN IF NOT EXISTS blocked_on JSONB;
-
--- 'awaiting_approval' is a fourth run state, and it is not 'needs_input'.
---   needs_input       - the agent ran and wants something from the marketer.
---   awaiting_approval - the agent has NOT run, and will not until a gate opens.
--- Collapsing them would lose exactly the distinction this whole change is for.
-DO $$
-BEGIN
-    ALTER TABLE runs DROP CONSTRAINT IF EXISTS runs_status_check;
-    ALTER TABLE runs ADD CONSTRAINT runs_status_check
-        CHECK (status IN ('running', 'completed', 'failed', 'needs_input', 'awaiting_approval'));
-END $$;
+CREATE INDEX IF NOT EXISTS idx_eval_runs_started ON eval_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);

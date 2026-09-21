@@ -32,17 +32,21 @@
  * to a human rather than to a service account; ~25 approval tools, which matters
  * for a review and triage pipeline; and AEM folder linkage.
  *
- * ARGUMENT SHAPES ARE NOT YET VERIFIED AGAINST A LIVE TENANT
+ * ARGUMENT SHAPES ARE VERIFIED - VIA THE COOKBOOK GATEWAY, NOT THIS ADAPTER'S
+ * OWN ENDPOINT
  *
- * The tool NAMES below are verbatim from Adobe's published tool list. The
- * argument shapes are inferred from the Workfront API's own conventions and have
- * NOT been checked against the live schemas, because listing them requires an
- * OAuth token and nobody has signed in yet. Until that happens, treat a write
- * through this adapter as unverified: createIntakeRequest already reports what
- * it WOULD have created when a call fails, so an unverified payload surfaces as
- * a visible dry run rather than a wrong record in a client's Workfront. Verify
- * with `check_mcp_server` in Agent Manager once authenticated, then delete this
- * paragraph.
+ * The tool NAMES below are verbatim from Adobe's published tool list, and the
+ * argument shapes were inferred from the Workfront API's own conventions. This
+ * repo now reaches Workfront through MCP_GATEWAY_URL (the Cookbook gateway,
+ * `workfront-adobe` namespace) rather than the endpoint described above, and a
+ * real write through it - Agent 1 creating a live Workfront issue - was
+ * confirmed live this session (`workflow_create_any_object`, OPTASK
+ * 6aad806f00079cbaa8101e3f69e574ea, 19 Sep 2026). createIntakeRequest still
+ * reports what it WOULD have created when a call fails, so a genuinely broken
+ * payload still surfaces as a visible dry run rather than a wrong record in a
+ * client's Workfront - that safety net just hasn't needed to catch anything
+ * on the create path in practice. Re-verify with `check_mcp_server` if the
+ * gateway's own Workfront connection or OAuth session ever changes.
  */
 
 export type WorkfrontFlavour = "adobe-official" | "inhouse";
@@ -98,17 +102,24 @@ export interface WorkfrontToolset {
  * wf_core_project_create and wf_core_issue_create did separately.
  */
 /*
- * WHAT THE TENANT ACTUALLY EXPOSES, read 16 Sep 2026 from taplondonptrsd:
+ * WHAT THE TENANT ACTUALLY EXPOSES - TWO DIFFERENT ANSWERS, DEPENDING ON HOW.
  *
- *   49 of the 94 documented tools. Every WRITE is absent -
- *   workflow_create_any_object, workflow_update_any_object,
- *   comment-stream_create_comment. Present: the whole insights_* family,
- *   comment-stream_query_comments, approvals_* reads, planning_* reads.
+ * Direct (MCP_ENDPOINT_URL, no gateway), read 16 Sep 2026 from taplondonptrsd:
+ * 49 of the 94 documented tools. Every WRITE is absent -
+ * workflow_create_any_object, workflow_update_any_object,
+ * comment-stream_create_comment. Present: the whole insights_* family,
+ * comment-stream_query_comments, approvals_* reads, planning_* reads. That
+ * was the documented default and not a fault: write actions are off until a
+ * Workfront admin turns them on in System Preferences.
  *
- * That is the documented default and not a fault: write actions are off until a
- * Workfront admin turns them on in System Preferences. The names below are
- * still the correct ones to call - they are what appear the moment writes are
- * enabled - so they stay, and the reads point at tools that exist today.
+ * Via MCP_GATEWAY_URL (CX Agent Manager's "Cookbook" endpoint), read 18 Sep
+ * 2026: all 410 tools present, WRITES INCLUDED -
+ * workfront-adobe__workflow_create_any_object/update/delete all showed up in
+ * a live tools/list. This is now the app's default gateway (.env.local.example),
+ * so writes through this file may actually reach Workfront for real instead
+ * of the dry run below - untested end-to-end as of this writing, so the
+ * honest-failure reporting stays regardless of which is true on any given
+ * call. The names below are the correct ones to call either way.
  */
 const ADOBE_OFFICIAL: WorkfrontToolset = {
   flavour: "adobe-official",
@@ -196,4 +207,15 @@ export function workfrontToolNames(set: WorkfrontToolset): string[] {
 /** Both flavours' names, so an allowlist does not have to change with the flavour. */
 export function allWorkfrontToolNames(): string[] {
   return [...new Set([...workfrontToolNames(ADOBE_OFFICIAL), ...workfrontToolNames(INHOUSE)])];
+}
+
+/**
+ * Just the "create a comment" tool, for BOTH flavours — the minimal grant an
+ * agent needs to post an update comment back onto its issue and nothing more.
+ * Both names are returned so the allowlist stays correct whichever
+ * WORKFRONT_MCP_FLAVOUR is configured, without granting the create/update/read
+ * tools a read-only agent has no business calling (allWorkfrontToolNames would).
+ */
+export function commentToolNames(): string[] {
+  return [...new Set([ADOBE_OFFICIAL.createComment, INHOUSE.createComment])];
 }
