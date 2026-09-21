@@ -1,3 +1,4 @@
+import { activateAudience, resolveActivationIntent } from "@/lib/agents/audience/activation";
 import { NextRequest, NextResponse } from "next/server";
 import type { AgentRequest, AgentResponse } from "@/lib/pipeline/types";
 import { countAudience } from "@/lib/agents/audience/count";
@@ -72,6 +73,25 @@ export interface AudienceCreationInput {
 export interface AudienceCreationOutput {
   /** B5: which build path this request takes. */
   buildPath: "aep_rule_builder" | "fac";
+  /**
+   * Where the audience was activated to, if the brief asked for that.
+   *
+   * A built audience still reaches nobody. This is on the output rather than
+   * in metadata for the same reason the audience itself is: the next stage
+   * and the reviewer both need it, and metadata is not handed forward.
+   *
+   * `declined` is a normal, useful outcome - the audience exists and the
+   * destination does not, which is a thing for a person to fix and not a
+   * failure of the build.
+   */
+  activation: {
+    state: "not_requested" | "already_active" | "activated" | "declined" | "failed";
+    destination: string | null;
+    flowId: string | null;
+    detail: string;
+    /** Set on `declined`: exactly what a human has to create. */
+    needsHuman: string | null;
+  };
   /**
    * B4: do the attributes this audience needs exist in AEP today?
    *
@@ -389,8 +409,51 @@ export async function POST(req: NextRequest) {
     .filter(Boolean)
     .join(" ");
 
+  /*
+   * ACTIVATE, when the brief asked and there is something to activate.
+   *
+   * After the build, because there is no audience to activate before it, and
+   * guarded on a segment id so a failed build cannot produce an activation
+   * attempt against nothing. Never throws - see activation.ts.
+   */
+  const intent = resolveActivationIntent(fields);
+  let activation: AudienceCreationOutput["activation"] = {
+    state: "not_requested",
+    destination: null,
+    flowId: null,
+    detail: `Not activated: ${intent.evidence ?? "no destination was asked for"}.`,
+    needsHuman: null,
+  };
+  if (intent.requested && intent.destinationName && build?.segmentId) {
+    const result = await activateAudience("audience_creation", {
+      segmentId: build.segmentId,
+      destinationName: intent.destinationName,
+      // The same source every other AEP call in this agent uses. NOT the
+      // tenant read off a schema id - "_taplondonptrsd" is the tenant and
+      // "tapdemo" is the sandbox, and passing one where the other is wanted
+      // makes every destination lookup miss and decline for the wrong reason.
+      sandbox: process.env.AEP_SANDBOX || "prod",
+    });
+    activation = {
+      state: result.state,
+      destination: intent.destinationName,
+      flowId: "flowId" in result ? result.flowId : null,
+      detail: result.detail,
+      needsHuman: result.state === "declined" ? result.needsHuman : null,
+    };
+  } else if (intent.requested && !build?.segmentId) {
+    activation = {
+      state: "declined",
+      destination: intent.destinationName,
+      flowId: null,
+      detail: "Activation was asked for, and there is no audience to activate - the build did not produce one.",
+      needsHuman: "Resolve the build first; the activation needs a segment to point at.",
+    };
+  }
+
   const output: AudienceCreationOutput = {
     buildPath: path.buildPath,
+    activation,
     attributesAvailable,
     openAttributeRequest: {
       status: attrState.status,

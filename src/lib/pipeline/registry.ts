@@ -180,6 +180,27 @@ export const PIPELINE: AgentDefinition[] = [
        */
       "adobe_list_field_groups",
       "adobe_get_field_group",
+      /*
+       * ACTIVATION. Building the audience was only half of B5 - a segment
+       * nobody activated reaches nobody, and the run was reporting "built" as
+       * though that finished the job.
+       *
+       * Three tools, and deliberately not a fourth. List and get are reads,
+       * used to find the destination's dataflow and to confirm afterwards
+       * that the audience really landed on it. update_dataflow_audiences is
+       * the one write, and it is additive - it adds this audience to a
+       * dataflow a person already created.
+       *
+       * destination_create_dataflow, _create_base_connection and
+       * _create_target_connection are NOT here on purpose. Those define where
+       * a client's customer data is sent and with which credentials, which is
+       * not an agent's decision to make. With them absent, the allow-list
+       * itself guarantees this agent cannot invent a destination, whatever
+       * any future code in it tries to do.
+       */
+      "destination_list_dataflows",
+      "destination_get_dataflow",
+      "destination_update_dataflow_audiences",
     ],
     /*
      * The original brief, and what phase 2 concluded.

@@ -134,5 +134,98 @@ for (const c of CASES) {
   console.log("");
 }
 
-console.log(`  ${passed} passed, ${failed} failed`);
+console.log(`  ${passed} passed, ${failed} failed  (rule)`);
+
+/* ===========================================================================
+   ACTIVATION INTENT - does the agent think it was asked to activate?
+   ===========================================================================
+   A false positive here sends a real population to a real external system on
+   a request that never asked for it, so the bar is "the brief named a
+   destination", not "the brief sounds like a campaign".
+
+   "Email" is the case that matters. It is a CHANNEL, and there is no way to
+   know which AEP destination a marketer means by it - guessing is the class
+   of inference that once built the inverse of the requested audience.
+   =========================================================================== */
+import { resolveActivationIntent } from "@/lib/agents/audience/activation";
+
+type IntentCase = { name: string; fields: Record<string, string>; want: boolean; dest?: string };
+
+const INTENT: IntentCase[] = [
+  {
+    name: "build-only - must never activate",
+    fields: { request_type: "Audience Build-Only" },
+    want: false,
+  },
+  {
+    name: "a channel is not a destination",
+    fields: { request_type: "Audience + Campaign Execution", channels: "Email" },
+    want: false,
+  },
+  {
+    name: "the demo brief, which names no AEP destination",
+    fields: {
+      request_type: "Audience + Campaign Execution",
+      channels: "Email",
+      campaign_name: "Fall Video Attach",
+      audience_description: "xfinityInternet = true AND xfinityTV = false",
+    },
+    want: false,
+  },
+  {
+    name: "a named destination field wins",
+    fields: { request_type: "Audience Build-Only", destination: "Chaunceys Audience s3 dest" },
+    want: true,
+    dest: "Chaunceys Audience s3 dest",
+  },
+  {
+    name: 'destination answered "none" means build-only',
+    fields: { request_type: "Audience + Campaign Execution", destination: "none" },
+    want: false,
+  },
+  {
+    name: "activation as an explicit verb, with a place after it",
+    fields: { notes: "Activate it to Adobe Campaign once approved." },
+    want: true,
+    // NOT "Adobe Campaign once approved". A greedy tail captured the rest of
+    // the sentence, and the first version of this case asserted that as
+    // correct - encoding the bug as the requirement.
+    dest: "Adobe Campaign",
+  },
+  {
+    name: "the name stops at a comma too",
+    fields: { notes: "Please sync the audience to Chaunceys Audience s3 dest, then tell me." },
+    want: true,
+    dest: "Chaunceys Audience s3 dest",
+  },
+  {
+    name: "a trailing clause with no destination before it must not become one",
+    fields: { notes: "Send it to the team for review when the count looks right." },
+    want: true,
+    dest: "the team",
+  },
+];
+
+console.log("");
+console.log("  activation intent");
+console.log("  -----------------");
+for (const c of INTENT) {
+  const got = resolveActivationIntent(c.fields);
+  const bad: string[] = [];
+  if (got.requested !== c.want) bad.push(`expected requested=${c.want}, got ${got.requested}`);
+  if (c.dest && got.destinationName !== c.dest) bad.push(`destination "${got.destinationName}" != "${c.dest}"`);
+  console.log("  " + c.name);
+  console.log("      requested=%s destination=%s", got.requested, JSON.stringify(got.destinationName));
+  console.log("      because: " + got.evidence);
+  if (bad.length) {
+    failed++;
+    for (const b of bad) console.log("      FAIL: " + b);
+  } else {
+    passed++;
+    console.log("      => PASS");
+  }
+  console.log("");
+}
+
+console.log(`  ${passed} passed, ${failed} failed  (rule + intent)`);
 process.exit(failed ? 1 : 0);
