@@ -39,7 +39,8 @@ type AnswerFixture = {
 };
 
 const results: EvalOutcome[] = [];
-afterAll(() => report("Intake (extractIntake / extractFromAnswer)", results));
+const startedAt = new Date();
+afterAll(() => report("intake", "Intake (extractIntake / extractFromAnswer)", results, startedAt));
 
 /** Loose match for free-text fields: case-insensitive, either side containing the other. */
 function fieldMatches(actual: string | undefined, expected: string): boolean {

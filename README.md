@@ -146,6 +146,7 @@ API surface:
 - `POST /api/runs/[runId]/approve` / `POST /api/runs/[runId]/promote` — two-tier human curation: mark a completed run worth keeping, then optionally mark it worth surfacing more broadly (`promote` requires `approve` first, and can be further restricted to a `promote_admins` roster in `settings` — see `src/lib/admins.ts`).
 - `GET /api/tasks` — the task catalog. `GET /api/tasks/[taskId]/runs` — every execution of one task, across all runs.
 - `GET /api/capabilities` — live check of Workfront-write-enablement and LLM reachability.
+- `GET /api/evals` / `GET /api/evals/[evalRunId]` — the `npm run eval:*` history (`eval_runs`/`eval_results`), rendered at `/evals`. See `evals/README.md` — these grade the real LLM path against hand-reviewed fixtures and are a manual step, not a CI gate.
 
 Two concurrent requests trying to advance the *same* run (a double-clicked
 Resume/Approve/Retry button, or a retried client call) are serialized by a

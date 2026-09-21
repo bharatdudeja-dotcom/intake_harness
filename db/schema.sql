@@ -293,3 +293,38 @@ INSERT INTO tasks (task_id, label, owner) VALUES
     ('audience_creation', 'Agent 3 — Audience Creation',   'Dev 3 (you)'),
     ('escalation',        'Agent 4 — Escalation (removed)', 'Unassigned')
 ON CONFLICT (task_id) DO UPDATE SET label = EXCLUDED.label, owner = EXCLUDED.owner;
+
+-- Eval results (evals/*.eval.ts), persisted so `npm run eval:*` is
+-- browsable in the UI (/evals) instead of living only in the terminal that
+-- ran it. See evals/README.md for what these suites check, and why they
+-- call the real configured LLM provider rather than a stub.
+--
+-- One eval_runs row per eval FILE invocation - intake.eval.ts,
+-- review.eval.ts, and audience-creation.eval.ts each call report() exactly
+-- once, in their own afterAll, so `npm run eval:all` (all three files, one
+-- process) produces three rows, matching the three separate summaries
+-- those files already print today.
+CREATE TABLE IF NOT EXISTS eval_runs (
+    eval_run_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    suite         TEXT NOT NULL CHECK (suite IN ('intake', 'review', 'audience_creation')),
+    provider      TEXT,  -- LLM_PROVIDER at run time (bedrock/anthropic/ollama); NULL if unset
+    passed_count  INTEGER NOT NULL,
+    total_count   INTEGER NOT NULL,
+    started_at    TIMESTAMPTZ NOT NULL,
+    finished_at   TIMESTAMPTZ NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- One row per fixture graded within an eval_runs row - the same
+-- id/passed/notes evals/lib/report.ts already prints to the console.
+CREATE TABLE IF NOT EXISTS eval_results (
+    eval_result_id  BIGSERIAL PRIMARY KEY,
+    eval_run_id     UUID NOT NULL REFERENCES eval_runs(eval_run_id) ON DELETE CASCADE,
+    fixture_id      TEXT NOT NULL,
+    passed          BOOLEAN NOT NULL,
+    notes           TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_runs_started ON eval_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);

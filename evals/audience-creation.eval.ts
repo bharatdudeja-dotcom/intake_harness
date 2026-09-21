@@ -32,7 +32,8 @@ type PqlFixture = {
 };
 
 const results: EvalOutcome[] = [];
-afterAll(() => report("Audience Creation (synthesizePql)", results));
+const startedAt = new Date();
+afterAll(() => report("audience_creation", "Audience Creation (synthesizePql)", results, startedAt));
 
 describe.skipIf(!isLlmConfigured())("PQL synthesis eval", () => {
   const fixtures = loadFixtures<PqlFixture>("pql-synth");

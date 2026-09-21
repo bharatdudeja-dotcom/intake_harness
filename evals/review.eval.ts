@@ -37,7 +37,8 @@ type TriageFixture = {
 };
 
 const results: EvalOutcome[] = [];
-afterAll(() => report("Review (detectRejectionLlm / triageRejectionLlm)", results));
+const startedAt = new Date();
+afterAll(() => report("review", "Review (detectRejectionLlm / triageRejectionLlm)", results, startedAt));
 
 describe.skipIf(!isLlmConfigured())("Rejection detection eval (detectRejectionLlm)", () => {
   const fixtures = loadFixtures<RejectionFixture>("review-rejection");

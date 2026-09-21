@@ -26,6 +26,16 @@ npm run eval:all        # all three
 Each run prints a per-fixture pass/fail table with why, plus an overall
 score, in addition to vitest's own summary.
 
+## Viewing results
+
+Every run also writes its results to Postgres (`eval_runs`/`eval_results`,
+`db/schema.sql`), best-effort - a DB failure is logged but never fails the
+eval itself, and a run with `DATABASE_URL` unset just isn't saved. Browse
+the history at `/evals` in the app (list of runs, and each run's
+fixture-by-fixture pass/fail with notes) instead of scrolling back through
+a terminal. This is view-only: nothing in the UI re-runs an eval or reaches
+the LLM provider, it only reads what `npm run eval:*` already wrote.
+
 ## Adding a fixture
 
 Drop a new `*.json` file in the right `fixtures/<dir>` - see any existing
