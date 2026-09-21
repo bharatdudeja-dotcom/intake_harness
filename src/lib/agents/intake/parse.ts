@@ -102,6 +102,96 @@ function isNegated(text: string, option: string): boolean {
 }
 
 /**
+ * The row labels this BU's intake table uses.
+ *
+ * Deliberately a closed list. Inferring a label from any short line would turn
+ * the first sentence of a prose brief into a field, so the only labels treated
+ * as labels are the ones on the form.
+ */
+const ROW_LABELS: readonly string[] = [
+  "requestor / bu", "requestor/bu", "requestor", "business unit", "bu",
+  "campaign name", "campaign", "business objective", "objective",
+  "audience definition", "audience to be targeted", "audience", "segment",
+  "line of business", "lob", "region", "market", "markets",
+  "channel / destination", "channel/destination", "channel", "destination",
+  "offer", "budget", "agency",
+  "flight dates", "flight", "in market", "in-market date", "launch date", "dates",
+  "success metrics", "success metric", "kpis", "kpi", "measurement",
+  "suppressions", "suppression", "exclusions", "exclusion",
+  "request type", "cdp team notes", "notes", "additional notes",
+];
+
+/** Longest first, so "audience definition" wins over "audience". */
+const ROW_LABELS_BY_LENGTH = [...ROW_LABELS].sort((a, b) => b.length - a.length);
+
+/** Is this whole line nothing but a row label (with or without a trailing colon)? */
+function bareRowLabel(line: string): string | null {
+  const t = line.trim().replace(/:$/, "").trim();
+  if (!t || t.length > 46) return null;
+  const hit = ROW_LABELS_BY_LENGTH.find((l) => l === t.toLowerCase());
+  return hit ? t : null;
+}
+
+/**
+ * A ROW SEPARATOR IS NOT ALWAYS A COLON, AND ONLY THE COLON WAS READ.
+ *
+ * The same brief, pasted the two ways a marketer actually pastes it, measured
+ * on two live runs:
+ *
+ *   "Requestor/BU: Video & Entertainment Marketing"    -> 2 questions, 1 round
+ *   "Requestor / BU<TAB>Video & Entertainment ..."     -> 14 questions, 7 rounds
+ *
+ * Copying the table out of Workfront gives TABS, and pasting it into a chat
+ * client often gives the label and its answer on separate LINES. So the format
+ * the BU really uses was the one nothing could read: no row matched, nothing
+ * was captured, and the fallback questionnaire asked the marketer, over seven
+ * round trips, everything the table had already answered on screen.
+ *
+ * Every capture rule downstream is written against "Label: value". Rather than
+ * loosening all of them - which is where a label starts matching an option
+ * value again - the separator is normalised here, once, before anything else
+ * looks at the text.
+ */
+function normaliseRows(text: string): string {
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // "Label<TAB>value", or "Label" followed by two or more spaces. A single
+    // space is left alone: "Offer bundle pricing" is a sentence, not a row.
+    const split = line.match(/^[ \t]*([A-Za-z][A-Za-z0-9 /&()'-]{0,44}?)[ \t]*(?:\t+|  +)(.+)$/);
+    if (split) {
+      const label = ROW_LABELS_BY_LENGTH.find((l) => l === split[1].trim().toLowerCase());
+      if (label) {
+        out.push(`${split[1].trim()}: ${split[2].trim()}`);
+        continue;
+      }
+    }
+
+    // "Label" alone on its line, its answer on the next line with content.
+    // Guarded both ways: the label must be one of the form's, and the answer
+    // must not itself be a label - two labels in a row means an empty row,
+    // which is a row the marketer left blank, not an answer.
+    const bare = bareRowLabel(line);
+    if (bare) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      if (j < lines.length && !bareRowLabel(lines[j]) && !lines[j].includes(":")) {
+        out.push(`${bare}: ${lines[j].trim()}`);
+        i = j;
+        continue;
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
+
+/**
  * The brief with its ROW LABELS removed.
  *
  * Briefs from this BU arrive as labelled rows - "Business objective:",
@@ -503,7 +593,14 @@ function channelSense(brief: string, option: string): boolean {
   return test ? test(brief) : true;
 }
 
-export function parseBrief(brief: string, known: Record<string, unknown> = {}): ParsedIntake {
+export function parseBrief(rawBrief: string, known: Record<string, unknown> = {}): ParsedIntake {
+  /*
+   * Read the table however it was pasted, BEFORE anything else reads it.
+   * See normaliseRows: the tab-separated form is the one the BU actually
+   * copies out of Workfront, and it was the one form nothing could read.
+   */
+  const brief = normaliseRows(rawBrief);
+
   /*
    * Values are matched against the ANSWERS, not against the row labels.
    * See withoutLabels: a residential campaign was filed as Business (SMB)
