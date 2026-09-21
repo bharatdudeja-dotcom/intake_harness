@@ -1,10 +1,11 @@
 # Dylan's handover — Comcast/Xfinity creative intake
 
-You are reading this because you may have to run this demo, or fix it, while
-Bharat is not available. Everything you need is here or linked from here. If
-something in this document turns out to be wrong, that is a bug in the
-document — correct it and push, because the next person reading it will be you
-in three weeks.
+Dylan — this is yours. It is everything needed to run this demo, ship a change
+to it, and know what state it is in, so you can drive it independently rather
+than through anyone else.
+
+If something in here turns out to be wrong, that is a bug in the document —
+correct it and push. The next person reading it will be you in three weeks.
 
 Read it in order once. After that, section 5 (health check) and section 4
 (deploy) are the two you will come back to.
@@ -86,11 +87,15 @@ this branch and open Claude Code in it, you get a `dylan` agent that already
 knows everything in this document — the box, the deploy process, the routing
 rules, the branch story, and what is still broken.
 
-That matters for a specific reason. Without it, covering for Bharat means
-reading this document, then re-explaining it to your Claude every session, and
-getting a slightly different answer each time because you emphasised something
-different. The agent definition makes the briefing identical every time, and
-it lives in git, so when a fact changes you change it in one place.
+It is there to save you a chore, not to hold the role. Without it, every
+session starts with you re-explaining this document to a fresh Claude and
+getting a slightly different answer depending on what you happened to
+emphasise. The definition makes that briefing identical every time, and it
+lives in git, so a fact that changes changes in one place.
+
+Use it, ignore it, or point your own Claude at this document instead —
+whichever is faster for you on the day. The agent is a convenience; the
+judgement is yours.
 
 ```bash
 git clone https://github.com/chaunceyplum/intake_harness.git
