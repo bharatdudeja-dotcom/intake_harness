@@ -310,6 +310,8 @@ async function handlePost(req: NextRequest) {
     const rawTriage = triaged.triage;
     const triageEngine = triaged.source;
     const triageFallbackReason = triaged.fallbackReason;
+    const triageAttempts = triaged.attempts;
+    const triageRevised = triaged.revised;
     // Populate AgentResponse.usage.model when the LLM did the translation, so
     // the run's model column / UI token line reflect Agent 2's LLM use (token
     // COUNTS are captured in the tool-call trace via the traced wrapper).
@@ -354,6 +356,8 @@ async function handlePost(req: NextRequest) {
           rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
           triageEngine,
           triageFallbackReason,
+          triageAttempts,
+          triageRevised,
           detectionEngine: "detectionEngine" in fetched ? fetched.detectionEngine : undefined,
         },
       };
@@ -392,6 +396,8 @@ async function handlePost(req: NextRequest) {
         rejectionsConsidered: "considered" in fetched ? fetched.considered : undefined,
         triageEngine,
         triageFallbackReason,
+        triageAttempts,
+        triageRevised,
         detectionEngine: "detectionEngine" in fetched ? fetched.detectionEngine : undefined,
         // The AEP-grounded data-source decision (null when the rejection
         // raised no wrong_data_source finding, so no probe was run).

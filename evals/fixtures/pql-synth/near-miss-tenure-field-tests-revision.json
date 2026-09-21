@@ -1,0 +1,7 @@
+{
+  "id": "near-miss-tenure-field-tests-revision",
+  "note": "The available field is named `customerTenureMonths`, not the more generic `tenureMonths` a model would naturally reach for first. A first attempt that guesses the shorter name gets rejected by verifyFields, exercising the reflection loop's revision path (see pql-synth.ts's synthesizePql) against a real model - not a mock. This does NOT assert a revision actually occurs (that depends on the live model's first guess, and a model that gets it right first try is a GOOD outcome, not a fixture failure) - `synthesized`/`unverifiedFields` still gate correctness as usual, and attempts/revised are surfaced in this eval's notes for visibility either way.",
+  "criteria": "Customers who have Xfinity Internet and have been with us for over a year.",
+  "availableFields": ["xfinityInternet", "customerTenureMonths"],
+  "rubric": "Must select profiles where xfinityInternet is true AND customerTenureMonths is greater than 12 (or at least 13, i.e. \"over a year\"). Fails if it references any field outside availableFields (including a plausible-sounding but wrong name like tenureMonths or tenure), or drops the tenure condition entirely."
+}

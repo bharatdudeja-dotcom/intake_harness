@@ -4,6 +4,7 @@ import {
   extractFromAnswer,
   parseExtractionResponse,
   toKnownFields,
+  explainRejectedExtractions,
 } from "./llm-extract";
 import type { LlmClient, LlmCompletionResult } from "@/lib/llm";
 
@@ -13,6 +14,19 @@ function stubClient(reply: string | Error, model = "stub-model"): LlmClient {
     id: `stub:${model}`,
     async complete(): Promise<LlmCompletionResult> {
       if (reply instanceof Error) throw reply;
+      return { text: reply, model, usage: { inputTokens: 100, outputTokens: 20 } };
+    },
+  };
+}
+
+/** One reply per call, in order - for exercising the reflection/revision path. */
+function stubSequence(replies: string[], model = "stub-model"): LlmClient {
+  let i = 0;
+  return {
+    id: `stub-seq:${model}`,
+    async complete(): Promise<LlmCompletionResult> {
+      const reply = replies[Math.min(i, replies.length - 1)];
+      i++;
       return { text: reply, model, usage: { inputTokens: 100, outputTokens: 20 } };
     },
   };
@@ -104,6 +118,55 @@ describe("extractIntake - LLM preferred, deterministic always the floor", () => 
     );
     const res = await extractIntake(brief, { campaign_name: "Human Confirmed" }, client);
     expect(res.parsed.fields.campaign_name).toBe("Human Confirmed");
+  });
+
+  it("a clean first attempt takes exactly one call", async () => {
+    const client = stubSequence([
+      JSON.stringify({ extractions: [{ key: "campaign_name", value: "Fall Switch and Save", provenance: "stated" }] }),
+    ]);
+    const res = await extractIntake(brief, {}, client);
+    expect(res.source).toBe("llm");
+    expect(res.attempts).toBe(1);
+    expect(res.revised).toBe(false);
+  });
+});
+
+describe("explainRejectedExtractions - the reflection critic", () => {
+  it("is empty when every extraction would survive toKnownFields", () => {
+    expect(explainRejectedExtractions([{ key: "campaign_name", value: "X", provenance: "stated" }])).toEqual([]);
+  });
+  it("flags an invented field key", () => {
+    expect(explainRejectedExtractions([{ key: "made_up_field", value: "x" }])[0]).toMatch(/made_up_field.*not a real field/);
+  });
+  it("flags an empty value", () => {
+    expect(explainRejectedExtractions([{ key: "region", value: "" }])[0]).toMatch(/region.*empty value/);
+  });
+});
+
+describe("extractIntake - reflection: one chance to fix a rejected extraction", () => {
+  const brief = "Fall Switch and Save. Growth/Upsell for existing Residential customers, in market 1 November.";
+
+  it("revises a first attempt with an invented key, and accepts a clean second attempt", async () => {
+    const client = stubSequence([
+      JSON.stringify({ extractions: [{ key: "not_a_real_field", value: "Fall Switch and Save", provenance: "stated" }] }),
+      JSON.stringify({ extractions: [{ key: "campaign_name", value: "Fall Switch and Save", provenance: "stated" }] }),
+    ]);
+    const res = await extractIntake(brief, {}, client);
+    expect(res.source).toBe("llm");
+    expect(res.attempts).toBe(2);
+    expect(res.revised).toBe(true);
+    expect(res.parsed.fields.campaign_name).toBe("Fall Switch and Save");
+  });
+
+  it("falls back to deterministic, with attempts:2, when the revision is also unusable", async () => {
+    const client = stubSequence([
+      JSON.stringify({ extractions: [{ key: "not_a_real_field", value: "x", provenance: "stated" }] }),
+      JSON.stringify({ extractions: [{ key: "still_not_real", value: "y", provenance: "stated" }] }),
+    ]);
+    const res = await extractIntake(brief, {}, client);
+    expect(res.source).toBe("deterministic");
+    expect(res.attempts).toBe(2);
+    expect(res.revised).toBe(true);
   });
 });
 

@@ -83,8 +83,12 @@ describe.skipIf(!isLlmConfigured())("Triage eval (triageRejectionLlm)", () => {
       let ok = true;
 
       const triaged = await triageRejectionLlm(fixture.rejectionReason, fixture.current);
+      // Surfaced regardless of pass/fail, so a reflection round is visible in
+      // /evals whether or not it ended up mattering to the outcome.
+      if (triaged.revised) notes.push(`revised (attempts=${triaged.attempts})`);
       if (triaged.source !== "llm") {
-        return { ok: false, notes: `fell back to deterministic (${triaged.fallbackReason ?? "no reason given"})` };
+        notes.push(`fell back to deterministic (${triaged.fallbackReason ?? "no reason given"})`);
+        return { ok: false, notes: notes.join("; ") };
       }
 
       const finding = triaged.triage.findings.find(

@@ -35,6 +35,19 @@ function stub(reply: string | Error, model = "stub"): LlmClient {
   };
 }
 
+/** One reply per call, in order - for exercising the reflection/revision path. */
+function stubSequence(replies: string[], model = "stub"): LlmClient {
+  let i = 0;
+  return {
+    id: `stub-seq:${model}`,
+    async complete(): Promise<LlmCompletionResult> {
+      const reply = replies[Math.min(i, replies.length - 1)];
+      i++;
+      return { text: reply, model, usage: null };
+    },
+  };
+}
+
 function probe(overrides: Partial<SchemaProbe> = {}): SchemaProbe {
   return {
     read: true, conclusive: true, error: null, sandbox: "sbx",
@@ -130,6 +143,52 @@ describe("synthesizePql - the verify gate is the whole point", () => {
   });
 });
 
+describe("synthesizePql - reflection: one chance to fix an unverified field", () => {
+  const criteria = "customers who have Xfinity Internet in a given state";
+
+  it("revises a first attempt that referenced an unverified field, and accepts a clean second attempt", async () => {
+    const client = stubSequence([
+      JSON.stringify({ pql: "profile.hasFerrari = true", fieldsUsed: ["profile.hasFerrari"], missing: [] }),
+      JSON.stringify({ pql: "xEvent.xfinityInternet = true", fieldsUsed: ["a.xfinityInternet"], missing: [] }),
+    ]);
+    const r = await synthesizePql(criteria, probe(), pqlRef, client);
+    expect(r.synthesized).toBe(true);
+    expect(r.fieldsUsed).toEqual(["a.xfinityInternet"]);
+    expect(r.attempts).toBe(2);
+    expect(r.revised).toBe(true);
+  });
+
+  it("still rejects, with attempts:2, when the SECOND attempt is also unverified", async () => {
+    const client = stubSequence([
+      JSON.stringify({ pql: "profile.hasFerrari = true", fieldsUsed: ["profile.hasFerrari"], missing: [] }),
+      JSON.stringify({ pql: "profile.hasYacht = true", fieldsUsed: ["profile.hasYacht"], missing: [] }),
+    ]);
+    const r = await synthesizePql(criteria, probe(), pqlRef, client);
+    expect(r.synthesized).toBe(false);
+    expect(r.unverifiedFields).toContain("profile.hasYacht");
+    expect(r.attempts).toBe(2);
+    expect(r.revised).toBe(true);
+  });
+
+  it("does NOT revise an honest empty-pql decline - one attempt, not treated as a critic failure", async () => {
+    const client = stubSequence([JSON.stringify({ pql: "", fieldsUsed: [], missing: ["loyalty tier"] })]);
+    const r = await synthesizePql(criteria, probe(), pqlRef, client);
+    expect(r.synthesized).toBe(false);
+    expect(r.attempts).toBe(1);
+    expect(r.revised).toBe(false);
+  });
+
+  it("a clean first attempt takes exactly one call", async () => {
+    const client = stubSequence([
+      JSON.stringify({ pql: "xEvent.xfinityInternet = true", fieldsUsed: ["a.xfinityInternet"], missing: [] }),
+    ]);
+    const r = await synthesizePql(criteria, probe(), pqlRef, client);
+    expect(r.synthesized).toBe(true);
+    expect(r.attempts).toBe(1);
+    expect(r.revised).toBe(false);
+  });
+});
+
 describe("isMissingWriteTool - names a disabled write, not a bug here", () => {
   it("matches a 'not found' error for the segment-create tool", () => {
     expect(isMissingWriteTool("Tool adobe_create_segment not found")).toBe(true);
@@ -160,6 +219,8 @@ describe("createSegmentFromPql - writes only from a verified expression, honest 
     model: "stub",
     reason: null,
     unverifiedFields: [],
+    attempts: 1,
+    revised: false,
   };
 
   beforeEach(() => {

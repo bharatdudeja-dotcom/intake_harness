@@ -181,6 +181,8 @@ async function handlePost(req: NextRequest) {
       extractionSource: extraction.source,
       extractionModel: extraction.model,
       extractionFallbackReason: extraction.fallbackReason,
+      extractionAttempts: extraction.attempts,
+      extractionRevised: extraction.revised,
     };
     // Only real when the LLM answered; the AgentResponse.usage field stays
     // absent otherwise (see types.ts - never a fabricated 0).

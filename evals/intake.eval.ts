@@ -60,8 +60,12 @@ describe.skipIf(!isLlmConfigured())("Intake extraction eval", () => {
       let ok = true;
 
       const extraction = await extractIntake(fixture.brief, fixture.known ?? {});
+      // Surfaced regardless of pass/fail, so a reflection round is visible in
+      // /evals whether or not it ended up mattering to the outcome.
+      if (extraction.revised) notes.push(`revised (attempts=${extraction.attempts})`);
       if (extraction.source !== "llm") {
-        return { ok: false, notes: `fell back to deterministic (${extraction.fallbackReason ?? "no reason given"})` };
+        notes.push(`fell back to deterministic (${extraction.fallbackReason ?? "no reason given"})`);
+        return { ok: false, notes: notes.join("; ") };
       }
 
       for (const [key, expectedValue] of Object.entries(fixture.expected.fields ?? {})) {

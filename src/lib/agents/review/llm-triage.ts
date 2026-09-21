@@ -40,6 +40,7 @@ import {
 } from "./triage";
 import { detectRejection, type CommentLike, type RejectionSignal } from "./rejection";
 import { resolveLlmClient, type LlmClient } from "@/lib/llm";
+import { reflectLoop } from "@/lib/llm/reflect";
 
 export type Agent2Source = "llm" | "deterministic";
 
@@ -157,6 +158,10 @@ export type LlmTriageResult = {
   /** The model id when source === "llm", for AgentResponse.usage / the DB model column. */
   model: string | null;
   fallbackReason: string | null;
+  /** How many model calls this took - 1 = no reflection round needed. 0 = no LLM call at all. */
+  attempts: number;
+  /** True when the first attempt had a finding rejected by validateFindings and a revision was tried. */
+  revised: boolean;
 };
 
 type RawFinding = { kind?: unknown; fieldKey?: unknown; proposed?: unknown; ask?: unknown; evidence?: unknown };
@@ -187,7 +192,7 @@ const TRIAGE_SYSTEM = [
   "Return ONLY JSON.",
 ].join("\n");
 
-function buildTriagePrompt(reason: string, current: Record<string, string>): string {
+function buildTriagePrompt(reason: string, current: Record<string, string>, extra?: string): string {
   return [
     "Fields (use these exact keys; map values to an allowed option verbatim where listed):",
     fieldGuide(),
@@ -197,7 +202,40 @@ function buildTriagePrompt(reason: string, current: Record<string, string>): str
     `Rejection text: ${JSON.stringify(reason)}`,
     "",
     'Respond with JSON: { "findings": [ { "kind": "...", "fieldKey": "...|null", "proposed": "...|null", "ask": "one clear question or instruction", "evidence": "the words that led here" } ] }',
+    ...(extra ? ["", extra] : []),
   ].join("\n");
+}
+
+/**
+ * Reflection critic for triageRejectionLlm: re-run the SAME gates
+ * validateFindings applies (VALID_KINDS, fieldByKey, closestOption) over the
+ * raw findings and explain, in terms the model can act on, exactly which
+ * ones would be rejected and why. [] means every finding would survive -
+ * nothing to revise. This is deliberately NOT a diff against validateFindings'
+ * output, because an invalid-`kind` finding is dropped entirely rather than
+ * kept-with-a-null-field, so the two arrays don't align by index.
+ */
+export function explainRejectedFindings(raw: RawFinding[]): string[] {
+  const issues: string[] = [];
+  for (const r of raw) {
+    const kind = typeof r.kind === "string" ? (r.kind as RejectionKind) : "unclassified";
+    if (!VALID_KINDS.has(kind)) {
+      issues.push(`kind "${String(r.kind)}" is not valid - use one of: ${[...VALID_KINDS].join(", ")}`);
+      continue;
+    }
+    const keyRaw = typeof r.fieldKey === "string" ? r.fieldKey.trim() : "";
+    const spec = keyRaw ? fieldByKey(keyRaw) : undefined;
+    if (keyRaw && !spec) {
+      issues.push(`fieldKey "${keyRaw}" is not a real field key - use one of the exact keys listed`);
+      continue;
+    }
+    if (spec?.options?.length && typeof r.proposed === "string" && r.proposed.trim() && !closestOption(spec, r.proposed.trim())) {
+      issues.push(
+        `proposed value "${r.proposed}" for ${spec.key} does not match any allowed option: ${spec.options.join(" / ")}`,
+      );
+    }
+  }
+  return issues;
 }
 
 /**
@@ -299,35 +337,65 @@ export async function triageRejectionLlm(
       source: "deterministic",
       model: null,
       fallbackReason: configError ? `LLM misconfigured (${configError}); used the deterministic translator.` : null,
+      attempts: 0,
+      revised: false,
     };
   }
   try {
-    const completion = await resolvedClient.complete({
+    const outcome = await reflectLoop({
+      client: resolvedClient,
       system: TRIAGE_SYSTEM,
       prompt: buildTriagePrompt(text, current),
-      temperature: 0,
       maxTokens: 1024,
+      parse: (t) => {
+        const parsed = extractJsonObject(t) as { findings?: unknown };
+        if (!Array.isArray(parsed.findings)) throw new Error("LLM triage JSON had no `findings` array");
+        return parsed.findings as RawFinding[];
+      },
+      // Reuses the exact gates validateFindings applies below - see that
+      // function's docstring. An empty raw array (the model found nothing to
+      // flag) is not a critic failure; explainRejectedFindings([]) is [].
+      critique: explainRejectedFindings,
+      revise: ({ issues }) =>
+        buildTriagePrompt(
+          text,
+          current,
+          `Some of your previous findings would be rejected:\n${issues.map((i) => `- ${i}`).join("\n")}\n` +
+            "Fix these specific issues and return corrected findings.",
+        ),
     });
-    const parsed = extractJsonObject(completion.text) as { findings?: unknown };
-    if (!Array.isArray(parsed.findings)) throw new Error("LLM triage JSON had no `findings` array");
-    const findings = validateFindings(parsed.findings as RawFinding[]);
+
+    const findings = validateFindings(outcome.result);
+    const revised = outcome.attempts > 1;
     if (!findings.length) {
-      // Model produced nothing that survived validation - defer to the
-      // deterministic translator rather than a bare "human must read it".
+      // Model produced nothing that survived validation even after a chance
+      // to revise - defer to the deterministic translator rather than a bare
+      // "human must read it".
       return {
         triage: triageRejection(text, current),
         source: "deterministic",
         model: null,
         fallbackReason: "LLM triage produced no valid findings; used the deterministic translator.",
+        attempts: outcome.attempts,
+        revised,
       };
     }
-    return { triage: assemble(current, findings), source: "llm", model: completion.model, fallbackReason: null };
+    return {
+      triage: assemble(current, findings),
+      source: "llm",
+      model: outcome.model,
+      fallbackReason: null,
+      attempts: outcome.attempts,
+      revised,
+    };
   } catch (err) {
     return {
       triage: triageRejection(text, current),
       source: "deterministic",
       model: null,
       fallbackReason: `LLM triage failed (${(err as Error).message}); used the deterministic translator.`,
+      attempts: 0,
+      revised: false,
     };
   }
 }

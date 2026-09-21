@@ -30,6 +30,7 @@
 import type { SchemaProbe } from "./aep";
 import type { PqlGuidance } from "@/lib/agents/review/pql-context";
 import { resolveLlmClient, type LlmClient } from "@/lib/llm";
+import { reflectLoop } from "@/lib/llm/reflect";
 import { callMcpTool } from "@/lib/mcp-client";
 import type { TaskId } from "@/lib/pipeline/types";
 import { findPriorTaskRun } from "@/lib/pipeline/idempotent-write";
@@ -51,6 +52,10 @@ export type PqlSynthesis = {
    * so the failure is legible, not a mystery "no PQL".
    */
   unverifiedFields: string[];
+  /** How many model calls this took - 1 = no reflection round needed. 0 = no LLM call at all. */
+  attempts: number;
+  /** True when the FIRST attempt referenced an unverified field and a revision was tried. */
+  revised: boolean;
 };
 
 const NOT_SYNTHESIZED = (reason: string, extra: Partial<PqlSynthesis> = {}): PqlSynthesis => ({
@@ -60,6 +65,8 @@ const NOT_SYNTHESIZED = (reason: string, extra: Partial<PqlSynthesis> = {}): Pql
   model: null,
   reason,
   unverifiedFields: [],
+  attempts: 0,
+  revised: false,
   ...extra,
 });
 
@@ -205,46 +212,71 @@ export async function synthesizePql(
     return NOT_SYNTHESIZED("the PQL reference could not be loaded; refusing to synthesize against unverified syntax");
   }
 
+  const buildPrompt = (extra?: string) =>
+    [
+      `Audience criteria: ${criteria.trim()}`,
+      "",
+      `Available profile field names (use ONLY these): ${presentNames.join(", ")}`,
+      "",
+      "PQL function reference (use ONLY this syntax):",
+      // Bound the reference so a huge doc can't blow the context; the
+      // function categories are near the top.
+      reference.slice(0, 12_000),
+      "",
+      'Respond with JSON: { "pql": "the expression, or empty string if not expressible", "fieldsUsed": ["field", ...], "missing": ["what you would need but was not available", ...] }',
+      ...(extra ? ["", extra] : []),
+    ].join("\n");
+
   try {
-    const completion = await resolvedClient.complete({
+    const outcome = await reflectLoop({
+      client: resolvedClient,
       system: SYSTEM,
-      prompt: [
-        `Audience criteria: ${criteria.trim()}`,
-        "",
-        `Available profile field names (use ONLY these): ${presentNames.join(", ")}`,
-        "",
-        "PQL function reference (use ONLY this syntax):",
-        // Bound the reference so a huge doc can't blow the context; the
-        // function categories are near the top.
-        reference.slice(0, 12_000),
-        "",
-        'Respond with JSON: { "pql": "the expression, or empty string if not expressible", "fieldsUsed": ["field", ...], "missing": ["what you would need but was not available", ...] }',
-      ].join("\n"),
-      temperature: 0,
+      prompt: buildPrompt(),
       maxTokens: 1024,
+      parse: (text) => {
+        const raw = extractJson(text);
+        return {
+          pql: typeof raw.pql === "string" ? raw.pql.trim() : "",
+          fieldsUsed: Array.isArray(raw.fieldsUsed) ? raw.fieldsUsed.map((f) => String(f)).filter(Boolean) : [],
+          missing: Array.isArray(raw.missing) ? raw.missing.map((m) => String(m)) : [],
+        };
+      },
+      // An empty pql is an honest "the available fields are insufficient" -
+      // never a revisable failure; arguing the model into fabricating a field
+      // just to satisfy the critic is exactly the failure mode this whole
+      // module exists to prevent. Only a field-verification miss is revisable.
+      critique: (parsed) => {
+        if (!parsed.pql) return [];
+        const { unverified } = verifyFields(parsed.fieldsUsed, presentNames);
+        return unverified.map((f) => `field "${f}" is not in the available list`);
+      },
+      revise: ({ issues }) =>
+        buildPrompt(
+          `Your previous expression referenced field(s) not in the available list: ${issues.join("; ")}. ` +
+            `Available fields are ONLY: ${presentNames.join(", ")}. Rewrite the expression using only those ` +
+            "fields, or return an empty pql (\"\") if the audience truly cannot be expressed with them.",
+        ),
     });
 
-    const raw = extractJson(completion.text);
-    const pql = typeof raw.pql === "string" ? raw.pql.trim() : "";
-    const fieldsUsed = Array.isArray(raw.fieldsUsed)
-      ? raw.fieldsUsed.map((f) => String(f)).filter(Boolean)
-      : [];
+    const { pql, fieldsUsed, missing } = outcome.result;
+    const revised = outcome.attempts > 1;
 
     if (!pql) {
-      const missing = Array.isArray(raw.missing) ? raw.missing.map((m) => String(m)) : [];
       return NOT_SYNTHESIZED(
         "the model reported the available fields are insufficient to express this audience" +
           (missing.length ? ` (would need: ${missing.join(", ")})` : ""),
-        { model: completion.model },
+        { model: outcome.model, attempts: outcome.attempts, revised },
       );
     }
 
-    // THE GATE: every referenced field must be provably present.
+    // THE GATE: every referenced field must be provably present - re-checked
+    // here on the winning attempt so this function's own contract doesn't
+    // depend on reflectLoop's internal bookkeeping.
     const { confirmed, unverified } = verifyFields(fieldsUsed, presentNames);
     if (unverified.length) {
       return NOT_SYNTHESIZED(
         `rejected the synthesized expression: it referenced field(s) not verified present in AEP (${unverified.join(", ")})`,
-        { model: completion.model, unverifiedFields: unverified },
+        { model: outcome.model, unverifiedFields: unverified, attempts: outcome.attempts, revised },
       );
     }
 
@@ -252,9 +284,11 @@ export async function synthesizePql(
       synthesized: true,
       pql,
       fieldsUsed: confirmed,
-      model: completion.model,
+      model: outcome.model,
       reason: null,
       unverifiedFields: [],
+      attempts: outcome.attempts,
+      revised,
     };
   } catch (err) {
     return NOT_SYNTHESIZED(`PQL synthesis failed (${(err as Error).message}); reporting the build path without an expression`);

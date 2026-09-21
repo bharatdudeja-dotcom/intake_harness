@@ -32,6 +32,7 @@
 import { CAMPAIGN_BRIEF_FIELDS, fieldByKey } from "@/lib/agents/shared/campaign-brief";
 import { parseBrief, type ParsedIntake, type Provenance } from "./parse";
 import { resolveLlmClient, type LlmClient } from "@/lib/llm";
+import { reflectLoop } from "@/lib/llm/reflect";
 
 export type ExtractionSource = "llm" | "deterministic";
 
@@ -45,6 +46,10 @@ export type LlmExtractionResult = {
   usage: { inputTokens: number | null; outputTokens: number | null } | null;
   /** Set when an LLM was configured but we fell back - so the reason is visible, not silent. */
   fallbackReason: string | null;
+  /** How many model calls this took - 1 = no reflection round needed. 0 = no LLM call at all. */
+  attempts: number;
+  /** True when the first attempt had an extraction rejected by toKnownFields and a revision was tried. */
+  revised: boolean;
 };
 
 /** One extraction the model is asked to return. */
@@ -138,6 +143,34 @@ export function toKnownFields(raw: RawExtraction[]): {
 }
 
 /**
+ * Reflection critic for extractIntake: re-run the SAME gates toKnownFields
+ * applies (a real FieldSpec key, a non-empty value) over the raw extractions
+ * and explain, in terms the model can act on, exactly which ones would be
+ * dropped and why. [] means every extraction would survive - nothing to
+ * revise (in particular, an empty `extractions` array - the model found
+ * nothing to extract - is not a critic failure).
+ */
+export function explainRejectedExtractions(raw: RawExtraction[]): string[] {
+  const issues: string[] = [];
+  for (const r of raw) {
+    const key = typeof r.key === "string" ? r.key.trim() : "";
+    if (!key) {
+      issues.push('an extraction was missing its "key"');
+      continue;
+    }
+    if (!fieldByKey(key)) {
+      issues.push(`key "${key}" is not a real field key - use one of the exact keys listed`);
+      continue;
+    }
+    const value = r.value == null ? "" : String(r.value).trim();
+    if (!value) {
+      issues.push(`key "${key}" had an empty value - omit it entirely rather than returning an empty value`);
+    }
+  }
+  return issues;
+}
+
+/**
  * Extract a brief into a ParsedIntake, preferring a configured LLM and always
  * falling back to the deterministic parser.
  *
@@ -224,17 +257,32 @@ export async function extractIntake(
       model: null,
       usage: null,
       fallbackReason: configError ? `LLM misconfigured (${configError}); used the deterministic parser.` : null,
+      attempts: 0,
+      revised: false,
     };
   }
 
   try {
-    const completion = await resolvedClient.complete({
+    const outcome = await reflectLoop({
+      client: resolvedClient,
       system: SYSTEM,
       prompt: buildPrompt(brief),
-      temperature: 0,
       maxTokens: 1536,
+      parse: parseExtractionResponse,
+      // Reuses the exact gates toKnownFields applies below - see that
+      // function's docstring.
+      critique: explainRejectedExtractions,
+      revise: ({ issues }) =>
+        [
+          buildPrompt(brief),
+          "",
+          `Some of your previous extractions were invalid:\n${issues.map((i) => `- ${i}`).join("\n")}`,
+          "Use ONLY the exact field keys listed above, and omit any field you cannot support with a non-empty value.",
+        ].join("\n"),
     });
-    const raw = parseExtractionResponse(completion.text);
+
+    const raw = outcome.result;
+    const revised = outcome.attempts > 1;
     const { known: llmKnown, provenance: llmProvenance } = toKnownFields(raw);
 
     // Caller-supplied `known` (confirmed rework answers) must not be overridden
@@ -251,7 +299,8 @@ export async function extractIntake(
     const provenance: Record<string, Provenance> = { ...llmProvenance };
     for (const key of Object.keys(known)) provenance[key] = "stated";
 
-    // Nothing usable came back: fall back rather than proceed on an empty read.
+    // Nothing usable came back even after a chance to revise: fall back
+    // rather than proceed on an empty read.
     if (Object.keys(llmKnown).length === 0) {
       return {
         parsed: parseBrief(brief, known),
@@ -259,25 +308,31 @@ export async function extractIntake(
         model: null,
         usage: null,
         fallbackReason: "LLM returned no usable field extractions; used the deterministic parser.",
+        attempts: outcome.attempts,
+        revised,
       };
     }
 
     return {
       parsed: parseBrief(brief, merged, provenance),
       source: "llm",
-      model: completion.model,
-      usage: completion.usage,
+      model: outcome.model,
+      usage: outcome.usage,
       fallbackReason: null,
+      attempts: outcome.attempts,
+      revised,
     };
   } catch (err) {
-    // Any failure - transport, timeout, malformed JSON - falls back. The run
-    // is never blocked on the LLM being reachable.
+    // Any failure - transport, timeout, malformed JSON on every attempt -
+    // falls back. The run is never blocked on the LLM being reachable.
     return {
       parsed: parseBrief(brief, known),
       source: "deterministic",
       model: null,
       usage: null,
       fallbackReason: `LLM extraction failed (${(err as Error).message}); used the deterministic parser.`,
+      attempts: 0,
+      revised: false,
     };
   }
 }

@@ -55,6 +55,9 @@ describe.skipIf(!isLlmConfigured())("PQL synthesis eval", () => {
       let ok = true;
 
       const synthesis = await synthesizePql(fixture.criteria, probe!, guidance);
+      // Surfaced regardless of pass/fail, so a reflection round is visible in
+      // /evals whether or not it ended up mattering to the outcome.
+      if (synthesis.revised) notes.push(`revised (attempts=${synthesis.attempts})`);
 
       if (!expectSynth) {
         if (synthesis.synthesized) {
